@@ -1,0 +1,2360 @@
+/**
+ * Matrix 客户端核心模块
+ * 封装 Matrix Client-Server API v3
+ * 文档：https://spec.matrix.org/latest/client-server-api/
+ */
+
+import { loadSyncSince, saveSyncSince, SessionInfo } from './storage.uts'
+
+export type UtsErr = {
+	message: string
+	errcode: string
+}
+
+export function errText(e: any | null, fallback: string): string {
+	if (e == null) return fallback
+	let s = ''
+	try {
+		s = '' + e
+	} catch (x) {
+		s = ''
+	}
+	if (s.indexOf('Error: ') == 0) s = s.substring(7)
+	if (s.indexOf('Error:') == 0) s = s.substring(6).trim()
+	if (s.indexOf('M_LIMIT_EXCEEDED') >= 0) return '请求太频繁，请稍后再试'
+	if (s.length == 0) return fallback
+	return s
+}
+
+export function errCode(e: any | null): string {
+	const s = errText(e, '')
+	if (s.length == 0) return ''
+	if (s.indexOf('[') != 0) return ''
+	const end = s.indexOf(']')
+	if (end <= 1) return ''
+	return s.substring(1, end)
+}
+
+export type MatrixEvent = {
+	type: string
+	sender?: string
+	event_id?: string
+	origin_server_ts?: number
+	content?: UTSJSONObject
+	state_key?: string
+}
+
+export type MatrixRoom = {
+	room_id: string
+	name?: string
+	topic?: string
+	avatar_url?: string
+	canonical_alias?: string
+	messages?: MatrixMessage[]
+	last_message_preview?: string
+	last_message_ts?: number
+	last_message_sender?: string
+	unread_count?: number
+	membership?: string
+	other_user_id?: string
+	other_displayname?: string
+	other_avatar?: string
+}
+
+export type MatrixMessage = {
+	event_id: string
+	sender: string
+	type: string
+	body: string
+	msgtype?: string
+	ts: number
+	url?: string
+	formatted_body?: string
+	formatted_type?: string
+	// 媒体扩展
+	mxc?: string
+	mimetype?: string
+	info?: UTSJSONObject
+	thumbnail_url?: string
+	// 关系：编辑/回复/反应
+	relates_to?: UTSJSONObject
+	m_new_content?: UTSJSONObject
+}
+
+export type RoomMember = {
+	user_id: string
+	display_name?: string
+	avatar_url?: string
+	membership: string
+	power_level?: number
+	presence?: string
+	last_active_ago?: number
+}
+
+export type LoginResult = {
+	user_id: string
+	access_token: string
+	device_id: string
+	home_server: string
+	expires_in_ms?: number
+	refresh_token?: string
+}
+
+const TAG = 'MatrixClient'
+
+function jsonBodyText(raw: any | null): string {
+	if (raw == null) return ''
+	let text = ''
+	try {
+		const s = JSON.stringify(raw)
+		if (s != null) text = s.trim()
+	} catch (e) {
+		text = ''
+	}
+	if (text.length == 0) return ''
+	const c0 = text.charAt(0)
+	if (c0 == '{' || c0 == '[') return text
+	if (c0 == '"') {
+		try {
+			const inner = JSON.parse(text)
+			if (inner == null) return ''
+			const innerText = ('' + inner).trim()
+			const i0 = innerText.charAt(0)
+			if (i0 == '{' || i0 == '[') return innerText
+		} catch (e2) {
+			return ''
+		}
+	}
+	return ''
+}
+
+function toJsonObj(raw: any | null): UTSJSONObject {
+	const empty: UTSJSONObject = {}
+	const text = jsonBodyText(raw)
+	if (text.length == 0) return empty
+	if (text.charAt(0) != '{') return empty
+	try {
+		return JSON.parse(text) as UTSJSONObject
+	} catch (e3) {
+		return empty
+	}
+}
+
+function toJsonList(raw: any | null): Array<UTSJSONObject> {
+	const out: Array<UTSJSONObject> = []
+	const text = jsonBodyText(raw)
+	if (text.length == 0) return out
+	if (text.charAt(0) != '[') return out
+	try {
+		const arr = JSON.parse(text) as Array<any>
+		if (arr == null) return out
+		for (let i = 0; i < arr.length; i++) {
+			out.push(toJsonObj(arr[i]))
+		}
+	} catch (e3) {
+		return out
+	}
+	return out
+}
+
+type HttpResult = {
+	statusCode: number
+	json: UTSJSONObject
+	list: Array<UTSJSONObject>
+}
+
+function httpJson(url: string, method: string, header: UTSJSONObject, body: UTSJSONObject, timeoutMs: number): Promise<HttpResult> {
+	return new Promise((resolve, reject) => {
+		const onOk = (res: RequestSuccess<any>) => {
+			try {
+				let code = 0
+				try {
+					code = res.statusCode
+				} catch (e0) {
+					code = 0
+				}
+				let text = ''
+				try {
+					text = jsonBodyText(res.data)
+				} catch (e1) {
+					text = ''
+				}
+				const emptyObj: UTSJSONObject = {}
+				const emptyList: Array<UTSJSONObject> = []
+				const row: HttpResult = {
+					statusCode: code,
+					json: (text.length > 0 && text.charAt(0) == '{') ? toJsonObj(res.data) : emptyObj,
+					list: (text.length > 0 && text.charAt(0) == '[') ? toJsonList(res.data) : emptyList
+				}
+				resolve(row)
+			} catch (e2) {
+				reject(new Error('解析响应失败'))
+			}
+		}
+		const onBad = (err: RequestFail) => {
+			reject(new Error(err.errMsg))
+		}
+		if (method == 'GET') {
+			uni.request({
+				url: url,
+				method: 'GET',
+				header: header,
+				data: body,
+				sslVerify: false,
+				timeout: timeoutMs,
+				success: onOk,
+				fail: onBad
+			})
+		} else if (method == 'PUT') {
+			uni.request({
+				url: url,
+				method: 'PUT',
+				header: header,
+				data: body,
+				sslVerify: false,
+				timeout: timeoutMs,
+				success: onOk,
+				fail: onBad
+			})
+		} else if (method == 'DELETE') {
+			uni.request({
+				url: url,
+				method: 'DELETE',
+				header: header,
+				data: body,
+				sslVerify: false,
+				timeout: timeoutMs,
+				success: onOk,
+				fail: onBad
+			})
+		} else {
+			uni.request({
+				url: url,
+				method: 'POST',
+				header: header,
+				data: body,
+				sslVerify: false,
+				timeout: timeoutMs,
+				success: onOk,
+				fail: onBad
+			})
+		}
+	})
+}
+
+function jsonKeys(obj: UTSJSONObject): Array<string> {
+	const out: Array<string> = []
+	const m = obj.toMap()
+	m.forEach((_v: any | null, k: string) => {
+		out.push(k)
+	})
+	return out
+}
+
+function jsonStr(obj: UTSJSONObject, key: string): string {
+	const v = obj.getString(key)
+	if (v == null) return ''
+	return v
+}
+
+function jsonNum(obj: UTSJSONObject, key: string): number {
+	const v = obj.getNumber(key)
+	if (v == null) return 0
+	return v
+}
+
+function jsonBool(obj: UTSJSONObject, key: string): boolean {
+	const v = obj.getBoolean(key)
+	if (v == null) return false
+	return v
+}
+
+function jsonArr(obj: UTSJSONObject, key: string): Array<UTSJSONObject> {
+	const raw = obj.getArray(key)
+	const out: Array<UTSJSONObject> = []
+	if (raw == null) return out
+	for (let i = 0; i < raw.length; i++) {
+		out.push(toJsonObj(raw[i]))
+	}
+	return out
+}
+
+function jsonStrArr(obj: UTSJSONObject, key: string): Array<string> {
+	const raw = obj.getArray(key)
+	const out: Array<string> = []
+	if (raw == null) return out
+	for (let i = 0; i < raw.length; i++) {
+		const one = raw[i]
+		if (one == null) continue
+		const s = '' + one
+		if (s.length > 0 && s != 'null') out.push(s)
+	}
+	return out
+}
+
+function jsonObj(obj: UTSJSONObject, key: string): UTSJSONObject {
+	const nested = obj.getJSON(key)
+	if (nested == null) return {}
+	return nested
+}
+
+function queryString(query: UTSJSONObject): string {
+	const names: Array<string> = ['timeout', 'since', 'from', 'dir', 'limit', 'filter', 'not_membership']
+	const parts: Array<string> = []
+	for (let i = 0; i < names.length; i++) {
+		const key = names[i]
+		const val = query[key]
+		if (val != null) {
+			parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(`${val}`))
+		}
+	}
+	return parts.join('&')
+}
+
+// ============================================================
+// 公共类型别名（必须写在 class 外，UTS 不支持在 class 体内放 type）
+// ============================================================
+
+export type SearchHit = {
+	event_id: string
+	room_id: string
+	sender: string
+	type: string
+	body: string
+	ts: number
+	highlight: Array<string>
+	context: UTSJSONObject
+}
+
+export type SearchResult = {
+	results: Array<SearchHit>
+	count: number
+	highlights: Array<string>
+	next_batch: string
+}
+
+type LastMessagePreview = {
+	body: string
+	ts: number
+	sender: string
+}
+
+type MemberCacheEntry = {
+	members: Array<string>
+	loaded_at: number
+}
+
+export type InvitedRoomInfo = {
+	room_id: string
+	name: string
+	inviter: string
+}
+
+export type DirectoryUser = {
+	user_id: string
+	display_name: string
+	avatar_url: string
+}
+
+type ProfileInfo = {
+	display_name: string
+	avatar_url: string
+}
+
+type RoomListCache = {
+	rooms: MatrixRoom[]
+	loaded_at: number
+}
+
+type RoomIdResult = {
+	room_id: string
+}
+
+export type CreateRoomOpts = {
+	name: string
+	topic: string
+	preset: string
+	invite: Array<string>
+	is_direct: boolean
+}
+
+type MessagesPage = {
+	messages: MatrixMessage[]
+	end: string
+}
+
+type ThreepidInfo = {
+	medium: string
+	address: string
+	validated_at: number
+}
+
+type PublicRoomsPage = {
+	chunk: Array<PublicRoom>
+	next_batch: string
+	total_room_count_estimate: number
+}
+
+type PresenceInfo = {
+	presence: string
+	currently_active?: boolean
+	last_active_ago?: number
+	status_msg?: string
+}
+
+export type DeviceInfo = {
+	device_id: string
+	user_id?: string
+	display_name?: string
+	last_seen_ip?: string
+	last_seen_ts?: number
+	app_id?: string
+	version?: string
+}
+
+// 模块级（文件级）变量：getRoomSummary 缓存
+// 避开 class field (Array/Map/Object) 在 UTS H5 上的索引不稳定问题
+// 结构：{ [roomId: string]: { summary: MatrixRoom, loaded_at: number } }
+const summaryCache: UTSJSONObject = {}
+
+export type PublicRoom = {
+	room_id: string
+	canonical_alias: string
+	name: string
+	topic: string
+	avatar_url: string
+	num_joined_members: number
+	world_readable: boolean
+	guest_can_join: boolean
+}
+
+export class MatrixClient {
+	homeserver: string = ''
+	accessToken: string = ''
+	userId: string = ''
+	deviceId: string = ''
+	txnCounter: number = 0
+	requestCount: number = 0
+	// 用户显示名缓存：userId → displayname
+	userDisplayNames: Map<string, string> = new Map()
+	userAvatars: Map<string, string> = new Map()
+	// 每房间最后一条消息预览（sync 时实时更新，避免 getMessages(1) 取不到）
+	roomLastMessage: Map<string, LastMessagePreview> = new Map()
+	// getRoomSummary 内存缓存：用并行数组存 (keys, entries)，避开 Map 和动态索引的兼容问题
+	cacheKeys: Array<string> = []
+	cacheEntries: Array<UTSJSONObject> = []
+	// listRooms 去重锁：避免并发调用导致重复打 N 个 state
+	listRoomsInflight: Promise<MatrixRoom[]> | null = null
+	// 同步状态
+	isSyncing: boolean = false
+	syncAbort: (() => void) | null = null
+	since: string = ''
+	// 事件回调（向后兼容：onRoomTimeline 等同于 _timelineHandlers 的最后一项）
+	onRoomTimeline: ((event: MatrixEvent, roomId: string) => void) | null = null
+	onRoomInvite: ((roomId: string) => void) | null = null
+	onSyncStateChange: ((state: string, error: string) => void) | null = null
+	onTyping: ((userIds: Array<string>, roomId: string) => void) | null = null
+	onReaction: ((event: MatrixEvent, roomId: string) => void) | null = null
+	onRedaction: ((redaction: UTSJSONObject, roomId: string) => void) | null = null
+	onUnread: ((roomId: string, count: number) => void) | null = null
+	onPresence: ((content: UTSJSONObject) => void) | null = null
+	// 多订阅者列表（推荐用法）
+	timelineHandlers: Array<(event: MatrixEvent, roomId: string) => void> = []
+	inviteHandlers: Array<(roomId: string) => void> = []
+	syncStateHandlers: Array<(state: string, error: string) => void> = []
+	typingHandlers: Array<(userIds: Array<string>, roomId: string) => void> = []
+	reactionHandlers: Array<(event: MatrixEvent, roomId: string) => void> = []
+	redactionHandlers: Array<(redaction: UTSJSONObject, roomId: string) => void> = []
+	unreadHandlers: Array<(roomId: string, count: number) => void> = []
+	presenceHandlers: Array<(content: UTSJSONObject) => void> = []
+	decryptHandlers: Array<(event: MatrixEvent, roomId: string) => void> = []
+	// 房间成员缓存（key: 'joined_members:<roomId>'）
+	memberCache: Map<string, MemberCacheEntry> = new Map()
+	// 房间事件缓冲（任何房间的事件都会暂存）
+	roomTimelines: Map<string, Array<UTSJSONObject>> = new Map()
+	// 已知房间 ID 集合（来自 sync 推送）；listRooms 用它补全 /joined_rooms 可能漏掉的房间
+	knownRoomIds: Set<string> = new Set<string>()
+	// 邀请状态房间（用户还未 join 的房间，含邀请者）
+	invitedRoomCache: Map<string, InvitedRoomInfo> = new Map()
+	stateEventHandlers: Array<(ev: UTSJSONObject, rid: string) => void> = []
+	// 心跳 timer
+	pollTimer: number | null = null
+	lastTypingAt: number = 0
+
+	/**
+	 * 构造：创建实例
+	 */
+	constructor() {
+	}
+
+	applySession(sessionHomeserver: string, accessToken: string, userId: string, deviceId: string): void {
+		this.homeserver = sessionHomeserver.replace(/\/$/, '')
+		this.accessToken = accessToken
+		this.userId = userId
+		this.deviceId = deviceId
+		this.since = loadSyncSince()
+	}
+
+	// ============================================================
+	// 服务器发现
+	// ============================================================
+
+	/**
+	 * 从 Matrix ID 中提取 server name 并发现 homeserver
+	 * @param matrixId 例如 "@user:matrix.org"
+	 */
+	async discoverHomeserver(matrixId: string): Promise<string> {
+		const parts = matrixId.split(':')
+		if (parts.length < 2) {
+			throw new Error('Matrix ID 格式错误，应为 @user:server')
+		}
+		const serverName = parts[parts.length - 1]
+
+		// 1. 尝试 .well-known
+		try {
+			const empty: UTSJSONObject = {}
+			const res = await httpJson('https://' + serverName + '/.well-known/matrix/client', 'GET', empty, empty, 10000)
+			const hs = toJsonObj(res.json['m.homeserver'])
+			const base = hs['base_url'] as string | null
+			if (base != null && base.length > 0) {
+				const ok = await this.validateHomeserver(base)
+				if (ok) return base.replace(/\/$/, '')
+			}
+		} catch (e) {
+			console.warn(TAG, '.well-known 请求失败，回退到直接域名', e)
+		}
+
+		// 2. 回退：直接用 server name 作为 homeserver
+		const fallback = `https://${serverName}`
+		const ok = await this.validateHomeserver(fallback)
+		if (ok) return fallback
+		throw new Error('无法发现可用的 homeserver')
+	}
+
+	async validateHomeserver(baseUrl: string): Promise<boolean> {
+		try {
+			const empty: UTSJSONObject = {}
+			const res = await httpJson(baseUrl + '/_matrix/client/versions', 'GET', empty, empty, 8000)
+			return res.statusCode == 200
+		} catch (e) {
+			return false
+		}
+	}
+
+	// ============================================================
+	// 登录 / 注册
+	// ============================================================
+
+	async login(homeserver: string, username: string, password: string): Promise<SessionInfo> {
+		const url = `${homeserver.replace(/\/$/, '')}/_matrix/client/v3/login`
+
+		// 支持 username 是完整 @user:server，也支持纯 local part
+		let loginUser = username.trim()
+		const hsUrl = homeserver.replace(/\/$/, '')
+
+		if (loginUser.startsWith('@') && loginUser.indexOf(':') > 0) {
+			const atIdx = loginUser.indexOf(':')
+			loginUser = loginUser.substring(1, atIdx)
+		}
+		if (loginUser.indexOf(':') > 0) {
+			loginUser = loginUser.substring(0, loginUser.indexOf(':'))
+		}
+
+		const ident: UTSJSONObject = {
+			type: 'm.id.user',
+			user: loginUser
+		}
+		const body: UTSJSONObject = {
+			type: 'm.login.password',
+			identifier: ident,
+			password: password
+		}
+		const header: UTSJSONObject = {
+			'Content-Type': 'application/json'
+		}
+		const res = await httpJson(url, 'POST', header, body, 20000)
+		const data = res.json
+		if (res.statusCode != 200) {
+			const errcode = jsonStr(data, 'errcode')
+			const code = errcode.length > 0 ? errcode : 'UNKNOWN'
+			if (code == 'M_LIMIT_EXCEEDED') {
+				const wait = jsonNum(data, 'retry_after_ms')
+				let sec = 30
+				if (wait > 0) {
+					sec = Math.ceil(wait / 1000)
+				}
+				throw new Error('请求太频繁，请 ' + sec + ' 秒后再试')
+			}
+			const error = jsonStr(data, 'error')
+			throw new Error('[' + code + '] ' + (error.length > 0 ? error : '登录失败'))
+		}
+		const session: SessionInfo = {
+			homeserver: homeserver.replace(/\/$/, ''),
+			user_id: jsonStr(data, 'user_id'),
+			access_token: jsonStr(data, 'access_token'),
+			device_id: jsonStr(data, 'device_id'),
+			display_name: '',
+			avatar_url: ''
+		}
+		if (session.access_token.length == 0) {
+			throw new Error('登录失败：未返回 access_token')
+		}
+		this.homeserver = session.homeserver
+		this.accessToken = session.access_token
+		this.userId = session.user_id
+		this.deviceId = session.device_id
+		return session
+	}
+
+	async logout(): Promise<void> {
+		if (this.accessToken.length == 0) return
+		try {
+			await this.request('POST', '/_matrix/client/v3/logout', null)
+		} catch (e) {
+			console.warn(TAG, 'logout 请求失败，继续清理本地', e)
+		}
+		this.accessToken = ''
+		this.userId = ''
+		this.deviceId = ''
+		this.stopSync()
+	}
+
+	// ============================================================
+	// HTTP 工具
+	// ============================================================
+
+	async request(
+		method: string,
+		path: string,
+		body: UTSJSONObject | null = null,
+		query: UTSJSONObject | null = null,
+		timeoutMs: number = 30000
+	): Promise<any> {
+		let url = `${this.homeserver}${path}`
+		if (query != null) {
+			const qs = queryString(query)
+			if (qs.length > 0) {
+				url += (path.indexOf('?') >= 0 ? '&' : '?') + qs
+			}
+		}
+		this.requestCount = this.requestCount + 1
+		if (path.indexOf('/sync') < 0) {
+			console.log('[REQ#' + this.requestCount + ']', method, path)
+		}
+		const header: UTSJSONObject = {
+			'Content-Type': 'application/json',
+			'Authorization': `Bearer ${this.accessToken}`
+		}
+		const waitMs = timeoutMs > 0 ? timeoutMs : 30000
+		const payload: UTSJSONObject = body != null ? (body as UTSJSONObject) : {}
+		const res = await httpJson(url, method, header, payload, waitMs)
+		const parsed = res.json
+		if (res.statusCode >= 200 && res.statusCode < 300) {
+			return parsed
+		}
+		const errcode = jsonStr(parsed, 'errcode')
+		const code = errcode.length > 0 ? errcode : ('HTTP_' + res.statusCode)
+		const error = jsonStr(parsed, 'error')
+		throw new Error('[' + code + '] ' + (error.length > 0 ? error : '请求失败'))
+	}
+
+	async requestList(
+		method: string,
+		path: string,
+		body: UTSJSONObject | null = null,
+		query: UTSJSONObject | null = null,
+		timeoutMs: number = 30000
+	): Promise<Array<UTSJSONObject>> {
+		let url = `${this.homeserver}${path}`
+		if (query != null) {
+			const qs = queryString(query)
+			if (qs.length > 0) {
+				url += (path.indexOf('?') >= 0 ? '&' : '?') + qs
+			}
+		}
+		this.requestCount = this.requestCount + 1
+		console.log('[REQ#' + this.requestCount + ']', method, path)
+		const header: UTSJSONObject = {
+			'Content-Type': 'application/json',
+			'Authorization': `Bearer ${this.accessToken}`
+		}
+		const waitMs = timeoutMs > 0 ? timeoutMs : 30000
+		const payload: UTSJSONObject = body != null ? (body as UTSJSONObject) : {}
+		const res = await httpJson(url, method, header, payload, waitMs)
+		if (res.statusCode >= 200 && res.statusCode < 300) {
+			return res.list
+		}
+		const parsed = res.json
+		const errcode = jsonStr(parsed, 'errcode')
+		const code = errcode.length > 0 ? errcode : ('HTTP_' + res.statusCode)
+		const error = jsonStr(parsed, 'error')
+		throw new Error('[' + code + '] ' + (error.length > 0 ? error : '请求失败'))
+	}
+
+	// ============================================================
+	// 当前用户信息
+	// ============================================================
+
+	async whoami(): Promise<UTSJSONObject> {
+		return await this.request('GET', '/_matrix/client/v3/account/whoami', null)
+	}
+
+	async searchUsers(searchTerm: string): Promise<Array<DirectoryUser>> {
+		const res = await this.request('POST', '/_matrix/client/v3/user_directory/search', {
+			search_term: searchTerm,
+			limit: 20
+		}) as UTSJSONObject
+		const results = (res['results'] as Array<UTSJSONObject>) ?? []
+		const out: Array<DirectoryUser> = []
+		for (let i = 0; i < results.length; i++) {
+			const u = results[i]
+			const item: DirectoryUser = {
+				user_id: (u['user_id'] as string) ?? '',
+				display_name: (u['display_name'] as string) ?? '',
+				avatar_url: (u['avatar_url'] as string) ?? ''
+			}
+			out.push(item)
+		}
+		return out
+	}
+
+	async getProfile(userId: string): Promise<ProfileInfo> {
+		const res = await this.request(
+			'GET',
+			`/_matrix/client/v3/profile/${encodeURIComponent(userId)}`,
+			null
+		)
+		const obj = res as UTSJSONObject
+		const dn = jsonStr(obj, 'displayname')
+		return {
+			display_name: dn.length > 0 ? dn : userId,
+			avatar_url: jsonStr(obj, 'avatar_url')
+		}
+	}
+
+	async setDisplayName(name: string): Promise<void> {
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/profile/${encodeURIComponent(this.userId)}/displayname`,
+			{ displayname: name }
+		)
+	}
+
+	async setAvatarUrl(mxc: string): Promise<void> {
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/profile/${encodeURIComponent(this.userId)}/avatar_url`,
+			{ avatar_url: mxc }
+		)
+	}
+
+	// ============================================================
+	// Sync（长轮询）
+	// ============================================================
+
+	startSync(): void {
+		if (this.isSyncing) return
+		this.isSyncing = true
+		this.syncLoop()
+	}
+
+	stopSync(): void {
+		this.isSyncing = false
+		if (this.pollTimer != null) {
+			const t = this.pollTimer
+			clearTimeout(t)
+			this.pollTimer = null
+		}
+		if (this.syncAbort != null) {
+			this.syncAbort()
+			this.syncAbort = null
+		}
+	}
+
+	async syncLoop(): Promise<void> {
+		const fireState = (state: string, error: string): void => {
+			for (const h of this.syncStateHandlers) {
+				try { h(state, error) } catch (e) { console.error('sync handler error', e) }
+			}
+			if (this.onSyncStateChange != null) {
+				try { this.onSyncStateChange(state, error) } catch (e) { console.error('legacy sync handler error', e) }
+			}
+		}
+
+		let failCount = 0
+		while (this.isSyncing) {
+			try {
+				fireState('SYNCING', '')
+				const first = this.since.length == 0
+				const query: UTSJSONObject = { timeout: first ? '0' : '30000' }
+				if (this.since.length > 0) query['since'] = this.since
+				const httpMs = first ? 120000 : 45000
+				const data = (await this.request(
+					'GET',
+					'/_matrix/client/v3/sync',
+					null,
+					query,
+					httpMs
+				)) as UTSJSONObject
+
+				if (!this.isSyncing) break
+
+				const nextVal = data.getString('next_batch')
+				if (nextVal != null && nextVal.length > 0) {
+					this.since = nextVal
+					saveSyncSince(nextVal)
+				}
+
+				await this.processSyncResponse(data)
+				failCount = 0
+				fireState('PREPARED', '')
+			} catch (e) {
+				const msg = `${e}`
+				console.error(TAG, 'sync error:', msg)
+				fireState('ERROR', msg)
+				if (msg.indexOf('M_UNKNOWN_TOKEN') >= 0) {
+					this.stopSync()
+					break
+				}
+				failCount = failCount + 1
+				let wait = 2000 * failCount
+				if (wait > 15000) wait = 15000
+				await this.sleep(wait)
+			}
+		}
+	}
+
+	async processSyncResponse(data: UTSJSONObject): Promise<void> {
+		const rooms = jsonObj(data, 'rooms')
+		const join = jsonObj(rooms, 'join')
+		const roomIds = jsonKeys(join)
+		if (roomIds.length > 0) {
+			for (let ri = 0; ri < roomIds.length; ri++) {
+				const roomId = roomIds[ri]
+				const room = jsonObj(join, roomId)
+				this.knownRoomIds.add(roomId)
+
+				const timeline = jsonObj(room, 'timeline')
+				const events = jsonArr(timeline, 'events')
+				if (events.length > 0) {
+					let buf: Array<UTSJSONObject> = []
+					const existing = this.roomTimelines.get(roomId)
+					if (existing != null) {
+						buf = existing
+					} else {
+						this.roomTimelines.set(roomId, buf)
+					}
+					for (let ei = 0; ei < events.length; ei++) {
+						const ev = events[ei]
+						const parsed = this.parseEvent(ev)
+						const evType = jsonStr(ev, 'type')
+
+						if (evType == 'm.room.redaction') {
+							const redacts = jsonStr(ev, 'redacts')
+							if (redacts.length > 0) {
+								for (let i = 0; i < buf.length; i++) {
+									const item = buf[i]
+									if (jsonStr(item, 'event_id') == redacts) {
+										item['redacted'] = true
+										item['body'] = '（消息已撤回）'
+										buf[i] = item
+										break
+									}
+								}
+								const handler: UTSJSONObject = {
+									kind: 'redaction',
+									redacts: redacts,
+									sender: jsonStr(ev, 'sender')
+								}
+								const reasonObj = jsonObj(ev, 'content')
+								const reason = jsonStr(reasonObj, 'reason')
+								if (reason.length > 0) handler['reason'] = reason
+								for (let hi = 0; hi < this.redactionHandlers.length; hi++) {
+									try { this.redactionHandlers[hi](handler, roomId) } catch (e) { console.error(e) }
+								}
+								continue
+							}
+						}
+
+						if (evType == 'm.room.message') {
+							const content = jsonObj(ev, 'content')
+							const relates = jsonObj(content, 'm.relates_to')
+							if (jsonStr(relates, 'rel_type') == 'm.replace') {
+								const origId = jsonStr(relates, 'event_id')
+								const newContent = jsonObj(content, 'm.new_content')
+								for (let i = 0; i < buf.length; i++) {
+									const item = buf[i]
+									if (jsonStr(item, 'event_id') == origId) {
+										const nb = jsonStr(newContent, 'body')
+										if (nb.length > 0) item['body'] = nb
+										item['edited'] = true
+										buf[i] = item
+										break
+									}
+								}
+							}
+						}
+
+						if (evType == 'm.reaction') {
+							for (let hi = 0; hi < this.reactionHandlers.length; hi++) {
+								try { this.reactionHandlers[hi](parsed, roomId) } catch (e) { console.error(e) }
+							}
+						}
+
+						buf.push(ev)
+						if (evType == 'm.room.message' || evType == 'm.room.encrypted') {
+							const sender = jsonStr(ev, 'sender')
+							const c = jsonObj(ev, 'content')
+							let body = jsonStr(c, 'body')
+							if (evType == 'm.room.encrypted') body = '[加密消息]'
+							const ts = jsonNum(ev, 'origin_server_ts')
+							this.roomLastMessage.set(roomId, { body: body, ts: ts, sender: sender })
+						}
+						for (let hi = 0; hi < this.timelineHandlers.length; hi++) {
+							try { this.timelineHandlers[hi](parsed, roomId) } catch (e) { console.error('handler error', e) }
+						}
+						if (this.onRoomTimeline != null) {
+							try { this.onRoomTimeline(parsed, roomId) } catch (e) { console.error('legacy onRoomTimeline error', e) }
+						}
+						if (evType != 'm.room.message' && evType != 'm.reaction' && evType != 'm.room.redaction') {
+							for (let hi = 0; hi < this.stateEventHandlers.length; hi++) {
+								try { this.stateEventHandlers[hi](ev, roomId) } catch (e) { console.error('stateEvent handler error', e) }
+							}
+						}
+					}
+				}
+
+				const ephemeral = jsonObj(room, 'ephemeral')
+				const typing = jsonArr(ephemeral, 'events')
+				for (let ti = 0; ti < typing.length; ti++) {
+					const ev = typing[ti]
+					if (jsonStr(ev, 'type') == 'm.typing') {
+						const content = jsonObj(ev, 'content')
+						const userIds = jsonStrArr(content, 'user_ids')
+						for (let hi = 0; hi < this.typingHandlers.length; hi++) {
+							try { this.typingHandlers[hi](userIds, roomId) } catch (e) { console.error(e) }
+						}
+						if (this.onTyping != null) {
+							try { this.onTyping(userIds, roomId) } catch (e) { console.error(e) }
+						}
+					}
+				}
+
+				const unread = jsonObj(room, 'unread_notifications')
+				const count = jsonNum(unread, 'notification_count')
+				for (let hi = 0; hi < this.unreadHandlers.length; hi++) {
+					try { this.unreadHandlers[hi](roomId, count) } catch (e) { console.error(e) }
+				}
+			}
+		}
+
+		const invite = jsonObj(rooms, 'invite')
+		const inviteIds = jsonKeys(invite)
+		for (let ii = 0; ii < inviteIds.length; ii++) {
+			const roomId = inviteIds[ii]
+			const inviteRoom = jsonObj(invite, roomId)
+			const inviteStateWrap = jsonObj(inviteRoom, 'invite_state')
+			const inviteState = jsonArr(inviteStateWrap, 'events')
+			let inviter = ''
+			let roomName = ''
+			for (let si = 0; si < inviteState.length; si++) {
+				const ev = inviteState[si]
+				const t = jsonStr(ev, 'type')
+				const c = jsonObj(ev, 'content')
+				if (t == 'm.room.member' && jsonStr(c, 'membership') == 'invite') {
+					inviter = jsonStr(ev, 'sender')
+				}
+				if (t == 'm.room.name') {
+					roomName = jsonStr(c, 'name')
+				}
+			}
+			this.invitedRoomCache.set(roomId, { room_id: roomId, name: roomName, inviter: inviter })
+			const joinedNow = jsonObj(rooms, 'join')
+			if (jsonKeys(joinedNow).indexOf(roomId) >= 0) {
+				this.invitedRoomCache.delete(roomId)
+			}
+
+			for (let hi = 0; hi < this.inviteHandlers.length; hi++) {
+				try { this.inviteHandlers[hi](roomId) } catch (e) { console.error('invite handler error', e) }
+			}
+			if (this.onRoomInvite != null) {
+				try { this.onRoomInvite(roomId) } catch (e) { console.error('legacy onRoomInvite error', e) }
+			}
+		}
+
+		const presence = jsonObj(data, 'presence')
+		const presenceEvents = jsonArr(presence, 'events')
+		for (let pi = 0; pi < presenceEvents.length; pi++) {
+			const ev = presenceEvents[pi]
+			for (let hi = 0; hi < this.presenceHandlers.length; hi++) {
+				try { this.presenceHandlers[hi](ev) } catch (e) { console.error(e) }
+			}
+			const legacy = this.onPresence
+			if (legacy != null) {
+				try { legacy(ev) } catch (e) { console.error(e) }
+			}
+		}
+	}
+
+	/**
+	 * 读取指定房间的缓冲事件（不清空）
+	 */
+	getBufferedEvents(roomId: string): Array<MatrixEvent> {
+		const out: Array<MatrixEvent> = []
+		const src = this.roomTimelines.get(roomId)
+		if (src == null) return out
+		for (let i = 0; i < src.length; i++) {
+			out.push(this.parseEvent(src[i]))
+		}
+		return out
+	}
+
+	/**
+	 * 取出并清空指定房间的缓冲事件
+	 */
+	drainBufferedEvents(roomId: string): Array<MatrixEvent> {
+		const out = this.getBufferedEvents(roomId)
+		const emptyDrain: Array<UTSJSONObject> = []
+		this.roomTimelines.set(roomId, emptyDrain)
+		return out
+	}
+
+	/**
+	 * 订阅房间消息事件，返回取消订阅的函数
+	 */
+	onTimeline(handler: (event: MatrixEvent, roomId: string) => void): () => void {
+		this.timelineHandlers.push(handler)
+		return () => {
+			const idx = this.timelineHandlers.indexOf(handler)
+			if (idx >= 0) this.timelineHandlers.splice(idx, 1)
+		}
+	}
+
+	/**
+	 * 订阅 state event 变化（包括 m.room.calling / m.room.power_levels 等）
+	 */
+	onStateEvent(handler: (event: UTSJSONObject, roomId: string) => void): () => void {
+		this.stateEventHandlers.push(handler)
+		return () => {
+			const idx = this.stateEventHandlers.indexOf(handler)
+			if (idx >= 0) this.stateEventHandlers.splice(idx, 1)
+		}
+	}
+
+	/**
+	 * 拿到房间已加入的成员（从 cache 取或单次 /joined_members）
+	 */
+	async getJoinedMembers(roomId: string): Promise<Array<string>> {
+		const cacheKey = 'joined_members:' + roomId
+		const cached = this.memberCache.get(cacheKey)
+		if (cached != null) {
+			if (Date.now() - cached.loaded_at < 60000) {
+				return cached.members
+			}
+		}
+		const url = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`
+		const res = (await this.request('GET', url)) as UTSJSONObject
+		const joined = jsonObj(res, 'joined')
+		const members = jsonKeys(joined)
+		this.memberCache.set(cacheKey, { members: members, loaded_at: Date.now() })
+		return members
+	}
+
+	/**
+	 * 订阅同步状态变化
+	 */
+	onSync(handler: (state: string, error: string) => void): () => void {
+		this.syncStateHandlers.push(handler)
+		return () => {
+			const idx = this.syncStateHandlers.indexOf(handler)
+			if (idx >= 0) this.syncStateHandlers.splice(idx, 1)
+		}
+	}
+
+	onPresence(handler: (content: UTSJSONObject) => void): () => void {
+		this.presenceHandlers.push(handler)
+		return () => {
+			const idx = this.presenceHandlers.indexOf(handler)
+			if (idx >= 0) this.presenceHandlers.splice(idx, 1)
+		}
+	}
+
+	/**
+	 * 订阅房间邀请
+	 */
+	onInvite(handler: (roomId: string) => void): () => void {
+		this.inviteHandlers.push(handler)
+		return () => {
+			const idx = this.inviteHandlers.indexOf(handler)
+			if (idx >= 0) this.inviteHandlers.splice(idx, 1)
+		}
+	}
+
+	parseEvent(ev: UTSJSONObject): MatrixEvent {
+		const content = jsonObj(ev, 'content')
+		const sender = jsonStr(ev, 'sender')
+		const evType = jsonStr(ev, 'type')
+		if (sender.length > 0 && evType == 'm.room.member') {
+			const dn = jsonStr(content, 'displayname')
+			const av = jsonStr(content, 'avatar_url')
+			if (dn.length > 0) this.userDisplayNames.set(sender, dn)
+			if (av.length > 0) this.userAvatars.set(sender, av)
+		}
+		const row: MatrixEvent = {
+			type: evType,
+			sender: sender,
+			event_id: jsonStr(ev, 'event_id'),
+			origin_server_ts: jsonNum(ev, 'origin_server_ts'),
+			content: content,
+			state_key: jsonStr(ev, 'state_key')
+		}
+		return row
+	}
+
+	cacheUserName(userId: string, displayName: string): void {
+		if (userId != null && displayName != null && displayName.length > 0) {
+			this.userDisplayNames.set(userId, displayName)
+		}
+	}
+
+	getCachedUserName(userId: string): string {
+		return this.userDisplayNames.get(userId) ?? ''
+	}
+
+	// ============================================================
+	// 房间操作
+	// ============================================================
+
+	// listRooms 整列表缓存：避免重复的 N 次 /state + /messages
+	listRoomsCache: RoomListCache | null = null
+
+	async listRooms(): Promise<MatrixRoom[]> {
+		// 并发去重：如果已有在飞的 listRooms，直接复用同一个 Promise
+		if (this.listRoomsInflight != null) {
+			console.log('[listRooms] INFLIGHT_DEDUP')
+			return this.listRoomsInflight
+		}
+		// 整列表缓存：30 秒内复用，避免反复打 N 个 /state + N 个 /messages
+		const now = Date.now()
+		if (this.listRoomsCache != null && now - this.listRoomsCache.loaded_at < 30000) {
+			console.log('[listRooms] CACHE_HIT')
+			return this.listRoomsCache.rooms
+		}
+		console.log('[listRooms] called')
+		// 用 inflight 去重锁：把整个 listRooms 过程打包成一个 Promise
+		this.listRoomsInflight = (async () => {
+			const query: UTSJSONObject = {}
+			if (this.since.length > 0) query['since'] = this.since
+			// 使用 /joined_rooms 拉所有已加入的房间 ID
+			const data = (await this.request(
+				'GET',
+				'/_matrix/client/v3/joined_rooms',
+				null
+			)) as UTSJSONObject
+			const joinedArr = jsonStrArr(data, 'joined_rooms')
+			const joinedRoomIds: Array<string> = []
+			for (let i = 0; i < joinedArr.length; i++) {
+				const id = joinedArr[i]
+				if (id != null && id.length > 0) joinedRoomIds.push(id)
+			}
+			this.knownRoomIds.forEach((k: string) => {
+				if (joinedRoomIds.indexOf(k) < 0) joinedRoomIds.push(k)
+			})
+			console.log('[listRooms] joined:', joinedArr.length, 'union known:', this.knownRoomIds.size, 'final:', joinedRoomIds.length)
+			const rooms: MatrixRoom[] = []
+			for (let i = 0; i < joinedRoomIds.length; i++) {
+				const rid = joinedRoomIds[i]
+				try {
+					const summary = await this.getRoomSummary(rid)
+					rooms.push(summary)
+				} catch (e) {
+					console.warn(TAG, 'listRooms: 获取房间详情失败', rid, e)
+				}
+			}
+			// 按最后消息时间倒序
+			rooms.sort((a, b) => (b.last_message_ts ?? 0) - (a.last_message_ts ?? 0))
+			this.listRoomsCache = { rooms, loaded_at: Date.now() }
+			return rooms
+		})()
+		try {
+			return await this.listRoomsInflight
+		} finally {
+			this.listRoomsInflight = null
+		}
+	}
+
+	async getRoomSummary(roomId: string): Promise<MatrixRoom> {
+		// 内存缓存：30 秒内复用，避免 sync 期间重复打 /state + /messages
+		// 用模块级 const 变量（UTSJSONObject）+ JSON.stringify/setItem 风格的赋值
+		const now = Date.now()
+		// 把 roomId 当成单层 key（不含特殊字符，Matrix ID 都是安全的 !xxx:domain 形式）
+		const cachedRaw = summaryCache[roomId]
+		if (cachedRaw != null) {
+			const cachedEntry = cachedRaw as UTSJSONObject
+			const loadedAtVal = cachedEntry['loaded_at'] as number
+			const loadedAt = loadedAtVal != null ? loadedAtVal : 0
+			if (now - loadedAt < 30000) {
+				console.log('[getRoomSummary]', roomId, 'CACHE_HIT', (now - loadedAt) + 'ms')
+				return cachedEntry['summary'] as MatrixRoom
+			}
+		}
+		this.requestCount = this.requestCount + 1
+		console.log('[getRoomSummary]', roomId, 'CACHE_MISS', 'total_requests=', this.requestCount)
+
+		const state = await this.requestList(
+			'GET',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state`,
+			null
+		)
+		const room: MatrixRoom = { room_id: roomId }
+		for (let si = 0; si < state.length; si++) {
+			const ev = state[si]
+			const type = jsonStr(ev, 'type')
+			const content = jsonObj(ev, 'content')
+			if (type == 'm.room.name') {
+				const n = jsonStr(content, 'name')
+				if (n.length > 0) room.name = n
+			} else if (type == 'm.room.topic') {
+				room.topic = jsonStr(content, 'topic')
+			} else if (type == 'm.room.canonical_alias') {
+				room.canonical_alias = jsonStr(content, 'alias')
+			} else if (type == 'm.room.avatar') {
+				room.avatar_url = jsonStr(content, 'avatar_url')
+			} else if (type == 'm.room.member') {
+				const sk = jsonStr(ev, 'state_key')
+				if (sk.length > 0 && sk != this.userId) {
+					room.other_user_id = sk
+					const dn = jsonStr(content, 'displayname')
+					const av = jsonStr(content, 'avatar_url')
+					if (dn.length > 0) room.other_displayname = dn
+					if (av.length > 0) room.other_avatar = av
+				}
+			}
+		}
+
+		// 私聊识别：state 中只看到 2 个不同 user（包含自己）的 event 就当作 DM
+		let otherUserIds = new Set<string>()
+		for (let sj = 0; sj < state.length; sj++) {
+			const ev2 = state[sj]
+			if (jsonStr(ev2, 'type') == 'm.room.member') {
+				const sk = jsonStr(ev2, 'state_key')
+				if (sk.length > 0 && sk != this.userId) otherUserIds.add(sk)
+			}
+		}
+		const isDM = otherUserIds.size == 1
+
+		// DM 情况下，强制用对方 displayname 覆盖
+		if (isDM && room.other_user_id != null) {
+			// 优先用缓存的 displayname
+			const cached = this.userDisplayNames.get(room.other_user_id) ?? ''
+			if (cached.length > 0) {
+				room.other_displayname = cached
+				room.name = cached
+			} else if (room.other_displayname != null && room.other_displayname.length > 0) {
+				room.name = room.other_displayname
+				this.userDisplayNames.set(room.other_user_id, room.other_displayname)
+			} else {
+				const local = room.other_user_id.split(':')[0].replace('@', '')
+				room.name = local
+			}
+			const cachedAv = this.userAvatars.get(room.other_user_id) ?? ''
+			if (cachedAv.length > 0) {
+				room.other_avatar = cachedAv
+				room.avatar_url = cachedAv
+			} else if (room.other_avatar != null && room.other_avatar.length > 0) {
+				room.avatar_url = room.other_avatar
+			}
+			// DM 尝试 profile 接口补一次
+			if ((room.other_displayname == null || room.other_displayname.length == 0) && room.other_user_id != null) {
+				try {
+					const profile = (await this.request(
+						'GET',
+						`/_matrix/client/v3/profile/${encodeURIComponent(room.other_user_id)}`,
+						null
+					)) as UTSJSONObject
+					const dn = jsonStr(profile, 'displayname')
+					if (dn.length > 0) {
+						room.name = dn
+						room.other_displayname = dn
+						this.userDisplayNames.set(room.other_user_id, dn)
+					}
+					const av = jsonStr(profile, 'avatar_url')
+					if (av.length > 0 && (room.avatar_url == null || room.avatar_url.length == 0)) {
+						room.avatar_url = av
+						room.other_avatar = av
+						this.userAvatars.set(room.other_user_id, av)
+					}
+				} catch (e: any) {
+					console.warn(TAG, 'getRoomSummary DM profile fallback 失败', e)
+				}
+			}
+		} else {
+			if (room.name == null || room.name.length == 0) {
+				room.name = room.canonical_alias ?? roomId
+			}
+		}
+
+		// 最后一条消息预览（优先用 sync 缓存，确保"暂无消息"不再误显示）
+		const cachedLast = this.roomLastMessage.get(roomId)
+		if (cachedLast != null) {
+			room.last_message_preview = cachedLast.body
+			room.last_message_ts = cachedLast.ts
+		}
+
+		// 写入缓存（30 秒内复用）
+		const wrap: UTSJSONObject = {}
+		wrap['summary'] = room
+		wrap['loaded_at'] = Date.now()
+		summaryCache[roomId] = wrap
+	console.log('[getRoomSummary]', roomId, 'CACHED', 'cache_size=', jsonKeys(summaryCache).length)
+	return room
+	}
+
+	// 返回当前用户处于 invited 状态的所有房间
+	listInvitedRooms(): Array<InvitedRoomInfo> {
+		const list: Array<InvitedRoomInfo> = []
+		this.invitedRoomCache.forEach((v: InvitedRoomInfo) => {
+			list.push(v)
+		})
+		return list
+	}
+
+	async joinRoom(roomIdOrAlias: string): Promise<RoomIdResult> {
+		const data = (await this.request(
+			'POST',
+			`/_matrix/client/v3/join/${encodeURIComponent(roomIdOrAlias)}`,
+			{}
+		)) as UTSJSONObject
+		// 加入成功后从邀请缓存移除
+		this.invitedRoomCache.delete(roomIdOrAlias)
+		return { room_id: (data['room_id'] as string) ?? roomIdOrAlias }
+	}
+
+	async createRoom(opts: CreateRoomOpts): Promise<string> {
+		let preset = opts.preset
+		if (preset.length == 0) preset = 'private_chat'
+		const body: UTSJSONObject = {
+			preset: preset,
+			name: opts.name,
+			topic: opts.topic
+		}
+		if (opts.invite.length > 0) {
+			body['invite'] = opts.invite
+		}
+		if (opts.is_direct == true) {
+			body['is_direct'] = true
+		}
+		const data = (await this.request(
+			'POST',
+			'/_matrix/client/v3/createRoom',
+			body
+		)) as UTSJSONObject
+		return (data['room_id'] as string) ?? ''
+	}
+
+	async inviteUser(roomId: string, userId: string): Promise<void> {
+		await this.request('POST', '/_matrix/client/v3/rooms/' + encodeURIComponent(roomId) + '/invite', {
+			user_id: userId
+		})
+	}
+
+	async leaveRoom(roomId: string): Promise<void> {
+		await this.request(
+			'POST',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`,
+			{}
+		)
+	}
+
+	async startDM(targetUserId: string): Promise<string> {
+		// 检查是否已有私聊房间
+		const existing = await this.listRooms()
+		for (const r of existing) {
+			try {
+				const members = await this.request('GET', `/_matrix/client/v3/rooms/${encodeURIComponent(r.room_id)}/members`, null) as UTSJSONObject
+				const chunk = (members['chunk'] as Array<UTSJSONObject>) ?? []
+				const userIds: Array<string> = []
+				for (let i = 0; i < chunk.length; i++) {
+					const sk = chunk[i]['state_key'] as string
+					if (sk != null && sk.length > 0) userIds.push(sk)
+				}
+				if (userIds.length === 2 && userIds.includes(this.userId) && userIds.includes(targetUserId)) {
+					return r.room_id
+				}
+			} catch (e) {}
+		}
+		// 没有则创建
+		const dmOpts: CreateRoomOpts = {
+			name: '',
+			topic: '',
+			preset: 'private_chat',
+			invite: [targetUserId],
+			is_direct: true
+		}
+		return await this.createRoom(dmOpts)
+	}
+
+	// ============================================================
+	// 消息
+	// ============================================================
+
+	async getMessages(roomId: string, limit: number = 30, from: string = ''): Promise<MatrixMessage[]> {
+		const page = await this.getMessagesPage(roomId, limit, from)
+		return page.messages
+	}
+
+	/**
+	 * GET /rooms/{roomId}/messages
+	 * spec: dir 必填；filter.lazy_load_members 避免把整房成员塞进响应
+	 */
+	async getMessagesPage(roomId: string, limit: number = 30, from: string = ''): Promise<MessagesPage> {
+		const filter = JSON.stringify({
+			lazy_load_members: true,
+			types: ['m.room.message', 'm.room.encrypted']
+		})
+		const query: UTSJSONObject = {
+			dir: 'b',
+			limit: `${limit}`,
+			filter: filter
+		}
+		if (from.length > 0) query['from'] = from
+		const data = (await this.request(
+			'GET',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages`,
+			null,
+			query
+		)) as UTSJSONObject
+		const chunk = jsonArr(data, 'chunk')
+		const msgs: MatrixMessage[] = []
+		for (let i = 0; i < chunk.length; i++) {
+			const ev = chunk[i]
+			const evType = jsonStr(ev, 'type')
+			if (evType == 'm.room.message') {
+				const c = jsonObj(ev, 'content')
+				const rawBody = jsonStr(c, 'body')
+				const info = jsonObj(c, 'info')
+				msgs.push({
+					event_id: jsonStr(ev, 'event_id'),
+					sender: jsonStr(ev, 'sender'),
+					type: evType,
+					body: unescapeMatrixBody(rawBody),
+					msgtype: jsonStr(c, 'msgtype').length > 0 ? jsonStr(c, 'msgtype') : 'm.text',
+					mxc: jsonStr(c, 'url'),
+					mimetype: jsonStr(info, 'mimetype'),
+					info: info,
+					ts: jsonNum(ev, 'origin_server_ts'),
+					formatted_body: jsonStr(c, 'formatted_body'),
+					formatted_type: jsonStr(c, 'format')
+				})
+			} else if (evType == 'm.room.encrypted') {
+				msgs.push({
+					event_id: jsonStr(ev, 'event_id'),
+					sender: jsonStr(ev, 'sender'),
+					type: evType,
+					body: '加密消息，当前版本无法解密',
+					msgtype: 'm.encrypted',
+					mxc: '',
+					mimetype: '',
+					info: {},
+					ts: jsonNum(ev, 'origin_server_ts')
+				})
+			}
+		}
+		msgs.sort((a, b) => a.ts - b.ts)
+		return {
+			messages: msgs,
+			end: jsonStr(data, 'end')
+		}
+	}
+
+	getCachedRoomName(roomId: string): string {
+		const cachedRaw = summaryCache[roomId]
+		if (cachedRaw != null) {
+			const cachedEntry = cachedRaw as UTSJSONObject
+			const summary = cachedEntry['summary'] as MatrixRoom
+			if (summary != null && summary.name != null && summary.name.length > 0) return summary.name
+		}
+		if (this.listRoomsCache != null) {
+			const hit = this.listRoomsCache.rooms.find((r: MatrixRoom) => r.room_id == roomId)
+			if (hit != null && hit.name != null && hit.name.length > 0) return hit.name
+		}
+		return ''
+	}
+
+	async getRoomTitle(roomId: string): Promise<string> {
+		const cached = this.getCachedRoomName(roomId)
+		if (cached.length > 0) return cached
+		try {
+			const ev = (await this.request(
+				'GET',
+				`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.name/`,
+				null
+			)) as UTSJSONObject
+			const n = (ev['name'] as string) ?? ''
+			if (n.length > 0) return n
+		} catch (e) {}
+		return roomId
+	}
+
+	async sendText(roomId: string, text: string): Promise<MatrixEvent> {
+		return await this.sendMessage(roomId, { msgtype: 'm.text', body: text })
+	}
+
+	async sendMessage(roomId: string, content: UTSJSONObject): Promise<MatrixEvent> {
+		this.txnCounter += 1
+		const txnId = `${Date.now()}_${this.txnCounter}_${Math.floor(Math.random() * 1000)}`
+		const url = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txnId}`
+		const data = (await this.request('PUT', url, content)) as UTSJSONObject
+		const row: MatrixEvent = {
+			type: 'm.room.message',
+			event_id: jsonStr(data, 'event_id'),
+			sender: this.userId,
+			origin_server_ts: Date.now(),
+			content: content
+		}
+		return row
+	}
+
+	async typing(roomId: string, isTyping: boolean): Promise<void> {
+		if (isTyping) {
+			const now = Date.now()
+			if (now - this.lastTypingAt < 4000) return
+			this.lastTypingAt = now
+		} else {
+			this.lastTypingAt = 0
+		}
+		try {
+			this.request(
+				'PUT',
+				`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/typing/${encodeURIComponent(this.userId)}`,
+				{ typing: isTyping }
+			)
+		} catch (e) {
+			// typing 失败不致命
+		}
+	}
+
+	async readReceipt(roomId: string, eventId: string): Promise<void> {
+		try {
+			await this.request(
+				'POST',
+				`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/receipt/m.read/${encodeURIComponent(eventId)}`,
+				{}
+			)
+		} catch (e) {
+			// 忽略
+		}
+	}
+
+	// ============================================================
+	// 工具
+	// ============================================================
+
+	async sleep(ms: number): Promise<void> {
+		return new Promise(resolve => {
+			setTimeout(() => resolve(), ms)
+		})
+	}
+
+	mxcToHttp(mxc: string, width: number = 96, height: number = 96): string {
+		if (mxc == null || mxc.length == 0) return ''
+		if (mxc.startsWith('http://') || mxc.startsWith('https://')) return mxc
+		// mxc://server.name/mediaid
+		const withoutScheme = mxc.replace('mxc://', '')
+		const parts = withoutScheme.split('/')
+		if (parts.length < 2) return ''
+		const server = parts[0]
+		const mediaId = parts.slice(1).join('/')
+		// itiklink 的媒体存储在 /_matrix/client/v1/media/download（thumbnail 端点报 400）
+		return `${this.homeserver}/_matrix/client/v1/media/download/${server}/${mediaId}`
+	}
+
+	// ============================================================
+	// 媒体上传（图片 / 文件 / 音频）
+	// ============================================================
+
+	async uploadMedia(localPath: string, mimeType: string, fileName: string): Promise<string> {
+		const fileName2 = (fileName.length > 0) ? fileName : 'file'
+		const uploadUrl = this.homeserver.replace(/\/$/, '') + '/_matrix/media/v3/upload?filename=' + encodeURIComponent(fileName2)
+
+		// #ifdef H5
+		// H5：blob URL → fetch 直接上传二进制（不要用 FormData，itiklink 需直传）
+		const resp = await fetch(localPath)
+		if (!resp.ok) throw new Error('fetch 文件失败 ' + resp.status)
+		const blob = await resp.blob()
+		const h5Res = await fetch(uploadUrl, {
+			method: 'POST',
+			headers: {
+				'Authorization': 'Bearer ' + this.accessToken,
+				'Content-Type': 'application/octet-stream'
+			},
+			body: blob
+		} as any)
+		if (!h5Res.ok) {
+			const text = await h5Res.text()
+			throw new Error('上传失败 ' + h5Res.status + ' ' + h5Res.statusText + ' | ' + text)
+		}
+		const h5Json = await h5Res.json() as UTSJSONObject
+		return (h5Json['content_uri'] as string) ?? ''
+		// #endif
+
+		// #ifndef H5
+		return await new Promise((resolve, reject) => {
+			uni.uploadFile({
+				url: uploadUrl,
+				filePath: localPath,
+				name: 'file',
+				header: {
+					'Authorization': 'Bearer ' + this.accessToken,
+					'Content-Type': mimeType
+				},
+				success: (up: UploadFileSuccess) => {
+					if (up.statusCode < 200 || up.statusCode >= 300) {
+						reject(new Error('上传失败 ' + up.statusCode))
+						return
+					}
+					const resBody = toJsonObj(up.data)
+					resolve((resBody['content_uri'] as string) ?? '')
+				},
+				fail: (err: UploadFileFail) => {
+					reject(new Error(err.errMsg))
+				}
+			})
+		})
+		// #endif
+	}
+
+	// 直接发送 mxc（已上传后的 content_uri）
+	async sendImage(roomId: string, mxc: string, mimeType: string, width: number, height: number, sizeBytes: number): Promise<MatrixMessage> {
+		const txnId = Date.now().toString() + Math.floor(Math.random() * 10000).toString()
+		const content: UTSJSONObject = {
+			msgtype: 'm.image',
+			body: '图片',
+			url: mxc,
+			info: {
+				mimetype: mimeType,
+				w: width,
+				h: height,
+				size: sizeBytes
+			}
+		}
+		return await this.sendRawEvent(roomId, 'm.room.message', content, txnId)
+	}
+
+	async sendFile(roomId: string, mxc: string, mimeType: string, sizeBytes: number, fileName: string): Promise<MatrixMessage> {
+		const txnId = Date.now().toString() + Math.floor(Math.random() * 10000).toString()
+		const content: UTSJSONObject = {
+			msgtype: 'm.file',
+			body: fileName,
+			filename: fileName,
+			url: mxc,
+			info: {
+				mimetype: mimeType,
+				size: sizeBytes
+			}
+		}
+		return await this.sendRawEvent(roomId, 'm.room.message', content, txnId)
+	}
+
+	async sendAudio(roomId: string, mxc: string, mimeType: string, duration: number): Promise<MatrixMessage> {
+		const txnId = Date.now().toString() + Math.floor(Math.random() * 10000).toString()
+		const content: UTSJSONObject = {
+			msgtype: 'm.audio',
+			body: '语音',
+			url: mxc,
+			info: {
+				mimetype: mimeType,
+				duration: duration > 1000 ? duration : duration * 1000,
+				'org.matrix.msc1767.audio': {
+					duration: duration > 1000 ? duration : duration * 1000
+				}
+			}
+		}
+		return await this.sendRawEvent(roomId, 'm.room.message', content, txnId)
+	}
+
+	async sendLocation(roomId: string, lat: number, lon: number, label: string): Promise<MatrixMessage> {
+		const txnId = Date.now().toString() + Math.floor(Math.random() * 10000).toString()
+		const content: UTSJSONObject = {
+			msgtype: 'm.location',
+			body: label,
+			geo_uri: 'geo:' + lat + ',' + lon,
+			'org.matrix.msc3488.location': {
+				uri: 'geo:' + lat + ',' + lon,
+				description: label
+			}
+		}
+		return await this.sendRawEvent(roomId, 'm.room.message', content, txnId)
+	}
+
+	// ============================================================
+	// 通用 raw event 发送（编辑/回复/反应都靠这个）
+	// ============================================================
+
+	async sendRawEvent(roomId: string, eventType: string, content: UTSJSONObject, txnId: string = ''): Promise<MatrixMessage> {
+		let tid = txnId
+		if (tid.length == 0) tid = this.genTxnId()
+		const url = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/${tid}`
+		const data = (await this.request('PUT', url, content)) as UTSJSONObject
+		const mid: MatrixMessage = {
+			event_id: jsonStr(data, 'event_id'),
+			sender: this.userId,
+			type: eventType,
+			body: jsonStr(content, 'body'),
+			msgtype: jsonStr(content, 'msgtype'),
+			ts: Date.now()
+		}
+		return mid
+	}
+
+	// ============================================================
+	// 消息编辑 / 撤回 / 反应 / 回复
+	// ============================================================
+
+	async editMessage(roomId: string, originalEventId: string, newContent: UTSJSONObject): Promise<MatrixMessage> {
+		const content: UTSJSONObject = {}
+		const msgtype = newContent['msgtype'] as string
+		const body = newContent['body'] as string
+		if (msgtype != null) content['msgtype'] = msgtype
+		if (body != null) content['body'] = body
+		content['m.new_content'] = newContent
+		const rel: UTSJSONObject = {}
+		rel['rel_type'] = 'm.replace'
+		rel['event_id'] = originalEventId
+		content['m.relates_to'] = rel
+		return await this.sendRawEvent(roomId, 'm.room.message', content, this.genTxnId())
+	}
+
+	async redactEvent(roomId: string, eventId: string, reason: string): Promise<void> {
+		const content: UTSJSONObject = {}
+		if (reason != null && reason.length > 0) content['reason'] = reason
+		const tid = Date.now().toString() + Math.floor(Math.random() * 10000).toString()
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/redact/${encodeURIComponent(eventId)}/${tid}`,
+			content
+		)
+	}
+
+	async sendReaction(roomId: string, eventId: string, emoji: string): Promise<void> {
+		const content: UTSJSONObject = {
+			'm.relates_to': {
+				rel_type: 'm.annotation',
+				event_id: eventId,
+				key: emoji
+			}
+		}
+		await this.sendRawEvent(roomId, 'm.reaction', content, this.genTxnId())
+	}
+
+	async sendReply(roomId: string, replyToEventId: string, text: string): Promise<MatrixMessage> {
+		const content: UTSJSONObject = {
+			msgtype: 'm.text',
+			body: text,
+			'm.relates_to': {
+				'm.in_reply_to': {
+					event_id: replyToEventId
+				}
+			}
+		}
+		return await this.sendRawEvent(roomId, 'm.room.message', content, this.genTxnId())
+	}
+
+	// ============================================================
+	// 房间成员 / 头像 / 状态
+	// ============================================================
+
+	async getRoomMembers(roomId: string): Promise<RoomMember[]> {
+		const data = (await this.request(
+			'GET',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members?not_membership=leave`,
+			null
+		)) as UTSJSONObject
+		const chunk = (data['chunk'] as Array<UTSJSONObject>) ?? []
+		const result: RoomMember[] = []
+		for (let i = 0; i < chunk.length; i++) {
+			const m = chunk[i]
+			const content = (m['content'] as UTSJSONObject) ?? {}
+			const item: RoomMember = {
+				user_id: (m['state_key'] as string) ?? '',
+				membership: (content['membership'] as string) ?? 'join',
+				display_name: content['displayname'] as string,
+				avatar_url: content['avatar_url'] as string
+			}
+			result.push(item)
+		}
+		return result
+	}
+
+	async setRoomAvatar(roomId: string, mxc: string): Promise<void> {
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.avatar`,
+			{ url: mxc }
+		)
+	}
+
+	async setRoomName(roomId: string, name: string): Promise<void> {
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.name`,
+			{ name: name }
+		)
+	}
+
+	async setRoomTopic(roomId: string, topic: string): Promise<void> {
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.topic`,
+			{ topic: topic }
+		)
+	}
+
+	async kickMember(roomId: string, userId: string, reason: string): Promise<void> {
+		await this.request(
+			'POST',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/kick`,
+			{ user_id: userId, reason: reason }
+		)
+	}
+
+	async banMember(roomId: string, userId: string, reason: string): Promise<void> {
+		await this.request(
+			'POST',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/ban`,
+			{ user_id: userId, reason: reason }
+		)
+	}
+
+	async unbanMember(roomId: string, userId: string): Promise<void> {
+		await this.request(
+			'POST',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/unban`,
+			{ user_id: userId }
+		)
+	}
+
+	// ============================================================
+	// 关系集合（拉 reactions / 编辑历史）
+	// ============================================================
+
+	async getRelations(roomId: string, eventId: string, relType: string, eventType: string): Promise<UTSJSONObject> {
+		let url = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/relations/${encodeURIComponent(eventId)}/${encodeURIComponent(relType)}`
+		if (eventType.length > 0) {
+			url += `/${encodeURIComponent(eventType)}`
+		}
+		return await this.request('GET', url, null)
+	}
+
+	/**
+	 * 搜索消息（关键词 + 可选房间范围）
+	 * @param searchTerm 关键词
+	 * @param roomIds 可选：在指定房间内搜索；空数组 = 全局
+	 * @param limit 每页条数（默认 20）
+	 * @param nextBatch 翻页 token（上一页返回的 next_batch）
+	 */
+	async searchMessages(
+		searchTerm: string,
+		roomIds: Array<string> = [],
+		limit: number = 20,
+		nextBatch: string = ''
+	): Promise<SearchResult> {
+		const filter: UTSJSONObject = { limit: limit }
+		if (roomIds.length > 0) {
+			filter['rooms'] = roomIds
+		}
+		const roomEvents: UTSJSONObject = {
+			search_term: searchTerm,
+			filter: filter,
+			order_by: 'recent',
+			groupings: { room_id: {} }
+		}
+		if (nextBatch.length > 0) {
+			roomEvents['next_batch'] = nextBatch
+		}
+		const body: UTSJSONObject = {
+			search_categories: {
+				room_events: roomEvents
+			}
+		}
+		const data = (await this.request('POST', '/_matrix/client/v3/search', body)) as UTSJSONObject
+		// 解析结果（只取第一组 group 简化结构）
+		const categories = data['search_categories'] as UTSJSONObject ?? {}
+		const events = categories['room_events'] as UTSJSONObject ?? {}
+		const rawResults = (events['results'] as Array<UTSJSONObject>) ?? []
+		const results: Array<SearchHit> = []
+		for (let i = 0; i < rawResults.length; i++) {
+			const r = rawResults[i]
+			const result = (r['result'] as UTSJSONObject) ?? {}
+			const ev = (result['event'] as UTSJSONObject) ?? {}
+			const content = (ev['content'] as UTSJSONObject) ?? {}
+			const hl = r['highlights'] as Array<string> | null
+			const hit: SearchHit = {
+				event_id: (ev['event_id'] as string) ?? '',
+				room_id: (result['room_id'] as string) ?? '',
+				sender: (ev['sender'] as string) ?? '',
+				type: (ev['type'] as string) ?? '',
+				body: (content['body'] as string) ?? '',
+				ts: (ev['origin_server_ts'] as number) ?? 0,
+				highlight: (hl != null) ? hl : ([] as Array<string>),
+				context: (r['context'] as UTSJSONObject) ?? ({} as UTSJSONObject)
+			}
+			results.push(hit)
+		}
+		const groups = events['groups'] as UTSJSONObject ?? {}
+		const roomGroup = groups['room_id'] as UTSJSONObject ?? {}
+		const count = (roomGroup['count'] as number) ?? results.length
+		return {
+			results: results,
+			count: count,
+			highlights: (events['highlights'] as Array<string>) ?? ([] as Array<string>),
+			next_batch: (events['next_batch'] as string) ?? ''
+		}
+	}
+
+	// ============================================================
+	// 在线状态（presence）
+	// ============================================================
+
+	/**
+	 * 查询某用户的在线状态
+	 * 默认 online/offline/unavailable 三档
+	 * 服务器可以支持自定义 presence（如 Element 的 busy、away）
+	 */
+	async getPresence(userId: string): Promise<PresenceInfo> {
+		return (await this.request(
+			'GET',
+			`/_matrix/client/v3/presence/${encodeURIComponent(userId)}/status`,
+			null
+		)) as PresenceInfo
+	}
+
+	/**
+	 * 设置自己的在线状态
+	 * @param presence 'online' | 'offline' | 'unavailable' 或 'org.matrix.msc3026.busy' 等
+	 * @param statusMsg 自定义状态消息（可选）
+	 */
+	async setPresence(presence: string, statusMsg: string = ''): Promise<void> {
+		const body: UTSJSONObject = { presence: presence }
+		if (statusMsg.length > 0) {
+			body['status_msg'] = statusMsg
+		}
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/presence/${encodeURIComponent(this.userId)}/status`,
+			body
+		)
+	}
+
+	// ============================================================
+	// 推送 / 通知
+	// ============================================================
+
+	/**
+	 * 注册一个系统推送通道（APNs / FCM / UniPush 等）
+	 * Matrix 服务器收到新消息后，会调用 pusher 里的 url 把消息推过来。
+	 * @param pusher { kind, app_id, pushkey, app_display_name, device_display_name, data }
+	 *   - kind: 'http' 或 'email'
+	 *   - app_id: 你的 App 包名（com.xxx.app）
+	 *   - pushkey: 来自 APNs/FCM/UniPush 的设备标识
+	 *   - data.url: Matrix 推送网关地址（UniPush 模式下用 https://push-helper.dcloud.io/notify）
+	 *   - data.format: 'event_id_only' 表示只推 eventId，App 收到后自己去 /sync 拉
+	 */
+	async setPusher(pusher: UTSJSONObject): Promise<void> {
+		await this.request('POST', '/_matrix/client/v3/pushers/set', pusher)
+	}
+
+	/**
+	 * 注销/删除一个推送通道
+	 * @param pushkey 设备标识
+	 * @param appId App 包名
+	 */
+	async removePusher(pushkey: string, appId: string): Promise<void> {
+		await this.request(
+			'POST',
+			'/_matrix/client/v3/pushers/set',
+			{ kind: null, app_id: appId, pushkey: pushkey, app_display_name: '', device_display_name: '', data: {} }
+		)
+	}
+
+	async getPushers(): Promise<UTSJSONObject> {
+		return await this.request('GET', '/_matrix/client/v3/pushers', null)
+	}
+
+	async getPushRules(): Promise<UTSJSONObject> {
+		return await this.request('GET', '/_matrix/client/v3/pushrules/', null)
+	}
+
+	async setPushRule(kind: string, ruleId: string, actions: Array<string>): Promise<void> {
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/pushrules/global/${encodeURIComponent(kind)}/${encodeURIComponent(ruleId)}`,
+			{ actions: actions }
+		)
+	}
+
+	// ============================================================
+	// 设备管理（查看/远程登出登录过的设备）
+	// ============================================================
+
+	/**
+	 * 列出当前账号下所有登录的设备
+	 */
+	async getDevices(): Promise<Array<DeviceInfo>> {
+		const data = (await this.request('GET', '/_matrix/client/v3/devices', null)) as UTSJSONObject
+		const devices = data['devices'] as Array<UTSJSONObject> ?? []
+		const result: Array<DeviceInfo> = []
+		for (const d of devices) {
+			result.push({
+				device_id: d['device_id'] as string ?? '',
+				user_id: d['user_id'] as string,
+				display_name: d['display_name'] as string,
+				last_seen_ip: (d['last_seen_ip'] as string),
+				last_seen_ts: (d['last_seen_ts'] as number),
+				app_id: (d['app'] as UTSJSONObject)?.['app_id'] as string,
+				version: (d['app'] as UTSJSONObject)?.['version'] as string
+			})
+		}
+		return result
+	}
+
+	/**
+	 * 获取单个设备详情
+	 */
+	async getDevice(deviceId: string): Promise<DeviceInfo> {
+		return (await this.request('GET', `/_matrix/client/v3/devices/${encodeURIComponent(deviceId)}`, null)) as DeviceInfo
+	}
+
+	/**
+	 * 修改设备显示名（"我的 iPhone 14" 之类的）
+	 */
+	async updateDevice(deviceId: string, displayName: string): Promise<void> {
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/devices/${encodeURIComponent(deviceId)}`,
+			{ display_name: displayName }
+		)
+	}
+
+	/**
+	 * 远程登出某一个设备（需要 UIA 二次验证时填 authData）
+	 */
+	async deleteDevice(deviceId: string, authData: UTSJSONObject): Promise<void> {
+		await this.request('DELETE', `/_matrix/client/v3/devices/${encodeURIComponent(deviceId)}`, authData)
+	}
+
+	/**
+	 * 远程登出所有设备（除了当前），相当于把账号在其他地方都踢下线
+	 * 需要 UIA auth（密码 / 验证码）
+	 */
+	async deleteAllDevices(authData: UTSJSONObject): Promise<void> {
+		await this.request('POST', '/_matrix/client/v3/delete_devices', authData)
+	}
+
+	// ============================================================
+	// 账号安全（密码 / 注销 / 3PID）
+	// ============================================================
+
+	/**
+	 * 改密码
+	 * 改完之后当前 access_token 会失效，需要重新登录
+	 */
+	async changePassword(newPassword: string, authData: UTSJSONObject): Promise<void> {
+		await this.request('POST', '/_matrix/client/v3/account/password', {
+			new_password: newPassword,
+			auth: authData
+		})
+	}
+
+	/**
+	 * 注销账号（不可逆！）
+	 * 需要 UIA auth（密码 / 验证码）
+	 */
+	async deactivateAccount(authData: UTSJSONObject, idServer: string): Promise<void> {
+		const body: UTSJSONObject = { auth: authData, erase: false }
+		if (idServer.length > 0) {
+			body['id_server'] = idServer
+		}
+		await this.request('POST', '/_matrix/client/v3/account/deactivate', body)
+	}
+
+	/**
+	 * 获取账号下绑定的第三方账号（邮箱 / 手机）
+	 */
+	async get3PIDs(): Promise<Array<ThreepidInfo>> {
+		const data = (await this.request('GET', '/_matrix/client/v3/account/3pid', null)) as UTSJSONObject
+		const list = (data['threepids'] as Array<UTSJSONObject>) ?? []
+		const out: Array<ThreepidInfo> = []
+		for (let i = 0; i < list.length; i++) {
+			const t = list[i]
+			const item: ThreepidInfo = {
+				medium: (t['medium'] as string) ?? '',
+				address: (t['address'] as string) ?? '',
+				validated_at: (t['validated_at'] as number) ?? 0
+			}
+			out.push(item)
+		}
+		return out
+	}
+
+	/**
+	 * 查询服务器能力（看支持哪些功能）
+	 * 比如 { 'm.change_password': { enabled: true }, 'm.room_versions': {...} }
+	 */
+	async getCapabilities(): Promise<UTSJSONObject> {
+		return await this.request('GET', '/_matrix/client/v3/capabilities', null)
+	}
+
+	// ============================================================
+	// 公共房间 / TURN（音视频通话用）
+	// ============================================================
+
+	/**
+	 * 浏览服务器上所有公开的房间
+	 * @param limit 每页条数（默认 20）
+	 * @param since 翻页 token
+	 * @param searchTerm 关键词（按房间名搜索）
+	 */
+	async listPublicRooms(
+		limit: number = 20,
+		since: string = '',
+		searchTerm: string = ''
+	): Promise<PublicRoomsPage> {
+		const body: UTSJSONObject = { limit: limit }
+		if (since.length > 0) body['since'] = since
+		if (searchTerm.length > 0) body['filter'] = { generic_search_term: searchTerm }
+		const data = (await this.request('POST', '/_matrix/client/v3/publicRooms', body)) as UTSJSONObject
+		const chunk: Array<PublicRoom> = []
+		const raw = data.getArray('chunk')
+		if (raw != null) {
+			for (let i = 0; i < raw.length; i++) {
+				const item = toJsonObj(raw[i])
+				const roomId = jsonStr(item, 'room_id')
+				if (roomId.length == 0) continue
+				const row: PublicRoom = {
+					room_id: roomId,
+					canonical_alias: jsonStr(item, 'canonical_alias'),
+					name: jsonStr(item, 'name'),
+					topic: jsonStr(item, 'topic'),
+					avatar_url: jsonStr(item, 'avatar_url'),
+					num_joined_members: jsonNum(item, 'num_joined_members'),
+					world_readable: jsonBool(item, 'world_readable'),
+					guest_can_join: jsonBool(item, 'guest_can_join')
+				}
+				chunk.push(row)
+			}
+		}
+		const next = jsonStr(data, 'next_batch')
+		return {
+			chunk: chunk,
+			next_batch: next,
+			total_room_count_estimate: jsonNum(data, 'total_room_count_estimate')
+		}
+	}
+
+	/**
+	 * 获取 TURN/STUN 服务器配置（用于 WebRTC 音视频通话）
+	 * 返回 { uris, username, password, ttl }
+	 */
+	async getTurnServer(): Promise<UTSJSONObject> {
+		return await this.request('GET', '/_matrix/client/v3/voip/turnServer', null)
+	}
+
+	// ============================================================
+	// 设备 ID 显式注册（登录前手动创建 device_id，避免自动生成的 ID 重复）
+	// ============================================================
+
+	/**
+	 * 显式生成 device_id（可选，多数情况下用 login 自动返回的即可）
+	 */
+	async registerDevice(deviceId: string, initialDisplayName: string): Promise<UTSJSONObject> {
+		return await this.request('POST', '/_matrix/client/v3/devices', {
+			device_id: deviceId,
+			initial_device_display_name: initialDisplayName
+		})
+	}
+
+	// ============================================================
+	// 账号数据 / 标签 / 收件箱
+	// ============================================================
+
+	async getAccountData(type: string): Promise<UTSJSONObject> {
+		return await this.request(
+			'GET',
+			`/_matrix/client/v3/user/${encodeURIComponent(this.userId)}/account_data/${encodeURIComponent(type)}`,
+			null
+		)
+	}
+
+	async setAccountData(type: string, content: UTSJSONObject): Promise<void> {
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/user/${encodeURIComponent(this.userId)}/account_data/${encodeURIComponent(type)}`,
+			content
+		)
+	}
+
+	async getRoomAccountData(roomId: string, type: string): Promise<UTSJSONObject> {
+		return await this.request(
+			'GET',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(type)}`,
+			null
+		)
+	}
+
+	async setRoomAccountData(roomId: string, type: string, content: UTSJSONObject): Promise<void> {
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/account_data/${encodeURIComponent(type)}`,
+			content
+		)
+	}
+
+	async getRoomTags(roomId: string): Promise<UTSJSONObject> {
+		return await this.request(
+			'GET',
+			`/_matrix/client/v3/user/${encodeURIComponent(this.userId)}/rooms/${encodeURIComponent(roomId)}/tags`,
+			null
+		)
+	}
+
+	async addRoomTag(roomId: string, tag: string, order: number = 0.5): Promise<void> {
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/user/${encodeURIComponent(this.userId)}/rooms/${encodeURIComponent(roomId)}/tags/${encodeURIComponent(tag)}`,
+			{ order: order }
+		)
+	}
+
+	async removeRoomTag(roomId: string, tag: string): Promise<void> {
+		await this.request(
+			'DELETE',
+			`/_matrix/client/v3/user/${encodeURIComponent(this.userId)}/rooms/${encodeURIComponent(roomId)}/tags/${encodeURIComponent(tag)}`,
+			null
+		)
+	}
+
+	// ============================================================
+	// E2EE 加密房间相关 API（兼容旧接口，不会真去拿密钥）
+	// ============================================================
+
+	async uploadKeys(authData: UTSJSONObject): Promise<UTSJSONObject> {
+		return await this.request('POST', '/_matrix/client/v3/keys/upload', authData)
+	}
+
+	async queryKeys(userIds: Array<string>): Promise<UTSJSONObject> {
+		const deviceKeys: UTSJSONObject = {}
+		for (let i = 0; i < userIds.length; i++) {
+			const empty: Array<string> = []
+			deviceKeys[userIds[i]] = empty
+		}
+		const body: UTSJSONObject = {}
+		body['device_keys'] = deviceKeys
+		return await this.request('POST', '/_matrix/client/v3/keys/query', body)
+	}
+
+	async sendToDevice(eventType: string, content: UTSJSONObject): Promise<void> {
+		await this.request(
+			'PUT',
+			`/_matrix/client/v3/sendToDevice/${encodeURIComponent(eventType)}/${Date.now().toString()}`,
+			content
+		)
+	}
+
+	// ============================================================
+	// 已读 / 未读便捷方法
+	// ============================================================
+
+	/**
+	 * 发送公共已读回执（m.read），告诉房间所有人"我读到了"
+	 * 用于列表页（联系人/消息列表）显示"已读"
+	 */
+	async sendPublicReadReceipt(roomId: string, eventId: string): Promise<void> {
+		await this.request(
+			'POST',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/receipt/m.read/${encodeURIComponent(eventId)}`,
+			null
+		)
+	}
+
+	/**
+	 * 发送私有已读回执（m.read.private），仅服务器看，不广播
+	 * 用于跨设备同步未读数（"在另一个设备读了"）
+	 */
+	async sendPrivateReadReceipt(roomId: string, eventId: string): Promise<void> {
+		await this.request(
+			'POST',
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/receipt/m.read.private/${encodeURIComponent(eventId)}`,
+			null
+		)
+	}
+
+	// ============================================================
+	// 房间扩展信息（标签、是否收藏、是否低优先级）
+	// ============================================================
+
+	/**
+	 * 一键打标签：m.favourite（收藏）/ m.lowpriority（低优）
+	 * 内部其实就是 addRoomTag 的封装
+	 */
+	async favouriteRoom(roomId: string, favourite: boolean): Promise<void> {
+		if (favourite) {
+			await this.addRoomTag(roomId, 'm.favourite', 0.0)
+		} else {
+			await this.removeRoomTag(roomId, 'm.favourite')
+		}
+	}
+
+	async setRoomLowPriority(roomId: string, low: boolean): Promise<void> {
+		if (low) {
+			await this.addRoomTag(roomId, 'm.lowpriority', 0.9)
+		} else {
+			await this.removeRoomTag(roomId, 'm.lowpriority')
+		}
+	}
+
+	genTxnId(): string {
+		this.txnCounter += 1
+		return `tx_${Date.now()}_${this.txnCounter}`
+	}
+}
+
+// ============================================================
+// 全局单例
+// ============================================================
+let _instance: MatrixClient | null = null
+
+export function getMatrix(): MatrixClient | null {
+	return _instance
+}
+
+export function setMatrix(client: MatrixClient): void {
+	_instance = client
+}
+
+export function clearMatrix(): void {
+	const client = _instance
+	if (client != null) {
+		client.stopSync()
+	}
+	_instance = null
+}
+
+/**
+ * 把 Matrix 消息 body 里的 HTML 实体反转义回原始字符
+ * 处理：
+ *   &lt; &gt; &quot; &#39; &amp;
+ *   &amp;#40; → &#40; （这一层故意保留，用于 fallback）
+ *   但因为客户端收到的 body 里 escape 的其实就是原文，我们解一层就够
+ */
+export function unescapeMatrixBody(body: string): string {
+	if (body == null || body.length == 0) return body
+	const froms: Array<string> = ['&lt;', '&gt;', '&quot;', '&apos;', '&#39;', '&nbsp;']
+	const tos: Array<string> = ['<', '>', '"', "'", "'", ' ']
+	let out = body
+	for (let i = 0; i < froms.length; i++) {
+		out = out.split(froms[i]).join(tos[i])
+	}
+	out = out.split('&amp;').join('&')
+	return out
+}

@@ -1,0 +1,40 @@
+/**
+ * 全局应用状态管理
+ * 用 uni-app 的 getApp() globalData 模式
+ */
+import { MatrixClient, setMatrix, clearMatrix } from './matrix.uts'
+import { saveSession, loadSession, clearSession, SessionInfo } from './storage.uts'
+import { bindCallToMatrix, getCallManager } from './call.uts'
+
+export function bootstrapMatrix(): MatrixClient | null {
+	const session = loadSession()
+	if (session == null) return null
+	const client = new MatrixClient()
+	client.applySession(session.homeserver, session.access_token, session.user_id, session.device_id)
+	setMatrix(client)
+	bindCallToMatrix()
+	return client
+}
+
+export function startMatrixSession(session: SessionInfo): MatrixClient {
+	const client = new MatrixClient()
+	client.applySession(session.homeserver, session.access_token, session.user_id, session.device_id)
+	setMatrix(client)
+	saveSession(session)
+	bindCallToMatrix()
+	return client
+}
+
+export function endMatrixSession(): void {
+	try { getCallManager().hangup(false) } catch (e) {}
+	try { getCallManager().unbind() } catch (e) {}
+	clearSession()
+	clearMatrix()
+}
+
+export function openChat(roomId: string, highlight: string = ''): void {
+	uni.setStorageSync('pending_chat_room', roomId)
+	uni.setStorageSync('last_chat_room', roomId)
+	uni.setStorageSync('pending_chat_highlight', highlight)
+	uni.navigateTo({ url: '/pages/chat/chat' })
+}

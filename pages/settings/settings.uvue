@@ -1,0 +1,968 @@
+<template>
+	<view class="settings-page">
+		<!-- 顶部导航 -->
+		<view class="topbar">
+			<text class="topbar-back" @click="goBack">←</text>
+			<text class="topbar-title">设置</text>
+			<view class="topbar-right"></view>
+		</view>
+
+		<scroll-view class="settings-scroll" scroll-y>
+			<!-- 推送通知 -->
+			<view class="section">
+				<view class="section-title">推送通知</view>
+				<view class="setting-row">
+					<text class="setting-label">接收推送</text>
+					<switch class="setting-switch" :checked="pushEnabled" @change="onTogglePush" color="#1f6feb" />
+				</view>
+				<view class="setting-row">
+					<text class="setting-label">推送状态</text>
+					<text class="setting-value" :class="pushStatusClass">{{ pushStatusText }}</text>
+				</view>
+			</view>
+
+			<!-- 设备管理 -->
+			<view class="section">
+				<view class="section-title">登录设备</view>
+				<view v-if="loadingDevices" class="loading-row">
+					<text class="loading-text">加载中…</text>
+				</view>
+				<view v-else>
+					<view
+						v-for="device in devices"
+						:key="device.device_id"
+						class="device-row"
+						@click="onDeviceTap(device)"
+					>
+						<view class="device-icon">
+							<text class="device-icon-text">{{ deviceIcon(device) }}</text>
+						</view>
+						<view class="device-info">
+							<text class="device-name">{{ deviceName(device) }}</text>
+							<text class="device-id">{{ device.device_id }}</text>
+							<text v-if="deviceHasLastSeen(device)" class="device-time">最近活跃: {{ deviceLastSeenText(device) }}</text>
+						</view>
+						<view v-if="device.device_id === currentDeviceId" class="current-badge">
+							<text class="current-text">当前</text>
+						</view>
+						<text v-else class="device-arrow">›</text>
+					</view>
+				</view>
+				<view class="setting-row danger-row" @click="onKickAllOther">
+					<text class="setting-label danger-text">登出其他所有设备</text>
+				</view>
+			</view>
+
+			<!-- 账号安全 -->
+			<view class="section">
+				<view class="section-title">账号安全</view>
+				<view class="setting-row" @click="onChangePassword">
+					<text class="setting-label">修改密码</text>
+					<text class="setting-arrow">›</text>
+				</view>
+				<view class="setting-row" @click="onDeactivate">
+					<text class="setting-label danger-text">注销账号</text>
+					<text class="setting-arrow">›</text>
+				</view>
+			</view>
+
+			<!-- 关于 -->
+			<view class="section">
+				<view class="section-title">关于</view>
+				<view class="setting-row">
+					<text class="setting-label">Matrix 版本</text>
+					<text class="setting-value">Client-Server API v3</text>
+				</view>
+				<view class="setting-row">
+					<text class="setting-label">App 版本</text>
+					<text class="setting-value">1.0.0</text>
+				</view>
+			</view>
+
+			<!-- 退出登录 -->
+			<view class="section">
+				<button class="btn-logout" @click="onLogout">
+					<text class="btn-logout-text">退出登录</text>
+				</button>
+			</view>
+		</scroll-view>
+
+		<!-- 改密码弹窗 -->
+		<view v-if="showPasswordModal" class="modal-overlay" @click="closePasswordModal">
+			<view class="modal-card" @click="stopBubble">
+				<view class="modal-title">修改密码</view>
+				<input
+					class="modal-input"
+					v-model="passwordForm.oldPassword"
+					type="password"
+					placeholder="当前密码"
+					placeholder-class="modal-placeholder"
+				/>
+				<input
+					class="modal-input"
+					v-model="passwordForm.newPassword"
+					type="password"
+					placeholder="新密码（至少8位）"
+					placeholder-class="modal-placeholder"
+				/>
+				<input
+					class="modal-input"
+					v-model="passwordForm.confirmPassword"
+					type="password"
+					placeholder="确认新密码"
+					placeholder-class="modal-placeholder"
+				/>
+				<view class="modal-actions">
+					<button class="modal-btn-cancel" @click="closePasswordModal">
+						<text class="modal-btn-cancel-text">取消</text>
+					</button>
+					<button class="modal-btn-confirm" @click="onSubmitPassword">
+						<text class="modal-btn-confirm-text">确认</text>
+					</button>
+				</view>
+			</view>
+		</view>
+
+		<!-- 设备详情弹窗 -->
+		<view v-if="showDeviceModal && selectedDevice" class="modal-overlay" @click="closeDeviceModal">
+			<view class="modal-card" @click="stopBubble">
+				<view class="modal-title">{{ deviceName(selectedDevice) }}</view>
+				<view class="device-detail-row">
+					<text class="device-detail-key">设备ID</text>
+					<text class="device-detail-val">{{ selectedId() }}</text>
+				</view>
+				<view v-if="selectedHasIp()" class="device-detail-row">
+					<text class="device-detail-key">最后IP</text>
+					<text class="device-detail-val">{{ selectedIp() }}</text>
+				</view>
+				<view v-if="selectedHasLastSeen()" class="device-detail-row">
+					<text class="device-detail-key">最后活跃</text>
+					<text class="device-detail-val">{{ selectedLastSeenText() }}</text>
+				</view>
+				<view class="modal-actions" style="margin-top: 32rpx;">
+					<button class="modal-btn-cancel" @click="closeDeviceModal">
+						<text class="modal-btn-cancel-text">关闭</text>
+					</button>
+					<button v-if="selectedIsOther()" class="modal-btn-danger" @click="onKickDevice(selectedId())">
+						<text class="modal-btn-danger-text">踢下线</text>
+					</button>
+				</view>
+			</view>
+		</view>
+
+		<!-- 注销二次确认弹窗 -->
+		<view v-if="showDeactivateModal" class="modal-overlay" @click="closeDeactivateModal">
+			<view class="modal-card" @click="stopBubble">
+				<view class="modal-title danger-text">注销账号</view>
+				<text class="modal-desc">注销后你的所有数据将被永久删除，包括聊天记录和联系人。此操作不可恢复！</text>
+				<input
+					class="modal-input"
+					v-model="deactivateForm.password"
+					type="password"
+					placeholder="请输入当前密码确认"
+					placeholder-class="modal-placeholder"
+				/>
+				<view class="modal-actions">
+					<button class="modal-btn-cancel" @click="closeDeactivateModal">
+						<text class="modal-btn-cancel-text">取消</text>
+					</button>
+					<button class="modal-btn-danger" @click="onSubmitDeactivate">
+						<text class="modal-btn-danger-text">确认注销</text>
+					</button>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, computed, onMounted, onUnmounted } from 'vue'
+	import { getMatrix, errText, errCode, DeviceInfo } from '@/common/matrix.uts'
+	import { loadSession, SessionInfo } from '@/common/storage.uts'
+	import { endMatrixSession } from '@/common/app.uts'
+
+	type SettingsDevice = {
+		device_id: string
+		display_name: string
+		last_seen_ip: string
+		last_seen_ts: number
+	}
+	type PasswordForm = {
+		oldPassword: string
+		newPassword: string
+		confirmPassword: string
+	}
+	type DeactivateForm = {
+		password: string
+	}
+
+	const session = ref<SessionInfo | null>(loadSession())
+	const currentDeviceId = computed(() => {
+		const s = session.value
+		if (s == null) return ''
+		return s.device_id
+	})
+
+	// 推送状态
+	const pushEnabled = ref<boolean>(true)
+	const pushStatusText = ref<string>('未注册')
+	const pushStatusClass = ref<string>('')
+	const loadingDevices = ref<boolean>(false)
+	const devices = ref<Array<SettingsDevice>>([])
+
+	type PushSwitchDetail = {
+		value: boolean
+	}
+	type PushSwitchEvent = {
+		detail: PushSwitchDetail
+	}
+
+	// 改密码
+	const showPasswordModal = ref<boolean>(false)
+	const passwordForm = ref<PasswordForm>({ oldPassword: '', newPassword: '', confirmPassword: '' })
+
+	// 设备详情
+	const showDeviceModal = ref<boolean>(false)
+	const selectedDevice = ref<SettingsDevice | null>(null)
+
+	// 注销
+	const showDeactivateModal = ref<boolean>(false)
+	const deactivateForm = ref<DeactivateForm>({ password: '' })
+
+	function goBack() {
+		uni.navigateBack()
+	}
+	function stopBubble(): void {}
+	function closePasswordModal(): void {
+		showPasswordModal.value = false
+	}
+	function closeDeviceModal(): void {
+		showDeviceModal.value = false
+	}
+	function closeDeactivateModal(): void {
+		showDeactivateModal.value = false
+	}
+
+	function deviceName(device: SettingsDevice | null): string {
+		if (device == null) return '未知设备'
+		if (device.display_name.length > 0) return device.display_name
+		return '未知设备'
+	}
+
+	function deviceIcon(device: SettingsDevice): string {
+		const name = device.display_name.toLowerCase()
+		const iphone = name.indexOf('iphone') >= 0
+		const ios = name.indexOf('ios') >= 0
+		if (iphone || ios) return '📱'
+		if (name.indexOf('ipad') >= 0) return '📲'
+		if (name.indexOf('android') >= 0) return '🤖'
+		const web = name.indexOf('web') >= 0
+		const browser = name.indexOf('browser') >= 0
+		if (web || browser) return '🌐'
+		if (name.indexOf('windows') >= 0) return '🪟'
+		if (name.indexOf('mac') >= 0) return '🍎'
+		if (name.indexOf('linux') >= 0) return '🐧'
+		return '💻'
+	}
+
+	function formatTime(ts: number): string {
+		if (ts == 0) return '未知'
+		const d = new Date(ts)
+		const now = new Date()
+		const diff = now.getTime() - d.getTime()
+		if (diff < 60000) return '刚刚'
+		if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前'
+		if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前'
+		const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+		const targetDay = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+		if (targetDay.getTime() == today.getTime()) {
+			const hh = d.getHours()
+			const mm = d.getMinutes()
+			const hs = (hh < 10) ? ('0' + hh) : ('' + hh)
+			const ms = (mm < 10) ? ('0' + mm) : ('' + mm)
+			return hs + ':' + ms
+		}
+		const yesterday = new Date(today.getTime() - 86400000)
+		if (targetDay.getTime() == yesterday.getTime()) return '昨天'
+		return (d.getMonth() + 1) + '/' + d.getDate()
+	}
+
+	function deviceHasLastSeen(device: SettingsDevice): boolean {
+		return device.last_seen_ts > 0
+	}
+	function deviceLastSeenText(device: SettingsDevice): string {
+		if (device.last_seen_ts == 0) return ''
+		return formatTime(device.last_seen_ts * 1000)
+	}
+	function selectedId(): string {
+		const d = selectedDevice.value
+		if (d == null) return ''
+		return d.device_id
+	}
+	function selectedHasIp(): boolean {
+		const d = selectedDevice.value
+		if (d == null) return false
+		return d.last_seen_ip.length > 0
+	}
+	function selectedIp(): string {
+		const d = selectedDevice.value
+		if (d == null) return ''
+		return d.last_seen_ip
+	}
+	function selectedHasLastSeen(): boolean {
+		const d = selectedDevice.value
+		if (d == null) return false
+		return d.last_seen_ts > 0
+	}
+	function selectedLastSeenText(): string {
+		const d = selectedDevice.value
+		if (d == null) return ''
+		if (d.last_seen_ts == 0) return ''
+		return formatTime(d.last_seen_ts * 1000)
+	}
+	function selectedIsOther(): boolean {
+		const d = selectedDevice.value
+		if (d == null) return false
+		return d.device_id != currentDeviceId.value
+	}
+	function toSettingsDevice(d: DeviceInfo): SettingsDevice {
+		const dn = d.display_name
+		const ip = d.last_seen_ip
+		const ts = d.last_seen_ts
+		const item: SettingsDevice = {
+			device_id: d.device_id,
+			display_name: (dn != null) ? dn : '',
+			last_seen_ip: (ip != null) ? ip : '',
+			last_seen_ts: (ts != null) ? ts : 0
+		}
+		return item
+	}
+
+	async function loadDevices() {
+		loadingDevices.value = true
+		try {
+			const matrix = getMatrix()
+			if (matrix != null) {
+				const list = await matrix.getDevices()
+				const out: Array<SettingsDevice> = []
+				let i = 0
+				while (i < list.length) {
+					const d = list[i]
+					if (d != null) out.push(toSettingsDevice(d))
+					i++
+				}
+				devices.value = out
+			}
+		} catch (e) {
+			console.warn('加载设备失败', e)
+		}
+		loadingDevices.value = false
+	}
+
+	async function checkPushStatus() {
+		try {
+			const matrix = getMatrix()
+			if (matrix == null) return
+			const pushers = await matrix.getPushers()
+			const pusherList = pushers['pushers'] as Array<UTSJSONObject> | null
+			if (pusherList != null && pusherList.length > 0) {
+				pushStatusText.value = '已注册'
+				pushStatusClass.value = 'status-online'
+				pushEnabled.value = true
+			} else {
+				pushStatusText.value = '未注册推送'
+				pushStatusClass.value = 'status-offline'
+				pushEnabled.value = false
+			}
+		} catch (e) {
+			pushStatusText.value = '检查失败'
+			pushStatusClass.value = 'status-offline'
+		}
+	}
+
+	async function setupSettings(): Promise<void> {
+		await loadDevices()
+		await checkPushStatus()
+	}
+
+	onMounted(() => {
+		setupSettings()
+	})
+
+	async function onTogglePush(e: PushSwitchEvent) {
+		const enabled = e.detail.value
+		const matrix = getMatrix()
+		if (matrix == null) return
+
+		if (enabled) {
+			uni.showLoading({ title: '注册推送…' })
+			try {
+				// 实际场景：这里应该取 APNs/FCM/UniPush 返回的 pushkey
+				// 演示用假 pushkey，生产环境请替换为真实设备 token
+				await matrix.setPusher({
+					kind: 'http',
+					app_id: 'im.clone.app',
+					pushkey: 'demo_pushkey_' + matrix.deviceId,
+					app_display_name: 'Clone Chat',
+					device_display_name: (session.value != null) ? session.value.device_id : 'Unknown Device',
+					data: {
+						url: 'https://push-helper.example.com/notify',
+						format: 'event_id_only'
+					}
+				})
+				pushStatusText.value = '已注册'
+				pushStatusClass.value = 'status-online'
+				uni.showToast({ title: '推送已开启', icon: 'success' })
+			} catch (err: any) {
+				pushEnabled.value = false
+				uni.showToast({ title: '注册失败: ' + errText(err, ''), icon: 'none' })
+			} finally {
+				uni.hideLoading()
+			}
+		} else {
+			uni.showLoading({ title: '关闭推送…' })
+			try {
+				const matrix = getMatrix()
+				if (matrix != null) {
+					await matrix.removePusher('demo_pushkey_' + matrix.deviceId, 'im.clone.app')
+				}
+				pushStatusText.value = '未注册'
+				pushStatusClass.value = 'status-offline'
+				uni.showToast({ title: '推送已关闭', icon: 'success' })
+			} catch (err: any) {
+				uni.showToast({ title: '关闭失败: ' + errText(err, ''), icon: 'none' })
+			} finally {
+				uni.hideLoading()
+			}
+		}
+	}
+
+	function onDeviceTap(device: SettingsDevice) {
+		selectedDevice.value = device
+		showDeviceModal.value = true
+	}
+
+	async function kickDeviceNow(deviceId: string, password: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			if (password.length > 0) {
+				const auth: UTSJSONObject = {
+					password: password,
+					type: 'm.login.password'
+				}
+				await matrix.deleteDevice(deviceId, auth)
+			} else {
+				await matrix.deleteDevice(deviceId, {} as UTSJSONObject)
+			}
+			uni.showToast({ title: '已踢下线', icon: 'success' })
+			showDeviceModal.value = false
+			await loadDevices()
+		} catch (e2) {
+			uni.showToast({ title: '验证失败: ' + errText(e2, ''), icon: 'none' })
+		}
+	}
+
+	async function tryKickDevice(deviceId: string): Promise<void> {
+		uni.showLoading({ title: '请稍候…' })
+		try {
+			const matrix = getMatrix()
+			if (matrix == null) {
+				uni.hideLoading()
+				return
+			}
+			await matrix.deleteDevice(deviceId, {} as UTSJSONObject)
+			uni.hideLoading()
+			uni.showToast({ title: '已踢下线', icon: 'success' })
+			showDeviceModal.value = false
+			await loadDevices()
+		} catch (err) {
+			uni.hideLoading()
+			const em = errText(err, '')
+			const ec = errCode(err)
+			const needPwd = (ec == 'M_FORBIDDEN') || (em.indexOf('password') >= 0)
+			if (needPwd) {
+				uni.showModal({
+					title: '需要验证',
+					content: '请输入当前密码以确认操作',
+					editable: true,
+					placeholderText: '当前密码',
+					success: (mr) => {
+						if (!mr.confirm) return
+						const pwd = mr.content
+						if (pwd == null || pwd.length == 0) return
+						kickDeviceNow(deviceId, pwd)
+					}
+				})
+			} else {
+				uni.showToast({ title: '操作失败: ' + errText(err, ''), icon: 'none' })
+			}
+		}
+	}
+
+	function onKickDevice(deviceId: string) {
+		uni.showModal({
+			title: '确认操作',
+			content: '确定要让该设备登出吗？',
+			success: (r) => {
+				if (!r.confirm) return
+				tryKickDevice(deviceId)
+			}
+		})
+	}
+
+	async function kickAllWithPassword(password: string): Promise<void> {
+		uni.showLoading({ title: '请稍候…' })
+		try {
+			const matrix = getMatrix()
+			if (matrix == null) {
+				uni.hideLoading()
+				return
+			}
+			const auth: UTSJSONObject = {
+				password: password,
+				type: 'm.login.password'
+			}
+			await matrix.deleteAllDevices(auth)
+			uni.hideLoading()
+			uni.showToast({ title: '已登出其他设备', icon: 'success' })
+			await loadDevices()
+		} catch (err) {
+			uni.hideLoading()
+			uni.showToast({ title: '操作失败: ' + errText(err, ''), icon: 'none' })
+		}
+	}
+
+	function onKickAllOther() {
+		uni.showModal({
+			title: '确认操作',
+			content: '将登出除当前设备外的所有设备，确定继续？',
+			success: (r) => {
+				if (!r.confirm) return
+				uni.showModal({
+					title: '身份验证',
+					content: '请输入当前密码',
+					editable: true,
+					placeholderText: '当前密码',
+					success: (mr) => {
+						if (!mr.confirm) return
+						const pwd = mr.content
+						if (pwd == null || pwd.length == 0) return
+						kickAllWithPassword(pwd)
+					}
+				})
+			}
+		})
+	}
+
+	function onChangePassword() {
+		passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+		showPasswordModal.value = true
+	}
+
+	async function onSubmitPassword() {
+		const form = passwordForm.value
+		const oldPassword = form.oldPassword
+		const newPassword = form.newPassword
+		const confirmPassword = form.confirmPassword
+		if (oldPassword.length == 0 || newPassword.length == 0 || confirmPassword.length == 0) {
+			uni.showToast({ title: '请填写所有字段', icon: 'none' })
+			return
+		}
+		if (newPassword.length < 8) {
+			uni.showToast({ title: '新密码至少8位', icon: 'none' })
+			return
+		}
+		if (newPassword != confirmPassword) {
+			uni.showToast({ title: '两次密码不一致', icon: 'none' })
+			return
+		}
+		uni.showLoading({ title: '请稍候…' })
+		try {
+			const matrix = getMatrix()
+			if (matrix == null) {
+				uni.hideLoading()
+				return
+			}
+			const auth: UTSJSONObject = {
+				password: oldPassword,
+				type: 'm.login.password'
+			}
+			await matrix.changePassword(newPassword, auth)
+			uni.hideLoading()
+			showPasswordModal.value = false
+			uni.showToast({ title: '密码修改成功，请重新登录', icon: 'success' })
+			setTimeout(() => {
+				endMatrixSession()
+				uni.reLaunch({ url: '/pages/login/login' })
+			}, 1500)
+		} catch (err) {
+			uni.hideLoading()
+			uni.showToast({ title: '修改失败: ' + errText(err, ''), icon: 'none' })
+		}
+	}
+
+	function onDeactivate() {
+		deactivateForm.value = { password: '' }
+		showDeactivateModal.value = true
+	}
+
+	async function runDeactivate(): Promise<void> {
+		uni.showLoading({ title: '注销中…' })
+		try {
+			const matrix = getMatrix()
+			if (matrix == null) {
+				uni.hideLoading()
+				return
+			}
+			const auth: UTSJSONObject = {
+				password: deactivateForm.value.password,
+				type: 'm.login.password'
+			}
+			await matrix.deactivateAccount(auth, '')
+			uni.hideLoading()
+			showDeactivateModal.value = false
+			uni.showModal({
+				title: '账号已注销',
+				content: '你的账号已被永久删除。',
+				showCancel: false,
+				success: (done) => {
+					endMatrixSession()
+					uni.reLaunch({ url: '/pages/login/login' })
+				}
+			})
+		} catch (err) {
+			uni.hideLoading()
+			uni.showToast({ title: '注销失败: ' + errText(err, ''), icon: 'none' })
+		}
+	}
+
+	function onSubmitDeactivate() {
+		const pwd = deactivateForm.value.password
+		if (pwd.length == 0) {
+			uni.showToast({ title: '请输入密码确认', icon: 'none' })
+			return
+		}
+		uni.showModal({
+			title: '最后确认',
+			content: '确定要永久注销账号吗？此操作不可逆！',
+			success: (r) => {
+				if (!r.confirm) return
+				runDeactivate()
+			}
+		})
+	}
+
+	async function doLogout(): Promise<void> {
+		const matrix = getMatrix()
+		try {
+			if (matrix != null) await matrix.logout()
+		} catch (e) {
+			console.warn('logout 失败', e)
+		}
+		endMatrixSession()
+		uni.reLaunch({ url: '/pages/login/login' })
+	}
+
+	function onLogout() {
+		uni.showModal({
+			title: '退出登录',
+			content: '确定要退出当前账户吗？',
+			success: (r) => {
+				if (!r.confirm) return
+				doLogout()
+			}
+		})
+	}
+</script>
+
+<style>
+	.settings-page {
+		flex: 1;
+		background-color: #f7f7fa;
+	}
+
+	.topbar {
+		background-color: #fff;
+		padding-top: 88rpx;
+		padding-left: 24rpx;
+		padding-right: 24rpx;
+		height: 176rpx;
+		flex-direction: row;
+		align-items: center;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #e8e8ec;
+	}
+
+	.topbar-back {
+		font-size: 40rpx;
+		color: #1f6feb;
+		padding: 10rpx 16rpx 10rpx 0;
+	}
+
+	.topbar-title {
+		flex: 1;
+		font-size: 34rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+	}
+
+	.topbar-right {
+		width: 60rpx;
+	}
+
+	.settings-scroll {
+		flex: 1;
+		height: 0;
+	}
+
+	.section {
+		background-color: #fff;
+		margin-top: 20rpx;
+	}
+
+	.section-title {
+		font-size: 24rpx;
+		color: #999;
+		padding: 20rpx 32rpx 12rpx;
+	}
+
+	.setting-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 24rpx 32rpx;
+		border-top-width: 1rpx;
+		border-top-color: #f0f0f5;
+	}
+
+	.setting-label {
+		flex: 1;
+		font-size: 30rpx;
+		color: #333;
+	}
+
+	.setting-value {
+		font-size: 26rpx;
+		color: #999;
+	}
+
+	.setting-arrow {
+		font-size: 36rpx;
+		color: #ccc;
+		margin-left: 16rpx;
+	}
+
+	.setting-switch {
+		transform: scale(0.8);
+	}
+
+	.danger-text {
+		color: #ff3b30;
+	}
+
+	.danger-row {
+		border-top-width: 1rpx;
+		border-top-color: #f0f0f5;
+	}
+
+	/* 设备列表 */
+	.device-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 24rpx 32rpx;
+		border-top-width: 1rpx;
+		border-top-color: #f0f0f5;
+	}
+
+	.device-icon {
+		width: 80rpx;
+		height: 80rpx;
+		border-radius: 20rpx;
+		background-color: #f0f0f5;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.device-icon-text {
+		font-size: 40rpx;
+	}
+
+	.device-info {
+		flex: 1;
+		margin-left: 24rpx;
+		flex-direction: column;
+	}
+
+	.device-name {
+		font-size: 30rpx;
+		color: #333;
+		font-weight: 500;
+	}
+
+	.device-id {
+		font-size: 22rpx;
+		color: #bbb;
+		margin-top: 6rpx;
+	}
+
+	.device-time {
+		font-size: 22rpx;
+		color: #bbb;
+		margin-top: 4rpx;
+	}
+
+	.device-arrow {
+		font-size: 40rpx;
+		color: #ccc;
+	}
+
+	.current-badge {
+		background-color: #e8f0ff;
+		border-radius: 8rpx;
+		padding: 6rpx 16rpx;
+	}
+
+	.current-text {
+		font-size: 22rpx;
+		color: #1f6feb;
+	}
+
+	/* 加载 */
+	.loading-row {
+		padding: 40rpx;
+		align-items: center;
+	}
+
+	.loading-text {
+		font-size: 26rpx;
+		color: #999;
+	}
+
+	/* 状态 */
+	.status-online {
+		color: #34c759;
+	}
+
+	.status-offline {
+		color: #ff3b30;
+	}
+
+	/* 弹窗 */
+	.modal-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background-color: rgba(0, 0, 0, 0.5);
+		align-items: center;
+		justify-content: center;
+		z-index: 999;
+	}
+
+	.modal-card {
+		width: 600rpx;
+		background-color: #fff;
+		border-radius: 24rpx;
+		padding: 40rpx;
+	}
+
+	.modal-title {
+		font-size: 34rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+		margin-bottom: 32rpx;
+		text-align: center;
+	}
+
+	.modal-desc {
+		font-size: 26rpx;
+		color: #666;
+		line-height: 1.6;
+		margin-bottom: 24rpx;
+	}
+
+	.modal-input {
+		background-color: #f7f7fa;
+		border-radius: 12rpx;
+		padding: 20rpx 24rpx;
+		font-size: 28rpx;
+		margin-bottom: 16rpx;
+	}
+
+	.modal-placeholder {
+		color: #bbb;
+	}
+
+	.modal-actions {
+		flex-direction: row;
+		justify-content: space-between;
+	}
+
+	.modal-btn-cancel, .modal-btn-confirm, .modal-btn-danger {
+		flex: 1;
+		border-radius: 12rpx;
+		padding: 20rpx;
+		align-items: center;
+	}
+
+	.modal-btn-cancel {
+		background-color: #f0f0f5;
+		margin-right: 16rpx;
+	}
+
+	.modal-btn-cancel-text {
+		font-size: 28rpx;
+		color: #666;
+	}
+
+	.modal-btn-confirm {
+		background-color: #1f6feb;
+	}
+
+	.modal-btn-confirm-text {
+		font-size: 28rpx;
+		color: #fff;
+	}
+
+	.modal-btn-danger {
+		background-color: #ff3b30;
+		margin-left: 16rpx;
+	}
+
+	.modal-btn-danger-text {
+		font-size: 28rpx;
+		color: #fff;
+	}
+
+	.device-detail-row {
+		flex-direction: row;
+		margin-bottom: 16rpx;
+	}
+
+	.device-detail-key {
+		font-size: 26rpx;
+		color: #999;
+		width: 140rpx;
+	}
+
+	.device-detail-val {
+		flex: 1;
+		font-size: 26rpx;
+		color: #333;
+	}
+
+	/* 退出登录 */
+	.btn-logout {
+		border-radius: 12rpx;
+		padding: 24rpx;
+		margin: 32rpx 24rpx;
+		background-color: #fff;
+		border: 1rpx solid #e8e8ec;
+	}
+
+	.btn-logout-text {
+		font-size: 30rpx;
+		color: #ff3b30;
+	}
+</style>

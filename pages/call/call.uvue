@@ -1,0 +1,324 @@
+<template>
+	<view class="call-page">
+		<!-- #ifdef H5 -->
+		<view class="call-stage"></view>
+		<view class="call-mask">
+			<text class="call-name">{{ ui.peerName }}</text>
+			<text class="call-sub">{{ ui.sub }}</text>
+			<view class="call-actions">
+				<view v-if="ui.phase == 'ringing' && ui.isIncoming" class="call-btn call-btn-accept" @click="onAccept">
+					<text class="call-btn-text">接听</text>
+				</view>
+				<view v-if="ui.phase == 'ringing' && ui.isIncoming" class="call-btn call-btn-hang" @click="onReject">
+					<text class="call-btn-text">拒绝</text>
+				</view>
+				<view v-if="showInCall()" class="call-btn call-btn-mute" @click="onMute">
+					<text class="call-btn-text">{{ ui.muted ? '取消静音' : '静音' }}</text>
+				</view>
+				<view v-if="showCamBtn()" class="call-btn call-btn-cam" @click="onCam">
+					<text class="call-btn-text">{{ ui.cameraOff ? '开摄像头' : '关摄像头' }}</text>
+				</view>
+				<view v-if="showInCall()" class="call-btn call-btn-hang" @click="onHang">
+					<text class="call-btn-text">挂断</text>
+				</view>
+			</view>
+		</view>
+		<!-- #endif -->
+		<!-- #ifndef H5 -->
+		<view class="call-bar">
+			<text class="call-name">{{ ui.peerName }}</text>
+			<text class="call-sub">{{ ui.sub }}</text>
+			<view class="call-actions">
+				<view v-if="ui.phase == 'ringing' && ui.isIncoming" class="call-btn call-btn-accept" @click="onAccept">
+					<text class="call-btn-text">接听</text>
+				</view>
+				<view v-if="ui.phase == 'ringing' && ui.isIncoming" class="call-btn call-btn-hang" @click="onReject">
+					<text class="call-btn-text">拒绝</text>
+				</view>
+				<view v-if="showHangBtn()" class="call-btn call-btn-hang" @click="onHang">
+					<text class="call-btn-text">挂断</text>
+				</view>
+			</view>
+		</view>
+		<!-- #endif -->
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, onMounted, onUnmounted, nextTick, getCurrentInstance } from 'vue'
+	import { getCallManager, CallSnapshot } from '@/common/call.uts'
+
+	const ui = ref<CallSnapshot>({
+		phase: 'idle', roomId: '', callId: '', peerName: '', isVideo: false,
+		isIncoming: false, sub: '', muted: false, cameraOff: false
+	})
+	let off: (() => void) | null = null
+	let closing: boolean = false
+	let webCtx: WebViewContext | null = null
+
+	function showInCall(): boolean {
+		const p = ui.value.phase
+		if (p == 'outgoing') return true
+		if (p == 'connected') return true
+		return false
+	}
+	function showCamBtn(): boolean {
+		if (ui.value.isVideo == false) return false
+		return showInCall()
+	}
+	function showHangBtn(): boolean {
+		const p = ui.value.phase
+		if (p == 'idle') return false
+		if (p == 'ringing' && ui.value.isIncoming) return false
+		return true
+	}
+
+	function stopOff(handler: (() => void) | null): void {
+		if (handler == null) return
+		try { handler() } catch (e) {}
+	}
+
+	function bindWeb(): boolean {
+		const mgr = getCallManager()
+		try {
+			const el = uni.getElementById('callWeb')
+			if (el != null) {
+				const wv = el as UniWebViewElement
+				mgr.htmlEval = (js: string): void => {
+					wv.evalJS(js)
+				}
+				mgr.htmlReady = true
+				return true
+			}
+		} catch (e0) {}
+		try {
+			const inst = getCurrentInstance()
+			let ctx: WebViewContext | null = null
+			if (inst != null && inst.proxy != null) {
+				ctx = uni.createWebViewContext('callWeb', inst.proxy)
+			}
+			if (ctx == null) {
+				ctx = uni.createWebViewContext('callWeb')
+			}
+			if (ctx != null) {
+				webCtx = ctx
+				const bound = ctx
+				mgr.htmlEval = (js: string): void => {
+					bound.evalJS(js)
+				}
+				mgr.htmlReady = true
+				return true
+			}
+		} catch (e) {}
+		return false
+	}
+
+	function onWebLoad(_e: UniWebViewLoadEvent): void {
+		const mgr = getCallManager()
+		mgr.htmlLoaded = true
+		bindWeb()
+		if (mgr.phase == 'outgoing') {
+			mgr.placeOutgoing()
+		} else {
+			mgr.pushUi()
+		}
+	}
+
+	function onWebError(e: UniWebViewErrorEvent): void {
+		console.warn('[call] web-view error', e.detail.errMsg)
+		uni.showToast({ title: '通话页加载失败', icon: 'none' })
+	}
+
+	function onWebMsg(e: UniWebViewMessageEvent): void {
+		bindWeb()
+		const mgr = getCallManager()
+		const data = e.detail.data
+		if (data == null) return
+		let item: any | null = data
+		try {
+			const arr = data as Array<any>
+			if (arr != null && arr.length > 0) {
+				item = arr[arr.length - 1]
+			}
+		} catch (err) {}
+		if (item == null) return
+		let kind = ''
+		let payload = ''
+		const cand: UTSJSONObject = {}
+		try {
+			const o = JSON.parse(JSON.stringify(item)) as UTSJSONObject
+			const t = o.getString('type')
+			kind = (t != null) ? t : ''
+			if (kind == 'offer' || kind == 'answer') {
+				const s = o.getString('sdp')
+				payload = (s != null) ? s : ''
+			} else if (kind == 'error') {
+				const s = o.getString('message')
+				payload = (s != null) ? s : ''
+			} else if (kind == 'ice') {
+				const s = o.getString('candidate')
+				payload = (s != null) ? s : ''
+				const mid = o.getString('sdpMid')
+				cand['sdpMid'] = (mid != null) ? mid : ''
+				cand['sdpMLineIndex'] = o.getNumber('sdpMLineIndex')
+			} else if (kind == 'ui') {
+				const s = o.getString('action')
+				payload = (s != null) ? s : ''
+			}
+		} catch (e2) {}
+		if (kind.length > 0) {
+			mgr.onHtmlMessage(kind, payload, cand)
+		}
+	}
+
+	async function setupCall(): Promise<void> {
+		const mgr = getCallManager()
+		mgr.bindMatrix()
+		ui.value = mgr.getSnapshot()
+		off = mgr.onChange((s: CallSnapshot) => {
+			ui.value = s
+		})
+		if (mgr.phase == 'idle') {
+			closing = true
+			uni.navigateBack()
+			return
+		}
+		await nextTick()
+		bindWeb()
+		mgr.attachDom()
+		// #ifdef H5
+		if (mgr.phase == 'outgoing') {
+			await mgr.placeOutgoing()
+		}
+		// #endif
+	}
+
+	function onAccept() {
+		getCallManager().accept()
+	}
+	function onReject() {
+		getCallManager().reject()
+	}
+	function onHang() {
+		getCallManager().hangup(true)
+	}
+	function onMute() {
+		getCallManager().toggleMute()
+	}
+	function onCam() {
+		getCallManager().toggleCamera()
+	}
+
+	onMounted(() => {
+		setupCall()
+	})
+
+	onBackPress(() => {
+		const mgr = getCallManager()
+		if (mgr.leaving) return false
+		mgr.hangup(true)
+		return true
+	})
+
+	onUnmounted(() => {
+		stopOff(off)
+		off = null
+		const mgr = getCallManager()
+		mgr.htmlEval = null
+		mgr.htmlReady = false
+		mgr.htmlLoaded = false
+		webCtx = null
+	})
+</script>
+
+<style>
+	.call-page {
+		flex: 1;
+		background-color: #111111;
+		flex-direction: column;
+	}
+	.call-engine {
+		position: absolute;
+		left: 0;
+		top: 0;
+		width: 8px;
+		height: 8px;
+		opacity: 0;
+	}
+	.call-web {
+		width: 8px;
+		height: 8px;
+	}
+	.call-web-audio {
+		width: 8px;
+		height: 8px;
+	}
+	.call-web-video {
+		width: 8px;
+		height: 8px;
+	}
+	.call-bar {
+		width: 750rpx;
+		flex: 1;
+		padding-top: 80rpx;
+		padding-bottom: 80rpx;
+		padding-left: 24rpx;
+		padding-right: 24rpx;
+		align-items: center;
+		justify-content: center;
+		background-color: #111111;
+	}
+	.call-stage {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+	}
+	.call-mask {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		padding: 48rpx 40rpx 80rpx;
+		align-items: center;
+		z-index: 3;
+		background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.55) 100%);
+	}
+	.call-name {
+		font-size: 44rpx;
+		color: #ffffff;
+		font-weight: 700;
+		margin-bottom: 12rpx;
+	}
+	.call-sub {
+		font-size: 28rpx;
+		color: rgba(255,255,255,0.75);
+		margin-bottom: 48rpx;
+	}
+	.call-actions {
+		flex-direction: row;
+		justify-content: center;
+		flex-wrap: wrap;
+	}
+	.call-btn {
+		padding: 20rpx 36rpx;
+		border-radius: 48rpx;
+		margin: 0 12rpx 16rpx;
+		min-width: 140rpx;
+		align-items: center;
+	}
+	.call-btn-accept { background-color: #07c160; }
+	.call-btn-hang {
+		background-color: #fa5151;
+		min-width: 240rpx;
+		padding: 28rpx 48rpx;
+	}
+	.call-btn-mute { background-color: #4a4a4a; }
+	.call-btn-cam { background-color: #4a4a4a; }
+	.call-btn-text {
+		color: #ffffff;
+		font-size: 28rpx;
+		font-weight: 600;
+	}
+</style>

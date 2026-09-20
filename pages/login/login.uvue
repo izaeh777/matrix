@@ -1,0 +1,242 @@
+<template>
+	<view class="page">
+		<view class="hero">
+			<view class="hero-fade"></view>
+			<view class="header">
+				<text class="brand">i-tiklink</text>
+				<view class="lang" @click="onLang">
+					<text class="lang-icon">◎</text>
+					<text class="lang-text">简体中文</text>
+					<text class="lang-caret">▾</text>
+				</view>
+			</view>
+
+			<view class="mascot-wrap">
+				<image class="mascot" src="/static/login/tiki.png" mode="aspectFit" />
+			</view>
+
+			<text class="title">链接世界</text>
+			<text class="title">从 i-tiklink 开始</text>
+			<text class="subtitle">一个面向全球社区的</text>
+			<text class="subtitle subtitle-2">高效协作平台</text>
+
+			<view class="btn-primary" @click="goLogin">
+				<text class="btn-primary-text">登录</text>
+			</view>
+		</view>
+
+		<view class="btn-outline" @click="onRegister">
+			<text class="btn-outline-text">注册账号</text>
+		</view>
+
+		<view class="other-row">
+			<view class="other-line"></view>
+			<text class="other-text">其他方式登录</text>
+			<view class="other-line"></view>
+		</view>
+
+		<view class="methods">
+			<view class="method" @click="onOther('tp')">
+				<image class="method-icon" src="/static/login/apple.png" mode="aspectFit" />
+			</view>
+			<view class="method" @click="onOther('wave')">
+				<image class="method-icon" src="/static/login/fb.png" mode="aspectFit" />
+			</view>
+			<view class="method" @click="goLogin">
+				<image class="method-icon" src="/static/login/ball-big.png" mode="aspectFit" />
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	function goLogin() {
+		uni.navigateTo({ url: '/pages/login/login-email' })
+	}
+
+	function onRegister() {
+		uni.showToast({ title: '请联系管理员开通账号', icon: 'none' })
+	}
+
+	function onLang() {
+		uni.showToast({ title: '当前仅支持简体中文', icon: 'none' })
+	}
+
+	function onOther(name: string) {
+		uni.showToast({ title: '该登录方式暂未开放', icon: 'none' })
+	}
+</script>
+
+<style>
+	.page {
+		flex: 1;
+		background-color: #ffffff;
+		padding: 0 0 48rpx;
+		align-items: center;
+	}
+
+	.hero {
+		width: 100%;
+		align-items: center;
+		padding: 88rpx 0 12rpx;
+		background: linear-gradient(90deg, #d7ebff 0%, #eef5fb 42%, #fbf6ef 68%, #f8e6d0 100%);
+		position: relative;
+		overflow: hidden;
+	}
+	.hero-fade {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		height: 560rpx;
+		background: linear-gradient(180deg, #ffffff00 0%, #ffffff66 38%, #ffffffd9 72%, #ffffff 100%);
+		z-index: 0;
+	}
+
+	.header {
+		width: 100%;
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		padding: 0 64rpx;
+		margin-bottom: 0;
+		position: relative;
+		z-index: 1;
+	}
+	.brand {
+		font-size: 44rpx;
+		font-weight: 800;
+		color: #1e7dff;
+		letter-spacing: -1rpx;
+	}
+	.lang {
+		flex-direction: row;
+		align-items: center;
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #d7e4f5;
+		background-color: #ffffff;
+		border-radius: 999rpx;
+		padding: 10rpx 20rpx;
+	}
+	.lang-icon {
+		font-size: 22rpx;
+		color: #4b6b8a;
+		margin-right: 8rpx;
+	}
+	.lang-text {
+		font-size: 24rpx;
+		color: #334155;
+	}
+	.lang-caret {
+		font-size: 22rpx;
+		color: #94a3b8;
+		margin-left: 6rpx;
+	}
+
+	.mascot-wrap {
+		width: 100%;
+		height: 500rpx;
+		margin-top: 8rpx;
+		margin-bottom: 12rpx;
+		align-items: center;
+		justify-content: center;
+		position: relative;
+		z-index: 1;
+	}
+	.mascot {
+		width: 500rpx;
+		height: 500rpx;
+		background-color: transparent;
+	}
+
+	.title {
+		font-size: 48rpx;
+		font-weight: 800;
+		color: #1e6fff;
+		line-height: 68rpx;
+		z-index: 2;
+	}
+	.subtitle {
+		margin-top: 18rpx;
+		font-size: 26rpx;
+		color: #0557D1;
+		text-align: center;
+		line-height: 40rpx;
+		font-weight: 500;
+		position: relative;
+		z-index: 2;
+	}
+	.subtitle-2 {
+		margin-top: 4rpx;
+		margin-bottom: 20rpx;
+	}
+
+	.btn-primary {
+		width: 622rpx;
+		height: 96rpx;
+		background-color: #1e6fff;
+		border-radius: 20rpx;
+		justify-content: center;
+		align-items: center;
+		position: relative;
+		z-index: 2;
+	}
+	.btn-primary-text {
+		color: #ffffff;
+		font-size: 32rpx;
+		font-weight: 600;
+	}
+	.btn-outline {
+		width: 622rpx;
+		height: 96rpx;
+		margin-top: 22rpx;
+		border-width: 3rpx;
+		border-style: solid;
+		border-color: #1e6fff;
+		background-color: #ffffff;
+		border-radius: 20rpx;
+		justify-content: center;
+		align-items: center;
+	}
+	.btn-outline-text {
+		color: #1e6fff;
+		font-size: 32rpx;
+		font-weight: 600;
+	}
+
+	.other-row {
+		width: 622rpx;
+		flex-direction: row;
+		align-items: center;
+		margin-top: 56rpx;
+		margin-bottom: 28rpx;
+	}
+	.other-line {
+		flex: 1;
+		height: 1rpx;
+		background-color: #dbe7f3;
+	}
+	.other-text {
+		font-size: 24rpx;
+		color: #94a3b8;
+		margin: 0 20rpx;
+	}
+
+	.methods {
+		width: 622rpx;
+		flex-direction: row;
+		justify-content: space-around;
+		padding: 8rpx 40rpx 0;
+	}
+	.method {
+		width: 88rpx;
+		height: 88rpx;
+		justify-content: center;
+		align-items: center;
+	}
+	.method-icon {
+		width: 72rpx;
+		height: 72rpx;
+	}
+</style>

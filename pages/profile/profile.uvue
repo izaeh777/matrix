@@ -1,0 +1,420 @@
+<template>
+	<view class="profile-page">
+		<view class="top-row">
+			<view class="lang-pill" @click="onSoon">
+				<text class="lang-globe">🌐</text>
+				<text class="lang-text">简体中文</text>
+				<text class="lang-caret">▾</text>
+			</view>
+			<view class="top-right">
+				<text class="top-icon" @click="onSoon">🔔</text>
+				<text class="top-icon" @click="onSettings">⚙</text>
+			</view>
+		</view>
+
+		<view class="user-row" @click="onSettings">
+			<image class="user-avatar" :src="avatarUrl" mode="aspectFill"></image>
+			<view class="user-meta">
+				<text class="user-name">{{ displayName }}</text>
+				<view class="user-sub">
+					<text class="user-id">ID: {{ accountName }}</text>
+					<view class="vip-badge">
+						<text class="vip-text">VIP1会员</text>
+					</view>
+				</view>
+			</view>
+			<text class="user-arrow">›</text>
+		</view>
+
+		<view class="member-card">
+			<view class="vip-bar">
+				<text class="vip-bar-text">有效期：2026-09-11 至 2026-10-11</text>
+				<view class="renew-btn" @click="onSoon">
+					<text class="renew-text">续费</text>
+				</view>
+			</view>
+			<view class="stat-row">
+				<view class="stat-cell" @click="onSearchMessages">
+					<view class="stat-head">
+						<text class="stat-title">收藏夹</text>
+						<text class="stat-mini">›</text>
+					</view>
+					<text class="stat-empty">暂无记录</text>
+				</view>
+				<view class="stat-split"></view>
+				<view class="stat-cell" @click="onSearchMessages">
+					<view class="stat-head">
+						<text class="stat-title">浏览历史</text>
+						<text class="stat-mini">›</text>
+					</view>
+					<text class="stat-empty">暂无记录</text>
+				</view>
+			</view>
+			<view class="quick-row">
+				<view class="quick-item" @click="onSoon">
+					<text class="quick-ico">▦</text>
+					<text class="quick-label">项目分析</text>
+				</view>
+				<view class="quick-item" @click="goRooms">
+					<text class="quick-ico">💬</text>
+					<text class="quick-label">沟通交流</text>
+				</view>
+				<view class="quick-item" @click="onSoon">
+					<text class="quick-ico">◎</text>
+					<text class="quick-label">项目分成</text>
+				</view>
+				<view class="quick-item" @click="onSoon">
+					<text class="quick-ico">♡</text>
+					<text class="quick-label">专属服务</text>
+				</view>
+			</view>
+		</view>
+
+		<view class="func-card">
+			<text class="func-title">功能中心</text>
+			<view class="func-cell" @click="onDiscover">
+				<text class="func-ico">☁</text>
+				<text class="func-label">我的发布</text>
+				<text class="func-arrow">›</text>
+			</view>
+			<view class="func-line"></view>
+			<view class="func-cell" @click="goContacts">
+				<text class="func-ico">♡</text>
+				<text class="func-label">我的关注</text>
+				<text class="func-arrow">›</text>
+			</view>
+			<view class="func-line"></view>
+			<view class="func-cell" @click="onInvite">
+				<text class="func-ico">☺</text>
+				<text class="func-label">邀请好友</text>
+				<text class="func-arrow">›</text>
+			</view>
+		</view>
+
+		<view class="wx-tabbar">
+			<view class="wx-tab" @click="goRooms">
+				<text class="wx-tab-icon">💬</text>
+				<text class="wx-tab-label">微信</text>
+			</view>
+			<view class="wx-tab" @click="goContacts">
+				<text class="wx-tab-icon">👤</text>
+				<text class="wx-tab-label">通讯录</text>
+			</view>
+			<view class="wx-tab" @click="onDiscover">
+				<text class="wx-tab-icon">◈</text>
+				<text class="wx-tab-label">发现</text>
+			</view>
+			<view class="wx-tab wx-tab-on">
+				<text class="wx-tab-icon">◎</text>
+				<text class="wx-tab-label">我</text>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, computed, onMounted, onUnmounted } from 'vue'
+	import { getMatrix } from '@/common/matrix.uts'
+	import { loadSession, saveSession, SessionInfo } from '@/common/storage.uts'
+
+	const session = ref<SessionInfo | null>(loadSession())
+	const displayName = computed(() => {
+		const s = session.value
+		if (s == null) return ''
+		if (s.display_name != null && s.display_name.length > 0) return s.display_name
+		return s.user_id
+	})
+	const userId = computed(() => {
+		const s = session.value
+		if (s == null) return ''
+		return s.user_id
+	})
+	const accountName = computed(() => {
+		const s = session.value
+		if (s == null) return ''
+		const id = s.user_id
+		if (id.length == 0) return ''
+		return id.split(':')[0].replace('@', '')
+	})
+	const avatarUrl = ref<string>('/static/login/tiki.png')
+	let offSync: (() => void) | null = null
+
+	function stopOff(handler: (() => void) | null): void {
+		if (handler == null) return
+		try { handler() } catch (e) {}
+	}
+
+	async function setupProfile(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) {
+			uni.reLaunch({ url: '/pages/login/login' })
+			return
+		}
+		try {
+			const p = await matrix.getProfile(userId.value)
+			const s = session.value
+			if (s != null) {
+				s.display_name = p.display_name
+				s.avatar_url = p.avatar_url
+				saveSession(s)
+				session.value = s
+			}
+			if (p.avatar_url != null && p.avatar_url.length > 0) {
+				let url = matrix.mxcToHttp(p.avatar_url, 256, 256)
+				const token = matrix.accessToken
+				if (token.length > 0 && url.indexOf('access_token=') < 0) {
+					url = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'access_token=' + encodeURIComponent(token)
+				}
+				if (url.length > 0) avatarUrl.value = url
+			}
+		} catch (e) {
+			console.warn('拉取 profile 失败', e)
+		}
+		offSync = matrix.onSync((_state: string, error: string) => {
+			if (error.length > 0) console.warn('sync error', error)
+		})
+	}
+
+	onMounted(() => {
+		setupProfile()
+	})
+
+	onUnmounted(() => {
+		stopOff(offSync)
+		offSync = null
+	})
+
+	function onSoon() {
+		uni.showToast({ title: '即将开放', icon: 'none' })
+	}
+
+	function goRooms() {
+		uni.redirectTo({ url: '/pages/rooms/rooms' })
+	}
+	function goContacts() {
+		uni.redirectTo({ url: '/pages/contacts/contacts' })
+	}
+	function onSearchMessages() {
+		uni.navigateTo({ url: '/pages/search/search' })
+	}
+	function onDiscover() {
+		uni.redirectTo({ url: '/pages/discover/discover' })
+	}
+	function onSettings() {
+		uni.navigateTo({ url: '/pages/settings/settings' })
+	}
+	function onInvite() {
+		const id = userId.value as string
+		if (id.length == 0) {
+			uni.showToast({ title: '暂无账号', icon: 'none' })
+			return
+		}
+		uni.setClipboardData({
+			data: id,
+			success: () => {
+				uni.showToast({ title: '已复制你的账号', icon: 'none' })
+			}
+		})
+	}
+</script>
+
+<style>
+	.profile-page {
+		flex: 1;
+		background-color: #f3f6fb;
+		flex-direction: column;
+	}
+	.top-row {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 12rpx 28rpx 8rpx;
+		padding-top: 60rpx;
+	}
+	.lang-pill {
+		flex-direction: row;
+		align-items: center;
+		background-color: #ffffff;
+		border-radius: 40rpx;
+		padding: 10rpx 22rpx;
+	}
+	.lang-globe { font-size: 28rpx; margin-right: 8rpx; }
+	.lang-text { font-size: 26rpx; color: #1a1a1a; }
+	.lang-caret { font-size: 22rpx; color: #888; margin-left: 6rpx; }
+	.top-right {
+		flex-direction: row;
+		align-items: center;
+	}
+	.top-icon {
+		font-size: 40rpx;
+		color: #333;
+		margin-left: 28rpx;
+	}
+	.user-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 20rpx 32rpx 28rpx;
+	}
+	.user-avatar {
+		width: 112rpx;
+		height: 112rpx;
+		border-radius: 56rpx;
+		background-color: #dbe7f8;
+		margin-right: 22rpx;
+	}
+	.user-meta { flex: 1; }
+	.user-name {
+		font-size: 36rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+		margin-bottom: 10rpx;
+	}
+	.user-sub {
+		flex-direction: row;
+		align-items: center;
+	}
+	.user-id {
+		font-size: 24rpx;
+		color: #8a8a8a;
+		margin-right: 12rpx;
+	}
+	.vip-badge {
+		background-color: #3b82f6;
+		border-radius: 8rpx;
+		padding: 4rpx 10rpx;
+	}
+	.vip-text {
+		font-size: 20rpx;
+		color: #ffffff;
+		font-weight: 600;
+	}
+	.user-arrow {
+		font-size: 48rpx;
+		color: #c5c5c5;
+		padding-left: 12rpx;
+	}
+	.member-card {
+		background-color: #ffffff;
+		margin: 0 24rpx 24rpx;
+		border-radius: 24rpx;
+		overflow: hidden;
+	}
+	.vip-bar {
+		flex-direction: row;
+		align-items: center;
+		background-color: #d7ebff;
+		padding: 16rpx 22rpx;
+	}
+	.vip-bar-text {
+		flex: 1;
+		font-size: 22rpx;
+		color: #3b6ea8;
+	}
+	.renew-btn {
+		background-color: #3b82f6;
+		border-radius: 24rpx;
+		padding: 6rpx 18rpx;
+	}
+	.renew-text {
+		font-size: 22rpx;
+		color: #ffffff;
+	}
+	.stat-row {
+		flex-direction: row;
+		padding: 28rpx 8rpx 20rpx;
+	}
+	.stat-cell {
+		flex: 1;
+		padding: 0 24rpx;
+	}
+	.stat-head {
+		flex-direction: row;
+		align-items: center;
+		margin-bottom: 8rpx;
+	}
+	.stat-title {
+		flex: 1;
+		font-size: 30rpx;
+		color: #1a1a1a;
+		font-weight: 600;
+	}
+	.stat-mini { font-size: 32rpx; color: #c5c5c5; }
+	.stat-empty {
+		font-size: 22rpx;
+		color: #b0b0b0;
+	}
+	.stat-split {
+		width: 1rpx;
+		background-color: #ececec;
+	}
+	.quick-row {
+		flex-direction: row;
+		padding: 8rpx 8rpx 28rpx;
+	}
+	.quick-item {
+		flex: 1;
+		align-items: center;
+	}
+	.quick-ico {
+		font-size: 32rpx;
+		color: #4b5563;
+		margin-bottom: 8rpx;
+	}
+	.quick-label {
+		font-size: 22rpx;
+		color: #4b5563;
+	}
+	.func-card {
+		background-color: #ffffff;
+		margin: 0 24rpx 24rpx;
+		border-radius: 24rpx;
+		padding: 28rpx 8rpx 12rpx;
+	}
+	.func-title {
+		font-size: 32rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+		padding: 0 24rpx 16rpx;
+	}
+	.func-cell {
+		flex-direction: row;
+		align-items: center;
+		padding: 28rpx 24rpx;
+	}
+	.func-ico {
+		font-size: 34rpx;
+		color: #374151;
+		width: 48rpx;
+		margin-right: 16rpx;
+	}
+	.func-label {
+		flex: 1;
+		font-size: 30rpx;
+		color: #1a1a1a;
+	}
+	.func-arrow {
+		font-size: 36rpx;
+		color: #c5c5c5;
+	}
+	.func-line {
+		height: 1rpx;
+		background-color: #f0f0f0;
+		margin-left: 88rpx;
+	}
+	.wx-tabbar {
+		flex-direction: row;
+		background-color: #ffffff;
+		border-top-width: 1rpx;
+		border-top-color: #eaeaea;
+		padding-bottom: 24rpx;
+		margin-top: auto;
+	}
+	.wx-tab {
+		flex: 1;
+		align-items: center;
+		padding: 10rpx 0 12rpx;
+	}
+	.wx-tab-icon { font-size: 40rpx; margin-bottom: 4rpx; }
+	.wx-tab-label { font-size: 20rpx; color: #181818; }
+	.wx-tab-on .wx-tab-label { color: #3b82f6; }
+</style>

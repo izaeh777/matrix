@@ -1,0 +1,1176 @@
+<template>
+	<view class="rooms-page">
+		<view class="wx-nav">
+			<text class="wx-nav-title">微信</text>
+			<view class="wx-nav-right">
+				<text class="wx-nav-btn" @click="onSearch">⌕</text>
+				<text class="wx-nav-btn" @click="onJoin">+</text>
+			</view>
+		</view>
+
+		<view class="wx-search" @click="onSearch">
+			<text class="wx-search-text">搜索</text>
+		</view>
+
+		<!-- 新邀请横幅 -->
+		<view v-if="invites.length > 0" class="invite-banner">
+			<view class="invite-banner-head">
+				<text class="invite-banner-title">📨 你有 {{ invites.length }} 条新邀请</text>
+			</view>
+			<view v-for="inv in invites" :key="inv.room_id" class="invite-row">
+				<view class="invite-row-body">
+					<text class="invite-room-name">{{ inviteTitle(inv) }}</text>
+					<text class="invite-room-id">{{ inv.room_id }}</text>
+					<text v-if="inviteHasFrom(inv)" class="invite-from">来自：{{ inv.inviter }}</text>
+				</view>
+				<view class="invite-row-actions">
+					<view class="invite-btn reject" @click="onRejectInvite(inv.room_id)">
+						<text class="invite-btn-text">拒绝</text>
+					</view>
+					<view class="invite-btn accept" @click="onAcceptInvite(inv.room_id)">
+						<text class="invite-btn-text">接受</text>
+					</view>
+				</view>
+			</view>
+		</view>
+
+		<!-- 房间列表 -->
+		<scroll-view class="rooms-scroll" scroll-y>
+			<view v-if="loading && rooms.length == 0" class="loading">
+				<text>加载中…</text>
+			</view>
+
+			<view v-if="!loading && rooms.length == 0" class="empty">
+				<text class="empty-icon">💬</text>
+				<text class="empty-title">还没有任何对话</text>
+				<text class="empty-hint">点击右上角 + 加入或创建房间</text>
+			</view>
+
+			<view
+				v-for="room in rooms"
+				:key="room.room_id"
+				class="room-item"
+				:class="{ 'room-active': roomHasUnread(room) }"
+				@click="onOpenRoom(room.room_id)"
+				@longpress="onLongPressRoom(room)"
+			>
+				<view class="avatar-wrap">
+					<image
+						class="room-avatar"
+						:src="roomAvatarSrc(room)"
+						fallback="/static/logo.png"
+					></image>
+					<view v-if="roomHasUnread(room)" class="avatar-badge">
+						<text class="avatar-badge-text">{{ roomUnreadText(room) }}</text>
+					</view>
+				</view>
+				<view class="room-body">
+					<view class="room-line1">
+						<text class="room-name" :class="{ 'room-name-bold': roomHasUnread(room) }">{{ roomTitle(room) }}</text>
+						<text class="room-time" :class="{ 'room-time-active': roomHasUnread(room) }">{{ roomTimeText(room) }}</text>
+					</view>
+					<view class="room-line2">
+						<text class="room-preview" :class="{ 'room-preview-active': roomHasUnread(room) }">{{ roomPreviewText(room) }}</text>
+						<view v-if="roomHasUnread(room)" class="mention-dot"></view>
+					</view>
+				</view>
+			</view>
+
+			<view v-if="rooms.length > 0" class="bottom-tip">
+				<text class="bottom-tip-text">共 {{ rooms.length }} 个会话</text>
+			</view>
+		</scroll-view>
+
+		<view class="wx-tabbar">
+			<view class="wx-tab wx-tab-on">
+				<text class="wx-tab-icon">💬</text>
+				<text class="wx-tab-label">微信</text>
+			</view>
+			<view class="wx-tab" @click="onContacts">
+				<text class="wx-tab-icon">👤</text>
+				<text class="wx-tab-label">通讯录</text>
+			</view>
+			<view class="wx-tab" @click="onDiscover">
+				<text class="wx-tab-icon">◈</text>
+				<text class="wx-tab-label">发现</text>
+			</view>
+			<view class="wx-tab" @click="onProfile">
+				<text class="wx-tab-icon">◎</text>
+				<text class="wx-tab-label">我</text>
+			</view>
+		</view>
+
+		<!-- 房间操作菜单（长按弹出） -->
+		<view v-if="roomAction.show" class="action-sheet" @click="roomAction.show = false">
+			<view class="action-panel" @click.stop="">
+				<view class="action-handle"></view>
+				<view class="action-header">
+					<text class="action-title">{{ actionRoomName }}</text>
+					<text class="action-subtitle">{{ actionRoomSub }}</text>
+				</view>
+				<view class="action-list">
+					<view class="action-item" @click="doRoomAction('invite')">
+						<text class="action-icon">＋</text>
+						<text class="action-label">邀请成员</text>
+					</view>
+					<view class="action-item" @click="doRoomAction('rename')">
+						<text class="action-icon">✎</text>
+						<text class="action-label">修改名称</text>
+					</view>
+					<view class="action-item" @click="doRoomAction('topic')">
+						<text class="action-icon">🏷</text>
+						<text class="action-label">修改主题</text>
+					</view>
+					<view class="action-item" @click="doRoomAction('tag')">
+						<text class="action-icon">⭐</text>
+						<text class="action-label">置顶 / 添加标签</text>
+					</view>
+					<view class="action-item danger" @click="doRoomAction('leave')">
+						<text class="action-icon">⎋</text>
+						<text class="action-label">退出房间</text>
+					</view>
+				</view>
+				<view class="action-cancel" @click="roomAction.show = false">
+					<text>取消</text>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, onMounted, onUnmounted, computed } from 'vue'
+	import { getMatrix, MatrixRoom, MatrixEvent, errText, InvitedRoomInfo, CreateRoomOpts } from '@/common/matrix.uts'
+	import { loadSession, SessionInfo } from '@/common/storage.uts'
+	import { openChat } from '@/common/app.uts'
+
+	const rooms = ref<Array<MatrixRoom>>([])
+	const invites = ref<Array<InvitedRoomInfo>>([])
+	const loading = ref<boolean>(false)
+	const syncState = ref<string>('INITIAL')
+	const syncError = ref<string>('')
+	const session = ref<SessionInfo | null>(null)
+	type RoomActionState = {
+		show: boolean
+		room: MatrixRoom | null
+	}
+	const roomAction = ref<RoomActionState>({ show: false, room: null })
+
+	function formatTime(ts: number = 0): string {
+		if (ts == 0) return ''
+		const d = new Date(ts)
+		const now = new Date()
+		const sameDay = d.toDateString() == now.toDateString()
+		const pad = (n: number): string => {
+			if (n < 10) return '0' + n
+			return '' + n
+		}
+		if (sameDay) return pad(d.getHours()) + ':' + pad(d.getMinutes())
+		const diff = (now.getTime() - d.getTime()) / 1000
+		if (diff < 7 * 86400) {
+			const days = ['日', '一', '二', '三', '四', '五', '六']
+			return '周' + days[d.getDay()]
+		}
+		return (d.getMonth() + 1) + '/' + d.getDate()
+	}
+
+	function inviteTitle(inv: InvitedRoomInfo): string {
+		if (inv.name.length > 0) return inv.name
+		return inv.room_id
+	}
+	function inviteHasFrom(inv: InvitedRoomInfo): boolean {
+		return inv.inviter.length > 0
+	}
+	function roomHasUnread(room: MatrixRoom): boolean {
+		const c = room.unread_count
+		if (c == null) return false
+		return c > 0
+	}
+	function roomUnreadText(room: MatrixRoom): string {
+		const c = room.unread_count
+		if (c == null) return ''
+		if (c > 99) return '99+'
+		return '' + c
+	}
+	function roomAvatarSrc(room: MatrixRoom): string {
+		const a = room.avatar_url
+		if (a != null && a.length > 0) return a
+		return '/static/logo.png'
+	}
+	function roomTitle(room: MatrixRoom): string {
+		const n = room.name
+		if (n != null && n.length > 0) return n
+		return room.room_id
+	}
+	function roomPreviewText(room: MatrixRoom): string {
+		const p = room.last_message_preview
+		if (p != null && p.length > 0) return p
+		const t = room.topic
+		if (t != null && t.length > 0) return t
+		return '暂无消息'
+	}
+	function roomTimeText(room: MatrixRoom): string {
+		const ts = room.last_message_ts
+		if (ts == null) return ''
+		return formatTime(ts)
+	}
+
+	const actionRoomName = computed((): string => {
+		const r = roomAction.value.room
+		if (r == null) return ''
+		const n = r.name
+		if (n != null && n.length > 0) return n
+		return r.room_id
+	})
+	const actionRoomSub = computed((): string => {
+		const r = roomAction.value.room
+		if (r == null) return ''
+		const id = r.other_user_id
+		if (id != null) return id
+		return ''
+	})
+	const displayName = computed(() => {
+		const s = session.value
+		if (s == null) return ''
+		if (s.display_name != null && s.display_name.length > 0) return s.display_name
+		return s.user_id
+	})
+	const userId = computed(() => {
+		const s = session.value
+		if (s == null) return ''
+		return s.user_id
+	})
+	const avatarUrl = computed(() => {
+		const m = getMatrix()
+		const s = session.value
+		if (s == null || s.avatar_url == null || s.avatar_url.length == 0) return '/static/logo.png'
+		if (m == null) return '/static/logo.png'
+		return m.mxcToHttp(s.avatar_url, 96, 96)
+	})
+	const syncClass = computed(() => {
+		const s = syncState.value
+		if (s == 'PREPARED' || s == 'SYNCING') return 'sync-ok'
+		if (s == 'ERROR') return 'sync-error'
+		return 'sync-init'
+	})
+	const syncText = computed(() => {
+		const s = syncState.value
+		if (s == 'PREPARED') return '已同步'
+		if (s == 'SYNCING') return '同步中'
+		if (s == 'ERROR') return '同步异常'
+		return '未同步'
+	})
+
+	let timer: number | null = null
+	let offSync: (() => void) | null = null
+	let offInvite: (() => void) | null = null
+	let offTimeline: (() => void) | null = null
+	let offUnread: (() => void) | null = null
+
+	function stopOff(handler: (() => void) | null): void {
+		if (handler == null) return
+		try { handler() } catch (e) {}
+	}
+
+	onUnmounted(() => {
+		const t = timer
+		timer = null
+		if (t != null) clearInterval(t)
+		stopOff(offSync)
+		stopOff(offInvite)
+		stopOff(offTimeline)
+		stopOff(offUnread)
+		offSync = null
+		offInvite = null
+		offTimeline = null
+		offUnread = null
+	})
+
+	async function loadRooms(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			if (rooms.value.length == 0) loading.value = true
+			rooms.value = await matrix.listRooms()
+			loading.value = false
+		} catch (e: any) {
+			loading.value = false
+			console.error('loadRooms error', e)
+			if (errText(e, '').indexOf('M_UNKNOWN_TOKEN') >= 0) {
+				uni.reLaunch({ url: '/pages/login/login' })
+			}
+		}
+	}
+
+	// 拉取自己处于 invited 状态的房间（不是 join）
+	async function loadInvites() {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const list = matrix.listInvitedRooms()
+			invites.value = list
+		} catch (e) {
+			console.warn('loadInvites error', e)
+		}
+	}
+
+	async function refreshOneRoom(roomId: string, event: MatrixEvent) {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const idx = rooms.value.findIndex(r => r.room_id == roomId)
+			if (idx < 0) {
+				const summary = await matrix.getRoomSummary(roomId)
+				const idx2 = rooms.value.findIndex(r => r.room_id == roomId)
+				if (idx2 < 0) {
+					rooms.value.unshift(summary)
+					rooms.value = rooms.value.slice()
+				}
+				return
+			}
+			const c = event.content != null ? event.content : ({} as UTSJSONObject)
+			const mt = (c['msgtype'] as string) ?? ''
+			const body: string = (c['body'] as string) ?? (mt == 'm.image' ? '[图片]' : '[消息]')
+			const ts: number = event.origin_server_ts != null ? event.origin_server_ts : Date.now()
+			const sender: string = event.sender != null ? event.sender : ''
+			const cur = rooms.value[idx]
+			// 仅当新消息时间更新时才覆盖预览并重新排序
+			const lastTs = cur.last_message_ts != null ? cur.last_message_ts : 0
+			if (lastTs < ts) {
+				cur.last_message_preview = body
+				cur.last_message_ts = ts
+				cur.last_message_sender = sender
+				// 把该房间移到列表顶部（unshift 之前先 splice）
+				rooms.value.splice(idx, 1)
+				rooms.value.unshift(cur)
+			}
+			rooms.value = rooms.value.slice() // 触发响应式
+		} catch (e) {
+			// 静默
+		}
+	}
+
+	async function setupRooms(): Promise<void> {
+		session.value = loadSession()
+		const matrix = getMatrix()
+		if (matrix == null) {
+			uni.reLaunch({ url: '/pages/login/login' })
+			return
+		}
+		if (offSync != null || offTimeline != null) {
+			console.warn('rooms: 回调已挂载，跳过重复注册')
+			return
+		}
+		offSync = matrix.onSync((state: string, error: string) => {
+			syncState.value = state
+			if (error.length > 0) syncError.value = error
+		})
+		offInvite = matrix.onInvite((_roomId: string) => {
+			uni.showToast({ title: '你收到一条新邀请', icon: 'none' })
+			loadInvites()
+		})
+		offTimeline = matrix.onTimeline((event: MatrixEvent, rid: string) => {
+			if (event.type != 'm.room.message') return
+			refreshOneRoom(rid, event)
+		})
+		const unreadHandler = (rid: string, count: number) => {
+			const idx = rooms.value.findIndex((r: MatrixRoom) => r.room_id == rid)
+			if (idx >= 0) {
+				rooms.value[idx].unread_count = count
+				rooms.value = rooms.value.slice()
+			}
+		}
+		matrix.unreadHandlers.push(unreadHandler)
+		offUnread = () => {
+			const i = matrix.unreadHandlers.indexOf(unreadHandler)
+			if (i >= 0) matrix.unreadHandlers.splice(i, 1)
+		}
+		matrix.startSync()
+		await loadInvites()
+		await loadRooms()
+		timer = setInterval(() => {
+			if (syncState.value == 'PREPARED') {
+				loadInvites()
+				loadRooms()
+			}
+		}, 60000) as number | null
+	}
+
+
+	onMounted(() => {
+		setupRooms()
+	})
+
+	async function onAcceptInvite(roomId: string) {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		uni.showLoading({ title: '正在加入…' })
+		try {
+			await matrix.joinRoom(roomId)
+			uni.hideLoading()
+			uni.showToast({ title: '已加入房间', icon: 'success' })
+			await loadInvites()
+			await loadRooms()
+		} catch (e: any) {
+			uni.hideLoading()
+			uni.showToast({ title: '加入失败: ' + errText(e, ''), icon: 'none' })
+		}
+	}
+
+	async function rejectInvite(roomId: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			await matrix.leaveRoom(roomId)
+			await loadInvites()
+		} catch (e) {
+			uni.showToast({ title: '操作失败', icon: 'none' })
+		}
+	}
+
+	function onRejectInvite(roomId: string) {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		uni.showModal({
+			title: '拒绝邀请？',
+			content: '拒绝后将看不到这个房间的聊天内容',
+			success: (res) => {
+				if (res.confirm) {
+					rejectInvite(roomId)
+				}
+			}
+		})
+	}
+
+	function onOpenRoom(roomId: string) {
+		openChat(roomId)
+	}
+
+	function onContacts() {
+		uni.redirectTo({ url: '/pages/contacts/contacts' })
+	}
+
+	async function createRoomNow(name: string, inviteUsers: Array<string>): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		uni.showLoading({ title: '创建中…' })
+		try {
+			const opts: CreateRoomOpts = {
+				name: name,
+				topic: '由 MatrixApp 创建',
+				preset: 'private_chat',
+				invite: inviteUsers,
+				is_direct: false
+			}
+			const roomId = await matrix.createRoom(opts)
+			uni.hideLoading()
+			uni.showToast({ title: '创建成功', icon: 'success' })
+			setTimeout(() => {
+				openChat(roomId)
+			}, 500)
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: errText(e, '创建失败'), icon: 'none' })
+		}
+	}
+
+	function askInviteThenCreate(name: string) {
+		uni.showModal({
+			title: '邀请成员（选填）',
+			editable: true,
+			placeholderText: '输入用户ID，如 @zhang:matrix.itiklink.com（留空则不邀请）',
+			success: (r) => {
+				const inviteUsers: Array<string> = []
+				const raw = r.content
+				const input = (raw != null) ? raw.trim() : ''
+				if (input.length > 0) {
+					inviteUsers.push(input.startsWith('@') ? input : '@' + input)
+				}
+				createRoomNow(name, inviteUsers)
+			}
+		})
+	}
+
+	function createNewRoom() {
+		uni.showModal({
+			title: '创建新房间',
+			editable: true,
+			placeholderText: '房间名称（如：测试群）',
+			success: (res) => {
+				if (!res.confirm) return
+				let name = ''
+				if (res.content != null) {
+					name = res.content.trim()
+				}
+				if (name.length == 0) {
+					name = '新房间'
+				}
+				askInviteThenCreate(name)
+			}
+		})
+	}
+
+	async function joinRoomByInput(input: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		uni.showLoading({ title: '加入中…' })
+		try {
+			const hash = input.startsWith('#')
+			const bang = input.startsWith('!')
+			const target = (hash || bang) ? input : '#' + input
+			const joined = await matrix.joinRoom(target)
+			uni.hideLoading()
+			uni.showToast({ title: '加入成功', icon: 'success' })
+			setTimeout(() => {
+				openChat(joined.room_id)
+			}, 500)
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: errText(e, '加入失败'), icon: 'none' })
+		}
+	}
+
+	function joinExistingRoom() {
+		uni.showModal({
+			title: '加入房间',
+			editable: true,
+			placeholderText: '输入房间号 #room:server 或房间别名',
+			success: (res) => {
+				if (!res.confirm) return
+				const raw = res.content
+				const input = (raw != null) ? raw.trim() : ''
+				if (input.length == 0) return
+				joinRoomByInput(input)
+			}
+		})
+	}
+
+	function onJoin() {
+		uni.showActionSheet({
+			itemList: ['加入已有房间', '创建新房间'],
+			success: (res) => {
+				if (res.tapIndex == 0) {
+					joinExistingRoom()
+				} else if (res.tapIndex == 1) {
+					createNewRoom()
+				}
+			}
+		})
+	}
+
+	function onProfile() {
+		uni.redirectTo({ url: '/pages/profile/profile' })
+	}
+
+	function onSearch() {
+		uni.navigateTo({ url: '/pages/search/search' })
+	}
+
+	function onDiscover() {
+		uni.redirectTo({ url: '/pages/discover/discover' })
+	}
+
+	function onLongPressRoom(room: MatrixRoom) {
+		roomAction.value.room = room
+		roomAction.value.show = true
+	}
+
+	async function inviteMemberByInput(roomId: string, raw: string | null): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		const trimmed = (raw != null) ? raw.trim() : ''
+		if (trimmed.length == 0) return
+		const userId = trimmed.startsWith('@') ? trimmed : '@' + trimmed
+		try {
+			await matrix.inviteUser(roomId, userId)
+			uni.showToast({ title: '已发送邀请', icon: 'success' })
+		} catch (e) {
+			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+		}
+	}
+
+	async function renameRoomByInput(roomId: string, content: string | null): Promise<void> {
+		if (content == null || content.length == 0) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			await matrix.setRoomName(roomId, content)
+			uni.showToast({ title: '已修改', icon: 'success' })
+			loadRooms()
+		} catch (e) {
+			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+		}
+	}
+
+	async function setTopicByInput(roomId: string, content: string | null): Promise<void> {
+		if (content == null || content.length == 0) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			await matrix.setRoomTopic(roomId, content)
+			uni.showToast({ title: '已修改', icon: 'success' })
+			loadRooms()
+		} catch (e) {
+			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+		}
+	}
+
+	async function leaveRoomConfirmed(roomId: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			await matrix.leaveRoom(roomId)
+			uni.showToast({ title: '已退出', icon: 'success' })
+			loadRooms()
+		} catch (e) {
+			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+		}
+	}
+
+	async function doRoomAction(action: string) {
+		const sheet = roomAction.value
+		const room = sheet.room
+		sheet.show = false
+		if (room == null) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			if (action == 'invite') {
+				uni.showModal({
+					title: '邀请成员',
+					editable: true,
+					placeholderText: '输入用户ID，如 @user:matrix.itiklink.com',
+					success: (res) => {
+						if (!res.confirm) return
+						inviteMemberByInput(room.room_id, res.content)
+					}
+				})
+			} else if (action == 'rename') {
+				const oldName = (room.name != null) ? room.name : ''
+				uni.showModal({
+					title: '修改房间名',
+					editable: true,
+					content: oldName,
+					success: (res) => {
+						if (res.confirm) {
+							renameRoomByInput(room.room_id, res.content)
+						}
+					}
+				})
+			} else if (action == 'topic') {
+				const oldTopic = (room.topic != null) ? room.topic : ''
+				uni.showModal({
+					title: '修改房间主题',
+					editable: true,
+					content: oldTopic,
+					success: (res) => {
+						if (res.confirm) {
+							setTopicByInput(room.room_id, res.content)
+						}
+					}
+				})
+			} else if (action == 'tag') {
+				await matrix.addRoomTag(room.room_id, 'm.favourite', 0.1)
+				uni.showToast({ title: '已置顶', icon: 'success' })
+			} else if (action == 'leave') {
+				const leaveName = (room.name != null) ? room.name : '此房间'
+				uni.showModal({
+					title: '退出房间',
+					content: '确定要退出「' + leaveName + '」吗？',
+					success: (res) => {
+						if (res.confirm) {
+							leaveRoomConfirmed(room.room_id)
+						}
+					}
+				})
+			}
+		} catch (e) {
+			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+		}
+	}
+</script>
+
+<style>
+	.rooms-page {
+		flex: 1;
+		background-color: #ffffff;
+		display: flex;
+		flex-direction: column;
+	}
+	.wx-nav {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 24rpx 28rpx 16rpx;
+		padding-top: 60rpx;
+		background-color: #ededed;
+	}
+	.wx-nav-title {
+		font-size: 34rpx;
+		font-weight: 600;
+		color: #181818;
+	}
+	.wx-nav-right {
+		flex-direction: row;
+		align-items: center;
+	}
+	.wx-nav-btn {
+		font-size: 40rpx;
+		color: #181818;
+		margin-left: 36rpx;
+		font-weight: 400;
+	}
+	.wx-search {
+		margin: 16rpx 24rpx 8rpx;
+		height: 64rpx;
+		background-color: #ffffff;
+		border-radius: 8rpx;
+		align-items: center;
+		justify-content: center;
+		background-color: #e3e3e3;
+	}
+	.wx-search-text {
+		font-size: 28rpx;
+		color: #888888;
+	}
+	.wx-tabbar {
+		flex-direction: row;
+		background-color: #f7f7f7;
+		border-top-width: 1rpx;
+		border-top-color: #d9d9d9;
+		padding-bottom: 24rpx;
+	}
+	.wx-tab {
+		flex: 1;
+		align-items: center;
+		padding: 10rpx 0 12rpx;
+	}
+	.wx-tab-icon {
+		font-size: 40rpx;
+		color: #181818;
+		margin-bottom: 4rpx;
+	}
+	.wx-tab-label {
+		font-size: 20rpx;
+		color: #181818;
+	}
+	.wx-tab-on .wx-tab-label {
+		color: #07c160;
+	}
+
+	.topbar {
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		padding: 24rpx 30rpx;
+		background-color: #fff;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #e8e8ec;
+	}
+
+	.topbar-left {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.topbar-title {
+		font-size: 44rpx;
+		font-weight: 800;
+		color: #1a1a1a;
+		letter-spacing: -1rpx;
+	}
+
+	.sync-pill {
+		flex-direction: row;
+		align-items: center;
+		background-color: #f0f0f4;
+		border-radius: 20rpx;
+		padding: 4rpx 14rpx;
+		margin-left: 16rpx;
+	}
+
+	.sync-dot {
+		width: 12rpx;
+		height: 12rpx;
+		border-radius: 50%;
+		background-color: #ccc;
+	}
+
+	.sync-ok { background-color: #34c759; }
+	.sync-init { background-color: #ff9500; }
+	.sync-error { background-color: #ff3b30; }
+
+	.sync-text {
+		font-size: 20rpx;
+		color: #888;
+		margin-left: 6rpx;
+	}
+
+	/* 新邀请横幅 */
+	.invite-banner {
+		background-color: #fff7e6;
+		padding: 20rpx 24rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #ffd591;
+	}
+
+	.invite-banner-head {
+		margin-bottom: 12rpx;
+	}
+
+	.invite-banner-title {
+		font-size: 26rpx;
+		color: #d4880f;
+		font-weight: 600;
+	}
+
+	.invite-row {
+		flex-direction: row;
+		align-items: center;
+		background-color: #fff;
+		border-radius: 12rpx;
+		padding: 16rpx 20rpx;
+		margin-bottom: 10rpx;
+	}
+
+	.invite-row-body {
+		flex: 1;
+		flex-direction: column;
+	}
+
+	.invite-room-name {
+		font-size: 28rpx;
+		color: #1a1a1a;
+		font-weight: 500;
+	}
+
+	.invite-room-id {
+		font-size: 22rpx;
+		color: #999;
+		margin-top: 4rpx;
+	}
+
+	.invite-from {
+		font-size: 22rpx;
+		color: #1f6feb;
+		margin-top: 4rpx;
+	}
+
+	.invite-row-actions {
+		flex-direction: row;
+		margin-left: 12rpx;
+	}
+
+	.invite-btn {
+		padding: 10rpx 24rpx;
+		border-radius: 8rpx;
+		margin-left: 8rpx;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.invite-btn.reject {
+		background-color: #f0f0f5;
+	}
+
+	.invite-btn.accept {
+		background-color: #1f6feb;
+	}
+
+	.invite-btn-text {
+		font-size: 24rpx;
+		color: #333;
+	}
+
+	.invite-btn.accept .invite-btn-text {
+		color: #fff;
+	}
+
+	.topbar-right {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.icon-btn {
+		background-color: #f0f0f4;
+		border-radius: 50%;
+		width: 64rpx;
+		height: 64rpx;
+		margin-left: 12rpx;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+	}
+
+	.icon-btn.primary {
+		background-color: #1a1a1a;
+	}
+
+	.icon-btn.primary .icon-text {
+		color: #fff;
+		font-size: 32rpx;
+		font-weight: 600;
+	}
+
+	.icon-text {
+		font-size: 28rpx;
+		color: #555;
+	}
+
+	.icon-avatar {
+		width: 64rpx;
+		height: 64rpx;
+		border-radius: 50%;
+		background-color: #e0e0e6;
+	}
+
+	.rooms-scroll {
+		flex: 1;
+		padding-top: 8rpx;
+	}
+
+	.loading, .empty {
+		padding: 120rpx 0;
+		align-items: center;
+	}
+
+	.empty-icon {
+		font-size: 96rpx;
+		margin-bottom: 24rpx;
+	}
+
+	.empty-title {
+		font-size: 30rpx;
+		color: #555;
+		text-align: center;
+		font-weight: 500;
+	}
+
+	.empty-hint {
+		font-size: 24rpx;
+		color: #aaa;
+		margin-top: 12rpx;
+		text-align: center;
+	}
+
+	.room-item {
+		flex-direction: row;
+		padding: 24rpx 30rpx;
+		background-color: #fff;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f2f2f5;
+		align-items: center;
+	}
+
+	.room-item.room-active {
+		background-color: #fafbfc;
+	}
+
+	.avatar-wrap {
+		position: relative;
+	}
+
+	.room-avatar {
+		width: 96rpx;
+		height: 96rpx;
+		border-radius: 12rpx;
+		background-color: #e0e0e6;
+	}
+
+	.avatar-badge {
+		position: absolute;
+		top: -6rpx;
+		right: -6rpx;
+		min-width: 36rpx;
+		height: 36rpx;
+		padding: 0 10rpx;
+		background-color: #ff3b30;
+		border-radius: 18rpx;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border-width: 4rpx;
+		border-color: #fff;
+	}
+
+	.avatar-badge-text {
+		font-size: 20rpx;
+		color: #fff;
+		font-weight: 700;
+	}
+
+	.room-body {
+		flex: 1;
+		margin-left: 24rpx;
+		overflow: hidden;
+	}
+
+	.room-line1 {
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+	}
+
+	.room-name {
+		font-size: 32rpx;
+		color: #1a1a1a;
+		font-weight: 500;
+		flex: 1;
+		lines: 1;
+		text-overflow: ellipsis;
+	}
+
+	.room-name-bold {
+		font-weight: 700;
+	}
+
+	.room-time {
+		font-size: 22rpx;
+		color: #999;
+		margin-left: 12rpx;
+	}
+
+	.room-time-active {
+		color: #34c759;
+		font-weight: 600;
+	}
+
+	.room-line2 {
+		flex-direction: row;
+		justify-content: space-between;
+		align-items: center;
+		margin-top: 10rpx;
+	}
+
+	.room-preview {
+		font-size: 26rpx;
+		color: #999;
+		flex: 1;
+		lines: 1;
+		text-overflow: ellipsis;
+	}
+
+	.room-preview-active {
+		color: #555;
+		font-weight: 500;
+	}
+
+	.mention-dot {
+		width: 12rpx;
+		height: 12rpx;
+		border-radius: 50%;
+		background-color: #ff3b30;
+		margin-left: 12rpx;
+	}
+
+	.bottom-tip {
+		padding: 30rpx 0 40rpx;
+		align-items: center;
+	}
+
+	.bottom-tip-text {
+		font-size: 22rpx;
+		color: #bbb;
+		text-align: center;
+	}
+
+	/* 通用操作面板 */
+	.action-sheet {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba(0,0,0,0.45);
+		display: flex;
+		align-items: flex-end;
+		justify-content: center;
+	}
+
+	.action-panel {
+		width: 100%;
+		background-color: #f7f7fa;
+		border-top-left-radius: 28rpx;
+		border-top-right-radius: 28rpx;
+		padding: 16rpx 0 40rpx;
+	}
+
+	.action-handle {
+		width: 60rpx;
+		height: 6rpx;
+		background-color: #d0d0d6;
+		border-radius: 3rpx;
+		margin: 0 auto 16rpx;
+	}
+
+	.action-header {
+		padding: 8rpx 30rpx 20rpx;
+		align-items: center;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #e8e8ec;
+		margin-bottom: 12rpx;
+	}
+
+	.action-title {
+		text-align: center;
+		font-size: 30rpx;
+		color: #1a1a1a;
+		font-weight: 700;
+	}
+
+	.action-subtitle {
+		text-align: center;
+		font-size: 22rpx;
+		color: #999;
+		margin-top: 6rpx;
+	}
+
+	.action-list {
+		background-color: #fff;
+		border-radius: 20rpx;
+		margin: 0 20rpx;
+		overflow: hidden;
+	}
+
+	.action-item {
+		flex-direction: row;
+		align-items: center;
+		padding: 28rpx 30rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f0f0f4;
+	}
+
+	.action-item:last-child {
+		border-bottom-width: 0;
+	}
+
+	.action-icon {
+		width: 56rpx;
+		font-size: 32rpx;
+		color: #1a1a1a;
+		font-weight: 600;
+	}
+
+	.action-label {
+		font-size: 30rpx;
+		color: #1a1a1a;
+		flex: 1;
+	}
+
+	.action-item.danger .action-icon,
+	.action-item.danger .action-label {
+		color: #ff3b30;
+	}
+
+	.action-cancel {
+		background-color: #fff;
+		padding: 28rpx;
+		text-align: center;
+		margin: 12rpx 20rpx 0;
+		border-radius: 20rpx;
+		color: #1a1a1a;
+		font-size: 30rpx;
+		font-weight: 500;
+	}
+</style>

@@ -1,0 +1,50 @@
+<template>
+	<view class="splash">
+		<image class="logo" src="/static/logo.png"></image>
+		<text class="title">{{ title }}</text>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref } from 'vue'
+	import { loadSession } from '@/common/storage.uts'
+	import { bootstrapMatrix } from '@/common/app.uts'
+
+	const title = ref('Matrix Chat')
+
+	onLoad(() => {
+		const session = loadSession()
+		if (session != null) {
+			// 已登录：重建 MatrixClient + 跳转房间列表
+			bootstrapMatrix()
+			setTimeout(() => {
+				uni.reLaunch({ url: '/pages/rooms/rooms' })
+			}, 200)
+		} else {
+			// 未登录：跳登录页
+			setTimeout(() => {
+				uni.reLaunch({ url: '/pages/login/login' })
+			}, 200)
+		}
+	})
+</script>
+
+<style>
+	.splash {
+		flex: 1;
+		background-color: #fff;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.logo {
+		height: 120px;
+		width: 120px;
+	}
+
+	.title {
+		font-size: 22px;
+		color: #555;
+		margin-top: 24px;
+	}
+</style>

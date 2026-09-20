@@ -1,0 +1,605 @@
+<template>
+	<view class="contacts-page">
+		<view class="wx-nav">
+			<text class="wx-nav-title">通讯录</text>
+			<text class="wx-nav-btn" @click="onOpenSettings">+</text>
+		</view>
+		<view class="search-bar">
+			<view class="search-input-wrap">
+				<text class="search-icon">⌕</text>
+				<input
+					class="search-input"
+					v-model="searchText"
+					placeholder="搜索"
+					placeholder-class="search-placeholder"
+					@confirm="onSearch"
+					@input="onSearchInput"
+				/>
+			</view>
+		</view>
+
+		<!-- 搜索结果 -->
+		<view v-if="searchText.length > 0" class="result-list">
+			<view v-if="searching" class="loading-row">
+				<text class="loading-text">搜索中…</text>
+			</view>
+			<view v-else-if="results.length === 0" class="empty-row">
+				<text class="empty-text">未找到用户（也可手动输入完整ID发起聊天）</text>
+			</view>
+			<view
+				v-for="user in results"
+				:key="user.user_id"
+				class="user-row"
+				@click="onStartChat(user)"
+			>
+				<view class="avatar-wrap">
+					<image
+						class="avatar"
+						:src="getAvatar(user)"
+						fallback="/static/logo.png"
+					></image>
+					<view class="presence-dot" :class="getPresenceClass(user.user_id)"></view>
+				</view>
+				<view class="user-info">
+					<text class="user-name">{{ userDisplayName(user) }}</text>
+					<text class="user-id">{{ user.user_id }}</text>
+					<text v-if="getPresenceText(user.user_id)" class="user-presence" :class="getPresenceClass(user.user_id)">{{ getPresenceText(user.user_id) }}</text>
+				</view>
+				<text class="chat-icon">💬</text>
+			</view>
+
+			<!-- 手动开聊按钮：如果输入是 @xxx:yyy 或很像 user_id -->
+			<view v-if="isLikelyUserId(searchText)" class="user-row manual-row" @click="onStartChatById">
+				<view class="avatar manual-avatar">
+					<text class="manual-avatar-text">➕</text>
+				</view>
+				<view class="user-info">
+					<text class="user-name">发起新对话</text>
+					<text class="user-id">{{ normalizedUserId(searchText) }}</text>
+				</view>
+				<text class="chat-icon">💬</text>
+			</view>
+		</view>
+
+		<!-- 默认空白页 -->
+		<view v-else class="empty-page">
+			<text class="empty-icon">👥</text>
+			<text class="empty-title">通讯录</text>
+			<text class="empty-desc">在上方搜索框输入用户名\n即可找到其他用户并发消息</text>
+			<view class="entry-buttons">
+				<view class="entry-btn" @click="onOpenDiscover">
+					<text class="entry-btn-icon">🌍</text>
+					<text class="entry-btn-text">公开房间</text>
+				</view>
+				<view class="entry-btn" @click="onOpenSearch">
+					<text class="entry-btn-icon">🔎</text>
+					<text class="entry-btn-text">搜索消息</text>
+				</view>
+				<view class="entry-btn" @click="onOpenSettings">
+					<text class="entry-btn-icon">⚙️</text>
+					<text class="entry-btn-text">设置</text>
+				</view>
+			</view>
+		</view>
+		<view class="wx-tabbar">
+			<view class="wx-tab" @click="goRooms">
+				<text class="wx-tab-icon">💬</text>
+				<text class="wx-tab-label">微信</text>
+			</view>
+			<view class="wx-tab wx-tab-on">
+				<text class="wx-tab-icon">👤</text>
+				<text class="wx-tab-label">通讯录</text>
+			</view>
+			<view class="wx-tab" @click="onOpenDiscover">
+				<text class="wx-tab-icon">◈</text>
+				<text class="wx-tab-label">发现</text>
+			</view>
+			<view class="wx-tab" @click="goProfile">
+				<text class="wx-tab-icon">◎</text>
+				<text class="wx-tab-label">我</text>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, onMounted, onUnmounted } from 'vue'
+	import { getMatrix, errText, DirectoryUser } from '@/common/matrix.uts'
+	import { openChat } from '@/common/app.uts'
+
+	type PresenceCache = {
+		presence: string
+		status_msg: string
+		last_active_ago: number
+		loaded_at: number
+	}
+
+	const searchText = ref<string>('')
+	const searching = ref<boolean>(false)
+	const results = ref<Array<DirectoryUser>>([])
+	let searchTimer: number | null = null
+
+	const presenceMap = ref<Map<string, PresenceCache>>(new Map())
+
+	function fillPresenceCache(presence: string, statusMsg: string, lastActiveAgo: number, loadedAt: number): PresenceCache {
+		const item: PresenceCache = {
+			presence: presence,
+			status_msg: statusMsg,
+			last_active_ago: lastActiveAgo,
+			loaded_at: loadedAt
+		}
+		return item
+	}
+
+	function userDisplayName(user: DirectoryUser): string {
+		if (user.display_name.length > 0) return user.display_name
+		return user.user_id
+	}
+
+	function getAvatar(user: DirectoryUser): string {
+		const matrix = getMatrix()
+		if (matrix == null) return '/static/logo.png'
+		if (user.avatar_url.length > 0) {
+			return matrix.mxcToHttp(user.avatar_url, 80, 80)
+		}
+		return '/static/logo.png'
+	}
+
+	function getPresenceClass(userId: string): string {
+		const p = presenceMap.value.get(userId)
+		if (p == null) return 'presence-unknown'
+		if (p.presence == 'online') return 'presence-online'
+		const busy = p.presence == 'unavailable' || p.presence == 'busy'
+		if (busy) return 'presence-busy'
+		return 'presence-offline'
+	}
+
+	function statusOrFallback(msg: string, fallback: string): string {
+		if (msg.length > 0) return msg
+		return fallback
+	}
+
+	function getPresenceText(userId: string): string {
+		const p = presenceMap.value.get(userId)
+		if (p == null) return ''
+		const msg = p.status_msg
+		if (p.presence == 'online') {
+			if (msg.length > 0) return '在线 · ' + msg
+			return '在线'
+		}
+		if (p.presence == 'unavailable') return statusOrFallback(msg, '忙碌')
+		if (p.presence == 'offline') return '离线'
+		if (p.presence == 'busy') return statusOrFallback(msg, '忙碌')
+		return statusOrFallback(msg, p.presence)
+	}
+
+	function goBack() {
+		uni.navigateBack()
+	}
+
+	function clearSearch() {
+		searchText.value = ''
+		results.value = []
+	}
+
+	async function batchLoadPresence() {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		const now = Date.now()
+		for (const user of results.value) {
+			const cached = presenceMap.value.get(user.user_id)
+			if (cached != null && now - cached.loaded_at < 5 * 60 * 1000) continue
+			try {
+				const info = await matrix.getPresence(user.user_id) as UTSJSONObject
+				const presenceRaw = info['presence'] as string | null
+				const presence = (presenceRaw == null || presenceRaw.length == 0) ? 'offline' : presenceRaw
+				const statusRaw = info['status_msg'] as string | null
+				const statusMsg = (statusRaw == null) ? '' : statusRaw
+				const agoRaw = info['last_active_ago'] as number | null
+				const lastAgo = (agoRaw == null) ? 0 : agoRaw
+				presenceMap.value.set(user.user_id, fillPresenceCache(presence, statusMsg, lastAgo, now))
+			} catch (e) {
+				console.warn('获取 presence 失败:', user.user_id, e)
+			}
+		}
+	}
+
+	async function onSearch() {
+		const term = searchText.value.trim()
+		if (term.length == 0) {
+			results.value = []
+			return
+		}
+		searching.value = true
+		try {
+			const matrix = getMatrix()
+			if (matrix == null) {
+				searching.value = false
+				return
+			}
+			results.value = await matrix.searchUsers(term)
+			await batchLoadPresence()
+		} catch (e) {
+			console.warn('搜索用户失败', e)
+			results.value = []
+		}
+		searching.value = false
+	}
+
+	function onSearchInput() {
+		const t = searchTimer
+		searchTimer = null
+		if (t != null) {
+			clearTimeout(t)
+		}
+		searchTimer = setTimeout(() => {
+			onSearch()
+		}, 400) as number | null
+	}
+
+	function normalizedUserId(input: string): string {
+		const t = input.trim()
+		if (t.startsWith('@')) return t
+		return `@${t}`
+	}
+
+	function isLikelyUserId(input: string): boolean {
+		const t = input.trim()
+		return t.length > 0 && (t.startsWith('@') || t.indexOf(':') >= 0)
+	}
+
+	function goRooms() {
+		uni.redirectTo({ url: '/pages/rooms/rooms' })
+	}
+	function goProfile() {
+		uni.redirectTo({ url: '/pages/profile/profile' })
+	}
+	function onOpenDiscover() {
+		uni.redirectTo({ url: '/pages/discover/discover' })
+	}
+
+	function onOpenSearch() {
+		uni.navigateTo({ url: '/pages/search/search' })
+	}
+
+	function onOpenSettings() {
+		uni.navigateTo({ url: '/pages/settings/settings' })
+	}
+
+	async function onStartChatById() {
+		const userId = normalizedUserId(searchText.value)
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (userId === matrix.userId) {
+			uni.showToast({ title: '不能和自己聊天', icon: 'none' })
+			return
+		}
+		uni.showLoading({ title: '正在打开…' })
+		try {
+			const roomId = await matrix.startDM(userId)
+			uni.hideLoading()
+			openChat(roomId)
+		} catch (e: any) {
+			uni.hideLoading()
+			uni.showToast({ title: '发起聊天失败: ' + errText(e, ''), icon: 'none' })
+		}
+	}
+
+	async function onStartChat(user: DirectoryUser) {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (user.user_id == matrix.userId) {
+			uni.showToast({ title: '不能和自己聊天', icon: 'none' })
+			return
+		}
+		uni.showLoading({ title: '正在打开…' })
+		try {
+			const roomId = await matrix.startDM(user.user_id)
+			uni.hideLoading()
+			openChat(roomId)
+		} catch (e: any) {
+			uni.hideLoading()
+			uni.showToast({ title: '发起聊天失败: ' + errText(e, ''), icon: 'none' })
+		}
+	}
+
+	function writePresence(uid: string, ev: UTSJSONObject): void {
+		const presenceRaw = ev['presence'] as string | null
+		const presence = (presenceRaw == null || presenceRaw.length == 0) ? 'offline' : presenceRaw
+		const statusRaw = ev['status_msg'] as string | null
+		const statusMsg = (statusRaw == null) ? '' : statusRaw
+		const agoRaw = ev['last_active_ago'] as number | null
+		const lastAgo = (agoRaw == null) ? 0 : agoRaw
+		presenceMap.value.set(uid, fillPresenceCache(presence, statusMsg, lastAgo, Date.now()))
+	}
+
+	function applyPresenceEvent(payload: UTSJSONObject): void {
+		const userIds = payload['user_ids'] as Array<string> | null
+		const eventsMap = payload['events'] as UTSJSONObject | null
+		if (userIds != null && eventsMap != null) {
+			for (const uid of userIds) {
+				const ev = eventsMap[uid] as UTSJSONObject | null
+				if (ev != null) writePresence(uid, ev)
+			}
+			return
+		}
+		let uid = payload['sender'] as string | null
+		let body = payload['content'] as UTSJSONObject | null
+		if (body == null) body = payload
+		if (uid == null || uid.length == 0) {
+			uid = body['user_id'] as string | null
+		}
+		if (uid == null || uid.length == 0) return
+		writePresence(uid, body)
+	}
+
+	onMounted(() => {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		matrix.presenceHandlers.push(applyPresenceEvent)
+	})
+
+	onUnmounted(() => {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		const idx = matrix.presenceHandlers.indexOf(applyPresenceEvent)
+		if (idx >= 0) {
+			matrix.presenceHandlers.splice(idx, 1)
+		}
+	})
+</script>
+
+<style>
+	.contacts-page {
+		flex: 1;
+		background-color: #ededed;
+		flex-direction: column;
+	}
+	.wx-nav {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 24rpx 28rpx 16rpx;
+		padding-top: 60rpx;
+		background-color: #ededed;
+	}
+	.wx-nav-title {
+		font-size: 34rpx;
+		font-weight: 600;
+		color: #181818;
+	}
+	.wx-nav-btn {
+		font-size: 40rpx;
+		color: #181818;
+	}
+	.wx-tabbar {
+		flex-direction: row;
+		background-color: #f7f7f7;
+		border-top-width: 1rpx;
+		border-top-color: #d9d9d9;
+		padding-bottom: 24rpx;
+	}
+	.wx-tab {
+		flex: 1;
+		align-items: center;
+		padding: 10rpx 0 12rpx;
+	}
+	.wx-tab-icon { font-size: 40rpx; margin-bottom: 4rpx; }
+	.wx-tab-label { font-size: 20rpx; color: #181818; }
+	.wx-tab-on .wx-tab-label { color: #07c160; }
+
+	.search-bar {
+		background-color: #fff;
+		flex-direction: row;
+		align-items: center;
+		padding: 16rpx 24rpx;
+		padding-top: 104rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #e8e8ec;
+	}
+
+	.search-input-wrap {
+		flex: 1;
+		flex-direction: row;
+		align-items: center;
+		background-color: #f0f0f5;
+		border-radius: 16rpx;
+		padding: 12rpx 16rpx;
+	}
+
+	.search-icon {
+		font-size: 28rpx;
+		margin-right: 8rpx;
+	}
+
+	.search-input {
+		flex: 1;
+		font-size: 28rpx;
+		color: #333;
+	}
+
+	.search-placeholder {
+		color: #aaa;
+		font-size: 28rpx;
+	}
+
+	.clear-btn {
+		font-size: 28rpx;
+		color: #999;
+		padding-left: 8rpx;
+	}
+
+	.cancel-btn {
+		font-size: 28rpx;
+		color: #1f6feb;
+		margin-left: 20rpx;
+	}
+
+	.result-list {
+		flex: 1;
+	}
+
+	.loading-row, .empty-row {
+		padding: 60rpx;
+		align-items: center;
+	}
+
+	.loading-text, .empty-text {
+		font-size: 28rpx;
+		color: #999;
+	}
+
+	.user-row {
+		background-color: #fff;
+		flex-direction: row;
+		align-items: center;
+		padding: 24rpx 32rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f0f0f5;
+	}
+
+	.manual-row {
+		border-top-width: 2rpx;
+		border-top-color: #e0e0e6;
+		margin-top: 0;
+	}
+
+	.manual-avatar {
+		background-color: #e8f0ff;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.manual-avatar-text {
+		font-size: 40rpx;
+	}
+
+	.avatar-wrap {
+		position: relative;
+	}
+
+	.avatar {
+		width: 88rpx;
+		height: 88rpx;
+		border-radius: 50%;
+		background-color: #e0e0e6;
+	}
+
+	.presence-dot {
+		position: absolute;
+		right: 0;
+		bottom: 0;
+		width: 24rpx;
+		height: 24rpx;
+		border-radius: 50%;
+		border-width: 4rpx;
+		border-color: #fff;
+	}
+
+	.presence-online {
+		background-color: #34c759;
+	}
+
+	.presence-offline {
+		background-color: #c8c8cd;
+	}
+
+	.presence-busy {
+		background-color: #ff9500;
+	}
+
+	.presence-unknown {
+		background-color: #e0e0e6;
+	}
+
+	.user-info {
+		flex: 1;
+		margin-left: 24rpx;
+		flex-direction: column;
+	}
+
+	.user-name {
+		font-size: 30rpx;
+		color: #1a1a1a;
+		font-weight: 500;
+	}
+
+	.user-id {
+		font-size: 24rpx;
+		color: #999;
+		margin-top: 6rpx;
+	}
+
+	.user-presence {
+		font-size: 22rpx;
+		margin-top: 4rpx;
+	}
+
+	.user-presence.presence-online {
+		color: #34c759;
+	}
+
+	.user-presence.presence-offline {
+		color: #999;
+	}
+
+	.user-presence.presence-busy {
+		color: #ff9500;
+	}
+
+	.chat-icon {
+		font-size: 40rpx;
+	}
+
+	.empty-page {
+		flex: 1;
+		align-items: center;
+		justify-content: center;
+		padding-bottom: 100rpx;
+	}
+
+	.empty-icon {
+		font-size: 120rpx;
+	}
+
+	.empty-title {
+		font-size: 36rpx;
+		color: #333;
+		font-weight: 600;
+		margin-top: 24rpx;
+	}
+
+	.empty-desc {
+		font-size: 26rpx;
+		color: #999;
+		margin-top: 16rpx;
+		text-align: center;
+		line-height: 1.6;
+	}
+
+	.entry-buttons {
+		flex-direction: row;
+		margin-top: 60rpx;
+		flex-wrap: wrap;
+		justify-content: center;
+	}
+
+	.entry-btn {
+		flex-direction: column;
+		align-items: center;
+		background-color: #fff;
+		border-radius: 16rpx;
+		padding: 32rpx 48rpx;
+		margin: 12rpx 16rpx;
+	}
+
+	.entry-btn-icon {
+		font-size: 48rpx;
+		margin-bottom: 12rpx;
+	}
+
+	.entry-btn-text {
+		font-size: 24rpx;
+		color: #333;
+	}
+</style>

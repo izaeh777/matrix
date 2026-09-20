@@ -1,0 +1,393 @@
+<template>
+	<view class="discover-page">
+		<view class="wx-nav">
+			<text class="wx-nav-title">发现</text>
+		</view>
+		<view class="topbar">
+			<view class="search-input-wrap">
+				<text class="search-icon">⌕</text>
+				<input
+					class="search-input"
+					v-model="searchTerm"
+					placeholder="搜索公开房间"
+					placeholder-class="search-placeholder"
+					@input="onSearchInput"
+				/>
+			</view>
+		</view>
+
+		<scroll-view class="rooms-scroll" scroll-y @scrolltolower="loadMore">
+			<!-- 房间列表 -->
+			<view v-if="loading && rooms.length === 0" class="state-row">
+				<text class="state-text">加载中…</text>
+			</view>
+
+			<view v-else-if="rooms.length === 0" class="state-row">
+				<text class="state-text-large">🌍</text>
+				<text class="state-text">未找到公开房间</text>
+				<text class="state-hint">试试换个关键词</text>
+			</view>
+
+			<view
+				v-for="room in rooms"
+				:key="room.room_id"
+				class="room-card"
+			>
+				<view class="card-header">
+					<image class="room-avatar" :src="getAvatar(room)" fallback="/static/logo.png" />
+					<view class="card-info">
+						<text class="room-name">{{ publicRoomTitle(room) }}</text>
+						<text v-if="room.topic" class="room-topic">{{ room.topic }}</text>
+						<view class="meta-row">
+							<text class="meta-item">👥 {{ publicRoomMembers(room) }}</text>
+							<text v-if="room.world_readable" class="meta-item">🌐 公开浏览</text>
+							<text v-if="room.guest_can_join" class="meta-item">👋 访客可加入</text>
+						</view>
+					</view>
+				</view>
+				<view class="card-actions">
+					<button class="btn-preview" @click="onPreview(room)">
+						<text class="btn-text">预览</text>
+					</button>
+					<button class="btn-join" @click="onJoin(room)">
+						<text class="btn-text">加入</text>
+					</button>
+				</view>
+			</view>
+
+			<!-- 加载更多 -->
+			<view v-if="loading && rooms.length > 0" class="state-row">
+				<text class="state-text">加载更多…</text>
+			</view>
+
+			<view v-if="!hasMore && rooms.length > 0" class="state-row">
+				<text class="state-hint">没有更多了</text>
+			</view>
+		</scroll-view>
+		<view class="wx-tabbar">
+			<view class="wx-tab" @click="goRooms">
+				<text class="wx-tab-icon">💬</text>
+				<text class="wx-tab-label">微信</text>
+			</view>
+			<view class="wx-tab" @click="goContacts">
+				<text class="wx-tab-icon">👤</text>
+				<text class="wx-tab-label">通讯录</text>
+			</view>
+			<view class="wx-tab wx-tab-on">
+				<text class="wx-tab-icon">◈</text>
+				<text class="wx-tab-label">发现</text>
+			</view>
+			<view class="wx-tab" @click="goProfile">
+				<text class="wx-tab-icon">◎</text>
+				<text class="wx-tab-label">我</text>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, onMounted } from 'vue'
+	import { getMatrix, errText, PublicRoom } from '@/common/matrix.uts'
+	import { openChat } from '@/common/app.uts'
+
+	const searchTerm = ref<string>('')
+	const rooms = ref<PublicRoom[]>([])
+	const loading = ref<boolean>(false)
+	const nextBatch = ref<string>('')
+	const hasMore = ref<boolean>(true)
+
+	let searchTimer: number | null = null
+
+	function goRooms() {
+		uni.redirectTo({ url: '/pages/rooms/rooms' })
+	}
+	function goContacts() {
+		uni.redirectTo({ url: '/pages/contacts/contacts' })
+	}
+	function goProfile() {
+		uni.redirectTo({ url: '/pages/profile/profile' })
+	}
+	function goBack() {
+		uni.redirectTo({ url: '/pages/rooms/rooms' })
+	}
+
+	function getAvatar(room: PublicRoom): string {
+		const matrix = getMatrix()
+		if (matrix == null) return '/static/logo.png'
+		const av = room.avatar_url
+		if (av != null && av.length > 0) {
+			return matrix.mxcToHttp(av, 96, 96)
+		}
+		return '/static/logo.png'
+	}
+
+	function publicRoomTitle(room: PublicRoom): string {
+		const n = room.name
+		if (n != null && n.length > 0) return n
+		const a = room.canonical_alias
+		if (a != null && a.length > 0) return a
+		return room.room_id
+	}
+
+	function publicRoomMembers(room: PublicRoom): string {
+		return '' + room.num_joined_members
+	}
+
+	async function load(reset: boolean = true) {
+		if (loading.value) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		loading.value = true
+		if (reset) {
+			rooms.value = []
+			nextBatch.value = ''
+			hasMore.value = true
+		}
+		try {
+			const term = searchTerm.value.trim()
+			const res = await matrix.listPublicRooms(20, nextBatch.value, term)
+			rooms.value = rooms.value.concat(res.chunk)
+			nextBatch.value = res.next_batch
+			hasMore.value = res.next_batch.length > 0 && res.chunk.length > 0
+		} catch (e: any) {
+			console.warn('加载公开房间失败', e)
+			uni.showToast({ title: '加载失败: ' + errText(e, ''), icon: 'none' })
+		}
+		loading.value = false
+	}
+
+	function onSearchInput() {
+		const t = searchTimer
+		searchTimer = null
+		if (t != null) {
+			clearTimeout(t)
+		}
+		searchTimer = setTimeout(() => {
+			load(true)
+		}, 400) as number | null
+	}
+
+	async function loadMore() {
+		if (hasMore.value && !loading.value) {
+			await load(false)
+		}
+	}
+
+	async function onJoin(room: PublicRoom) {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		uni.showLoading({ title: '加入中…' })
+		try {
+			let target = room.room_id
+			if (room.canonical_alias.length > 0) {
+				target = room.canonical_alias
+			}
+			const result = await matrix.joinRoom(target)
+			uni.hideLoading()
+			uni.showToast({ title: '已加入', icon: 'success' })
+			setTimeout(() => {
+				openChat(result.room_id)
+			}, 600)
+		} catch (e: any) {
+			uni.hideLoading()
+			uni.showToast({ title: '加入失败: ' + errText(e, ''), icon: 'none' })
+		}
+	}
+
+	async function onPreview(room: PublicRoom) {
+		// 预览：跳到只读的房间页（如果支持）
+		uni.showToast({
+			title: '预览需要服务器开启 world_readable',
+			icon: 'none'
+		})
+		// 直接尝试加入（多数房间允许直接进）
+		await onJoin(room)
+	}
+
+	async function setupDiscover(): Promise<void> {
+		await load(true)
+	}
+
+	onMounted(() => {
+		setupDiscover()
+	})
+</script>
+
+<style>
+	.discover-page {
+		flex: 1;
+		background-color: #ededed;
+	}
+	.wx-nav {
+		flex-direction: row;
+		align-items: center;
+		padding: 24rpx 28rpx 8rpx;
+		padding-top: 60rpx;
+		background-color: #ededed;
+	}
+	.wx-nav-title {
+		font-size: 34rpx;
+		font-weight: 600;
+		color: #181818;
+	}
+	.wx-tabbar {
+		flex-direction: row;
+		background-color: #f7f7f7;
+		border-top-width: 1rpx;
+		border-top-color: #d9d9d9;
+		padding-bottom: 24rpx;
+	}
+	.wx-tab { flex: 1; align-items: center; padding: 10rpx 0 12rpx; }
+	.wx-tab-icon { font-size: 40rpx; margin-bottom: 4rpx; }
+	.wx-tab-label { font-size: 20rpx; color: #181818; }
+	.wx-tab-on .wx-tab-label { color: #07c160; }
+
+	.topbar {
+		background-color: #fff;
+		padding-top: 8rpx;
+		padding-left: 16rpx;
+		padding-right: 24rpx;
+		padding-bottom: 16rpx;
+		flex-direction: row;
+		align-items: center;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #e8e8ec;
+	}
+
+	.topbar-back {
+		font-size: 40rpx;
+		color: #1f6feb;
+		padding: 0 12rpx;
+	}
+
+	.search-input-wrap {
+		flex: 1;
+		flex-direction: row;
+		align-items: center;
+		background-color: #f0f0f5;
+		border-radius: 16rpx;
+		padding: 12rpx 16rpx;
+	}
+
+	.search-icon {
+		font-size: 28rpx;
+		margin-right: 8rpx;
+	}
+
+	.search-input {
+		flex: 1;
+		font-size: 28rpx;
+		color: #333;
+	}
+
+	.search-placeholder {
+		color: #aaa;
+		font-size: 28rpx;
+	}
+
+	.rooms-scroll {
+		flex: 1;
+		height: 0;
+	}
+
+	.state-row {
+		padding: 60rpx 40rpx;
+		align-items: center;
+	}
+
+	.state-text-large {
+		font-size: 80rpx;
+		margin-bottom: 24rpx;
+	}
+
+	.state-text {
+		font-size: 28rpx;
+		color: #999;
+	}
+
+	.state-hint {
+		font-size: 24rpx;
+		color: #bbb;
+		margin-top: 12rpx;
+	}
+
+	.room-card {
+		background-color: #fff;
+		margin: 20rpx 24rpx;
+		border-radius: 16rpx;
+		padding: 24rpx;
+	}
+
+	.card-header {
+		flex-direction: row;
+		margin-bottom: 20rpx;
+	}
+
+	.room-avatar {
+		width: 96rpx;
+		height: 96rpx;
+		border-radius: 16rpx;
+		background-color: #e0e0e6;
+		margin-right: 24rpx;
+	}
+
+	.card-info {
+		flex: 1;
+		flex-direction: column;
+	}
+
+	.room-name {
+		font-size: 32rpx;
+		color: #1a1a1a;
+		font-weight: 600;
+		margin-bottom: 6rpx;
+	}
+
+	.room-topic {
+		font-size: 26rpx;
+		color: #666;
+		line-height: 1.4;
+		margin-bottom: 8rpx;
+	}
+
+	.meta-row {
+		flex-direction: row;
+		flex-wrap: wrap;
+		margin-top: 4rpx;
+	}
+
+	.meta-item {
+		font-size: 22rpx;
+		color: #999;
+		margin-right: 16rpx;
+		margin-top: 4rpx;
+	}
+
+	.card-actions {
+		flex-direction: row;
+		justify-content: flex-end;
+	}
+
+	.btn-preview, .btn-join {
+		border-radius: 12rpx;
+		padding: 14rpx 32rpx;
+		margin-left: 16rpx;
+	}
+
+	.btn-preview {
+		background-color: #f0f0f5;
+	}
+
+	.btn-join {
+		background-color: #1f6feb;
+	}
+
+	.btn-text {
+		font-size: 26rpx;
+		color: #fff;
+	}
+
+	.btn-preview .btn-text {
+		color: #666;
+	}
+</style>

@@ -1,0 +1,61 @@
+<script setup lang="uts">
+	import { bootstrapMatrix } from '@/common/app.uts'
+	import { getMatrix } from '@/common/matrix.uts'
+
+	// #ifdef APP-ANDROID || APP-HARMONY
+	let firstBackTime = 0
+	// #endif
+
+	onLaunch(() => {
+		console.log('App Launch')
+		// 启动时如果有 session，恢复 Matrix 客户端实例
+		const matrix = bootstrapMatrix()
+		if (matrix != null) {
+			matrix.startSync()
+		}
+	})
+
+	onAppShow(() => {
+		console.log('App Show')
+	})
+
+	onAppHide(() => {
+		console.log('App Hide')
+	})
+
+	// #ifdef APP-ANDROID || APP-HARMONY
+	onLastPageBackPress(() => {
+		console.log('App LastPageBackPress')
+		if (firstBackTime == 0) {
+			uni.showToast({
+				title: '再按一次退出应用',
+				position: 'bottom',
+			})
+			firstBackTime = Date.now()
+			setTimeout(() => {
+				firstBackTime = 0
+			}, 2000)
+		} else if (Date.now() - firstBackTime < 2000) {
+			firstBackTime = Date.now()
+			uni.exit()
+		}
+	})
+	// #endif
+
+	onExit(() => {
+		console.log('App Exit')
+		const m = getMatrix()
+		if (m != null) m.stopSync()
+	})
+</script>
+
+<style>
+	/* 每个页面公共 css */
+	.uni-row {
+		flex-direction: row;
+	}
+
+	.uni-column {
+		flex-direction: column;
+	}
+</style>

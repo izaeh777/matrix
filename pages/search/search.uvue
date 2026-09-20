@@ -1,0 +1,489 @@
+<template>
+	<view class="search-page">
+		<!-- 顶部搜索栏 -->
+		<view class="topbar">
+			<text class="topbar-back" @click="goBack">←</text>
+			<view class="search-input-wrap">
+				<text class="search-icon">🔍</text>
+				<input
+					class="search-input"
+					v-model="searchTerm"
+					placeholder="搜索消息内容"
+					placeholder-class="search-placeholder"
+					:adjust-position="true"
+					:focus="true"
+					@confirm="onSearch"
+				/>
+				<text v-if="searchTerm.length > 0" class="clear-btn" @click="clearSearch">✕</text>
+			</view>
+			<text class="search-btn" @click="onSearch">搜索</text>
+		</view>
+
+		<!-- 快捷范围筛选 -->
+		<view class="filter-bar">
+			<view class="filter-chip" :class="{ active: filterScope === 'all' }" @click="setScope('all')">
+				<text class="filter-chip-text">全部</text>
+			</view>
+			<view class="filter-chip" :class="{ active: filterScope === 'room' }" @click="setScope('room')">
+				<text class="filter-chip-text">当前房间</text>
+			</view>
+		</view>
+
+		<!-- 加载/结果 -->
+		<scroll-view class="results-scroll" scroll-y>
+			<view v-if="loading && results.length === 0" class="state-row">
+				<text class="state-text">搜索中…</text>
+			</view>
+
+			<view v-else-if="hasSearched && results.length === 0" class="state-row">
+				<text class="state-text">未找到匹配的消息</text>
+			</view>
+
+			<view v-else-if="!hasSearched" class="state-row">
+				<text class="state-text-large">🔎</text>
+				<text class="state-text">输入关键词搜索聊天记录</text>
+			</view>
+
+			<view v-for="item in results" :key="item.event_id" class="result-item" @click="onTapResult(item)">
+				<image class="result-avatar" :src="getAvatarForRoom(item.room_id)" fallback="/static/logo.png" />
+				<view class="result-body">
+					<view class="result-line1">
+						<text class="result-room">{{ getRoomName(item.room_id) }}</text>
+						<text class="result-time">{{ formatTime(item.ts) }}</text>
+					</view>
+					<text class="result-sender">{{ getSenderName(item.sender) }}</text>
+					<view v-if="itemHasHighlight(item)" class="result-content">
+						<rich-text class="result-content-text" :nodes="renderHighlight(itemFirstHighlight(item))" />
+					</view>
+					<text v-else class="result-content">{{ item.body }}</text>
+				</view>
+			</view>
+
+			<view v-if="canLoadMore" class="load-more" @click="loadMore">
+				<text class="load-more-text">加载更多…</text>
+			</view>
+
+			<view v-if="results.length > 0" class="result-count">
+				<text class="result-count-text">共 {{ totalCount }} 条结果</text>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, computed, onMounted } from 'vue'
+	import { getMatrix, errText, SearchHit } from '@/common/matrix.uts'
+	import { openChat } from '@/common/app.uts'
+
+	type ResultItem = {
+		event_id: string
+		room_id: string
+		sender: string
+		body: string
+		ts: number
+		highlight: Array<string>
+	}
+
+	const searchTerm = ref<string>('')
+	const loading = ref<boolean>(false)
+	const hasSearched = ref<boolean>(false)
+	const results = ref<Array<ResultItem>>([])
+	const nextBatch = ref<string>('')
+	const totalCount = ref<number>(0)
+	const filterScope = ref<string>('all')
+	const currentRoomId = ref<string>('')
+
+	const roomNames = ref<Map<string, string>>(new Map())
+	const userNames = ref<Map<string, string>>(new Map())
+
+	const canLoadMore = computed((): boolean => {
+		if (results.value.length == 0) return false
+		return nextBatch.value.length > 0
+	})
+
+	function goBack() {
+		uni.navigateBack()
+	}
+
+	function clearSearch() {
+		searchTerm.value = ''
+		results.value = []
+		hasSearched.value = false
+		nextBatch.value = ''
+		totalCount.value = 0
+	}
+
+	function itemHasHighlight(item: ResultItem): boolean {
+		return item.highlight.length > 0
+	}
+
+	function itemFirstHighlight(item: ResultItem): string {
+		if (item.highlight.length == 0) return ''
+		return item.highlight[0]
+	}
+
+	async function loadRoomNames() {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const rooms = await matrix.listRooms()
+			for (const r of rooms) {
+				const nm = r.name
+				const other = r.other_displayname
+				if (nm != null && nm.length > 0) {
+					roomNames.value.set(r.room_id, nm)
+				} else if (other != null && other.length > 0) {
+					roomNames.value.set(r.room_id, other)
+				} else {
+					roomNames.value.set(r.room_id, r.room_id)
+				}
+			}
+		} catch (e) {
+			console.warn('加载房间名失败', e)
+		}
+	}
+
+	function getRoomName(roomId: string): string {
+		const n = roomNames.value.get(roomId)
+		if (n != null && n.length > 0) return n
+		if (roomId.length > 12) return roomId.substring(0, 12) + '...'
+		return roomId
+	}
+
+	function getSenderName(sender: string): string {
+		const n = userNames.value.get(sender)
+		if (n != null && n.length > 0) return n
+		return sender
+	}
+
+	function getAvatarForRoom(roomId: string): string {
+		const matrix = getMatrix()
+		if (matrix == null) return '/static/logo.png'
+		return matrix.mxcToHttp('', 64, 64)
+	}
+
+	function formatTime(ts: number): string {
+		if (ts == 0) return ''
+		const d = new Date(ts)
+		const now = new Date()
+		const diff = now.getTime() - d.getTime()
+		if (diff < 60000) return '刚刚'
+		if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前'
+		if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前'
+		const targetDay = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+		const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+		if (targetDay.getTime() == today.getTime()) {
+			const hh = d.getHours()
+			const mm = d.getMinutes()
+			const hs = (hh < 10) ? ('0' + hh) : ('' + hh)
+			const ms = (mm < 10) ? ('0' + mm) : ('' + mm)
+			return hs + ':' + ms
+		}
+		const yesterday = new Date(today.getTime() - 86400000)
+		if (targetDay.getTime() == yesterday.getTime()) return '昨天'
+		return (d.getMonth() + 1) + '/' + d.getDate()
+	}
+
+	function renderHighlight(highlight: string): Array<UTSJSONObject> {
+		const child: UTSJSONObject = {
+			type: 'text',
+			text: highlight
+		}
+		const node: UTSJSONObject = {
+			name: 'span',
+			attrs: { class: 'highlight' } as UTSJSONObject,
+			children: [child]
+		}
+		return [node]
+	}
+
+	function toResultItem(r: SearchHit): ResultItem {
+		const sender = r.sender
+		if (sender.length > 0) {
+			userNames.value.set(sender, sender.split(':')[0].replace('@', ''))
+		}
+		const item: ResultItem = {
+			event_id: r.event_id,
+			room_id: r.room_id,
+			sender: sender,
+			body: r.body,
+			ts: r.ts,
+			highlight: r.highlight
+		}
+		return item
+	}
+
+	function collectHits(hits: Array<SearchHit>): Array<ResultItem> {
+		const out: Array<ResultItem> = []
+		let i = 0
+		while (i < hits.length) {
+			const hit = hits[i]
+			if (hit != null) {
+				out.push(toResultItem(hit))
+			}
+			i++
+		}
+		return out
+	}
+
+	async function onSearch() {
+		const term = searchTerm.value.trim()
+		if (term.length == 0) {
+			uni.showToast({ title: '请输入关键词', icon: 'none' })
+			return
+		}
+		const matrix = getMatrix()
+		if (matrix == null) return
+		loading.value = true
+		hasSearched.value = true
+		results.value = []
+		nextBatch.value = ''
+		try {
+			await loadRoomNames()
+			const roomIds: Array<string> = []
+			if (filterScope.value == 'room' && currentRoomId.value.length > 0) {
+				roomIds.push(currentRoomId.value)
+			}
+			const res = await matrix.searchMessages(term, roomIds, 20, '')
+			results.value = collectHits(res.results)
+			nextBatch.value = res.next_batch
+			totalCount.value = res.count
+		} catch (e) {
+			console.warn('搜索失败', e)
+			uni.showToast({ title: '搜索失败: ' + errText(e, ''), icon: 'none' })
+		}
+		loading.value = false
+	}
+
+	function setScope(scope: string) {
+		filterScope.value = scope
+		if (hasSearched.value) onSearch()
+	}
+
+	async function loadMore() {
+		if (nextBatch.value.length == 0 || loading.value) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		loading.value = true
+		try {
+			const term = searchTerm.value.trim()
+			const roomIds: Array<string> = []
+			if (filterScope.value == 'room' && currentRoomId.value.length > 0) {
+				roomIds.push(currentRoomId.value)
+			}
+			const res = await matrix.searchMessages(term, roomIds, 20, nextBatch.value)
+			results.value = results.value.concat(collectHits(res.results))
+			nextBatch.value = res.next_batch
+		} catch (e) {
+			uni.showToast({ title: '加载失败', icon: 'none' })
+		}
+		loading.value = false
+	}
+
+	function onTapResult(item: ResultItem) {
+		openChat(item.room_id, item.event_id)
+	}
+
+	onMounted(() => {
+		// 可选：从上一个页面传入房间 ID
+		const pages = getCurrentPages()
+		if (pages.length == 0) return
+		const cur = pages[pages.length - 1] as UTSJSONObject
+		const opts = cur['options'] as UTSJSONObject
+		if (opts == null) return
+		const rid = opts['roomId'] as string
+		if (rid != null && rid.length > 0) {
+			currentRoomId.value = rid
+			filterScope.value = 'room'
+		}
+	})
+</script>
+
+<style>
+	.search-page {
+		flex: 1;
+		background-color: #f7f7fa;
+	}
+
+	.topbar {
+		background-color: #fff;
+		padding-top: 88rpx;
+		padding-left: 16rpx;
+		padding-right: 24rpx;
+		padding-bottom: 16rpx;
+		flex-direction: row;
+		align-items: center;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #e8e8ec;
+	}
+
+	.topbar-back {
+		font-size: 40rpx;
+		color: #1f6feb;
+		padding: 0 12rpx;
+	}
+
+	.search-input-wrap {
+		flex: 1;
+		flex-direction: row;
+		align-items: center;
+		background-color: #f0f0f5;
+		border-radius: 16rpx;
+		padding: 12rpx 16rpx;
+	}
+
+	.search-icon {
+		font-size: 28rpx;
+		margin-right: 8rpx;
+	}
+
+	.search-input {
+		flex: 1;
+		font-size: 28rpx;
+		color: #333;
+	}
+
+	.search-placeholder {
+		color: #aaa;
+		font-size: 28rpx;
+	}
+
+	.clear-btn {
+		font-size: 28rpx;
+		color: #999;
+		padding-left: 8rpx;
+	}
+
+	.search-btn {
+		font-size: 28rpx;
+		color: #1f6feb;
+		margin-left: 20rpx;
+	}
+
+	.filter-bar {
+		flex-direction: row;
+		background-color: #fff;
+		padding: 16rpx 32rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f0f0f5;
+	}
+
+	.filter-chip {
+		padding: 8rpx 24rpx;
+		border-radius: 24rpx;
+		background-color: #f0f0f5;
+		margin-right: 16rpx;
+	}
+
+	.filter-chip.active {
+		background-color: #1f6feb;
+	}
+
+	.filter-chip-text {
+		font-size: 24rpx;
+		color: #666;
+	}
+
+	.filter-chip.active .filter-chip-text {
+		color: #fff;
+	}
+
+	.results-scroll {
+		flex: 1;
+		height: 0;
+	}
+
+	.state-row {
+		padding: 80rpx 40rpx;
+		align-items: center;
+	}
+
+	.state-text-large {
+		font-size: 80rpx;
+		margin-bottom: 24rpx;
+	}
+
+	.state-text {
+		font-size: 28rpx;
+		color: #999;
+	}
+
+	.result-item {
+		flex-direction: row;
+		padding: 24rpx 32rpx;
+		background-color: #fff;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f0f0f5;
+	}
+
+	.result-avatar {
+		width: 80rpx;
+		height: 80rpx;
+		border-radius: 16rpx;
+		background-color: #e0e0e6;
+		margin-right: 24rpx;
+	}
+
+	.result-body {
+		flex: 1;
+		flex-direction: column;
+	}
+
+	.result-line1 {
+		flex-direction: row;
+		justify-content: space-between;
+		margin-bottom: 8rpx;
+	}
+
+	.result-room {
+		font-size: 26rpx;
+		color: #1f6feb;
+		font-weight: 500;
+	}
+
+	.result-time {
+		font-size: 22rpx;
+		color: #999;
+	}
+
+	.result-sender {
+		font-size: 22rpx;
+		color: #999;
+		margin-bottom: 6rpx;
+	}
+
+	.result-content {
+		font-size: 28rpx;
+		color: #333;
+		line-height: 1.5;
+	}
+
+	.result-content-text {
+		font-size: 28rpx;
+		color: #333;
+		line-height: 1.5;
+	}
+
+	.load-more {
+		padding: 32rpx;
+		align-items: center;
+		background-color: #fff;
+		margin-top: 20rpx;
+	}
+
+	.load-more-text {
+		font-size: 26rpx;
+		color: #1f6feb;
+	}
+
+	.result-count {
+		padding: 20rpx;
+		align-items: center;
+		background-color: #f7f7fa;
+	}
+
+	.result-count-text {
+		font-size: 22rpx;
+		color: #999;
+	}
+</style>

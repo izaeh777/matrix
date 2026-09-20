@@ -1,0 +1,245 @@
+<template>
+	<view class="page">
+		<view class="top-bar">
+			<view class="back-btn" @click="onBack">
+				<text class="back-icon">‹</text>
+			</view>
+			<text class="top-title">登录</text>
+			<view class="top-spacer"></view>
+		</view>
+
+		<text class="brand">i-tiklink</text>
+		<text class="card-title">欢迎回来</text>
+		<text class="card-subtitle">使用账号密码登录 Matrix</text>
+
+		<view class="field">
+			<text class="field-label">用户名</text>
+			<view class="input-box">
+				<input
+					class="input"
+					type="text"
+					v-model="username"
+					placeholder="用户名（不含 @server）"
+					placeholder-class="placeholder"
+				/>
+			</view>
+		</view>
+
+		<view class="field">
+			<text class="field-label">密码</text>
+			<view class="input-box">
+				<input
+					class="input"
+					:type="showPwd ? 'text' : 'password'"
+					v-model="password"
+					placeholder="请输入密码"
+					placeholder-class="placeholder"
+				/>
+				<text class="input-eye" @click="togglePwd">{{ showPwd ? '隐藏' : '显示' }}</text>
+			</view>
+		</view>
+
+		<view class="btn-login" :class="loading ? 'btn-login-off' : ''" @click="onLogin">
+			<text class="btn-login-text">{{ loading ? '登录中…' : '登录' }}</text>
+		</view>
+
+		<view class="signup-row">
+			<text class="signup-text">还没有账号？</text>
+			<text class="signup-link" @click="onSignup">注册账号</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref } from 'vue'
+	import { MatrixClient, errText } from '@/common/matrix.uts'
+	import { startMatrixSession } from '@/common/app.uts'
+	import { saveSession } from '@/common/storage.uts'
+
+	const username = ref<string>('')
+	const password = ref<string>('')
+	const homeserver = ref<string>('https://matrix.itiklink.com')
+	const showPwd = ref<boolean>(false)
+	const loading = ref<boolean>(false)
+
+	function onBack() {
+		uni.navigateBack()
+	}
+
+	function togglePwd() {
+		showPwd.value = !showPwd.value
+	}
+
+	function onSignup() {
+		uni.showToast({ title: '请联系管理员开通账号', icon: 'none' })
+	}
+
+	async function onLogin() {
+		if (loading.value) return
+		const user = username.value.trim()
+		const pwd = password.value
+		if (user.length == 0) {
+			uni.showToast({ title: '请输入用户名', icon: 'none' })
+			return
+		}
+		if (pwd.length == 0) {
+			uni.showToast({ title: '请输入密码', icon: 'none' })
+			return
+		}
+
+		loading.value = true
+		uni.showLoading({ title: '登录中…' })
+		try {
+			const client = new MatrixClient()
+			const session = await client.login(homeserver.value.trim(), user, pwd)
+			const matrix = startMatrixSession(session)
+
+			try {
+				const profile = await matrix.getProfile(session.user_id)
+				session.display_name = profile.display_name
+				session.avatar_url = profile.avatar_url
+				saveSession(session)
+			} catch (e) {
+				console.warn('拉取 profile 失败，不致命', e)
+			}
+
+			uni.hideLoading()
+			uni.showToast({ title: '登录成功', icon: 'success' })
+
+			setTimeout(() => {
+				uni.reLaunch({ url: '/pages/rooms/rooms' })
+			}, 600)
+		} catch (e: any) {
+			uni.hideLoading()
+			loading.value = false
+			const msg = errText(e, '登录失败')
+			uni.showToast({ title: msg, icon: 'none', duration: 3000 })
+		}
+	}
+</script>
+
+<style>
+	.page {
+		flex: 1;
+		background: linear-gradient(180deg, #eaf6ff 0%, #ffffff 40%);
+		padding: 24rpx 48rpx 48rpx;
+	}
+
+	.top-bar {
+		flex-direction: row;
+		align-items: center;
+		margin-top: 40rpx;
+		margin-bottom: 40rpx;
+	}
+	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
+		justify-content: center;
+		align-items: center;
+	}
+	.back-icon {
+		font-size: 64rpx;
+		color: #1e6fff;
+		font-weight: 300;
+		line-height: 64rpx;
+	}
+	.top-title {
+		flex: 1;
+		text-align: center;
+		font-size: 34rpx;
+		font-weight: 700;
+		color: #0f172a;
+		margin-right: 72rpx;
+	}
+	.top-spacer {
+		width: 72rpx;
+		height: 72rpx;
+	}
+
+	.brand {
+		font-size: 40rpx;
+		font-weight: 800;
+		color: #1e7dff;
+		margin-bottom: 12rpx;
+	}
+	.card-title {
+		font-size: 48rpx;
+		font-weight: 800;
+		color: #0f172a;
+		margin-bottom: 10rpx;
+	}
+	.card-subtitle {
+		font-size: 26rpx;
+		color: #64748b;
+		margin-bottom: 48rpx;
+	}
+
+	.field {
+		margin-bottom: 28rpx;
+	}
+	.field-label {
+		font-size: 24rpx;
+		color: #475569;
+		margin-bottom: 12rpx;
+		font-weight: 600;
+	}
+	.input-box {
+		flex-direction: row;
+		align-items: center;
+		background-color: #f4f8fd;
+		border-radius: 16rpx;
+		padding: 0 24rpx;
+		height: 96rpx;
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #e2eef8;
+	}
+	.input-eye {
+		font-size: 24rpx;
+		color: #1e6fff;
+		padding: 8rpx;
+	}
+	.input {
+		flex: 1;
+		font-size: 30rpx;
+		color: #0f172a;
+		background-color: transparent;
+		height: 96rpx;
+	}
+	.placeholder {
+		color: #b8c4d4;
+	}
+
+	.btn-login {
+		height: 96rpx;
+		background-color: #1e6fff;
+		border-radius: 48rpx;
+		margin-top: 24rpx;
+		justify-content: center;
+		align-items: center;
+		flex-direction: row;
+	}
+	.btn-login-off {
+		background-color: #8fb4ff;
+	}
+	.btn-login-text {
+		color: #ffffff;
+		font-size: 32rpx;
+		font-weight: 700;
+	}
+
+	.signup-row {
+		flex-direction: row;
+		justify-content: center;
+		margin-top: 36rpx;
+	}
+	.signup-text {
+		font-size: 26rpx;
+		color: #64748b;
+	}
+	.signup-link {
+		font-size: 26rpx;
+		color: #1e6fff;
+		font-weight: 600;
+	}
+</style>

@@ -1,0 +1,99 @@
+/**
+ * 本地存储工具
+ * 封装 uni-app 的 uni.setStorage / uni.getStorage，自动做 JSON 转换
+ */
+
+const KEY_SESSION = 'matrix_session_v1'
+const KEY_SYNC_SINCE = 'matrix_sync_since_v1'
+
+export type SessionInfo = {
+	homeserver: string
+	user_id: string
+	access_token: string
+	device_id: string
+	display_name: string
+	avatar_url: string
+}
+
+export function saveSession(session: SessionInfo): void {
+	try {
+		uni.setStorageSync(KEY_SESSION, JSON.stringify(session))
+	} catch (e) {
+		console.error('saveSession 失败', e)
+	}
+}
+
+export function loadSession(): SessionInfo | null {
+	try {
+		const raw = uni.getStorageSync(KEY_SESSION)
+		if (raw == null) return null
+		let text = ''
+		try {
+			text = ('' + raw).trim()
+		} catch (e0) {
+			text = ''
+		}
+		if (text.length == 0) return null
+		if (text.charAt(0) != '{') {
+			try {
+				text = JSON.stringify(raw).trim()
+			} catch (e1) {
+				return null
+			}
+		}
+		if (text.charAt(0) != '{') return null
+		const obj = JSON.parse(text) as UTSJSONObject
+		const token = obj.getString('access_token')
+		const hs = obj.getString('homeserver')
+		const uid = obj.getString('user_id')
+		const did = obj.getString('device_id')
+		if (token == null || token.length == 0) return null
+		if (hs == null || hs.length == 0) return null
+		if (uid == null || uid.length == 0) return null
+		const dn = obj.getString('display_name')
+		const av = obj.getString('avatar_url')
+		const session: SessionInfo = {
+			homeserver: hs,
+			user_id: uid,
+			access_token: token,
+			device_id: (did != null) ? did : '',
+			display_name: (dn != null) ? dn : '',
+			avatar_url: (av != null) ? av : ''
+		}
+		return session
+	} catch (e) {
+		console.error('loadSession 失败', e)
+	}
+	return null
+}
+
+export function saveSyncSince(since: string): void {
+	try {
+		if (since != null && since.length > 0) {
+			uni.setStorageSync(KEY_SYNC_SINCE, since)
+		}
+	} catch (e) {}
+}
+
+export function loadSyncSince(): string {
+	try {
+		const raw = uni.getStorageSync(KEY_SYNC_SINCE)
+		if (typeof raw === 'string' && raw.length > 0) return raw
+	} catch (e) {}
+	return ''
+}
+
+export function clearSyncSince(): void {
+	try {
+		uni.removeStorageSync(KEY_SYNC_SINCE)
+	} catch (e) {}
+}
+
+export function clearSession(): void {
+	try {
+		uni.removeStorageSync(KEY_SESSION)
+		uni.removeStorageSync(KEY_SYNC_SINCE)
+	} catch (e) {
+		console.error('clearSession 失败', e)
+	}
+}

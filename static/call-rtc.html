@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>call</title>
+<style>
+html,body{margin:0;padding:0;width:100%;height:100%;background:#111;overflow:hidden;font-family:sans-serif}
+#remote,#local{display:none}
+</style>
+</head>
+<body>
+<video id="remote" autoplay playsinline></video>
+<video id="local" autoplay playsinline muted></video>
+<script>
+var pc = null
+var localStream = null
+var muted = false
+var HS = ''
+var TOKEN = ''
+var ROOM = ''
+var CALL = ''
+var PARTY = ''
+function saveAuth(msg) {
+  if (msg.hs) HS = msg.hs
+  if (msg.token) TOKEN = msg.token
+  if (msg.room) ROOM = msg.room
+  if (msg.call) CALL = msg.call
+  if (msg.party) PARTY = msg.party
+}
+function mxSend(type, content, done) {
+  if (!HS || !TOKEN || !ROOM) {
+    if (done) done(false)
+    return
+  }
+  var txn = 't' + Date.now() + '_' + Math.floor(Math.random() * 10000)
+  var url = HS + '/_matrix/client/v3/rooms/' + encodeURIComponent(ROOM) + '/send/' + encodeURIComponent(type) + '/' + txn
+  fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Authorization': 'Bearer ' + TOKEN,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(content)
+  }).then(function (r) {
+    if (done) done(r.ok)
+  }).catch(function () {
+    if (done) done(false)
+  })
+}
+function emit(obj) {
+  window.__lastCallMsg = obj
+  try {
+    if (window.uni && uni.webView && uni.webView.postMessage) {
+      uni.webView.postMessage({ data: obj })
+    }
+  } catch (e) {}
+  try {
+    if (window.__dcloud_weex_postMessage) {
+      window.__dcloud_weex_postMessage({ data: [obj] })
+    }
+  } catch (e2) {}
+}
+function post(obj) { emit(obj) }
+function parseIce(text) {
+  try { return JSON.parse(text) } catch (e) { return [{ urls: 'stun:stun.l.google.com:19302' }] }
+}
+function ensurePc(ice) {
+  if (pc) return pc
+  pc = new RTCPeerConnection({ iceServers: ice })
+  pc.onicecandidate = function (ev) {
+    if (!ev || !ev.candidate) return
+    mxSend('m.call.candidates', {
+      call_id: CALL,
+      version: 1,
+      party_id: PARTY,
+      candidates: [{
+        candidate: ev.candidate.candidate,
+        sdpMid: ev.candidate.sdpMid,
+        sdpMLineIndex: ev.candidate.sdpMLineIndex
+      }]
+    })
+    post({
+      type: 'ice',
+      candidate: ev.candidate.candidate,
+      sdpMid: ev.candidate.sdpMid,
+      sdpMLineIndex: ev.candidate.sdpMLineIndex
+    })
+  }
+  pc.ontrack = function (ev) {
+    var el = document.getElementById('remote')
+    if (!el) return
+    if (ev.streams && ev.streams[0]) el.srcObject = ev.streams[0]
+    else el.srcObject = new MediaStream([ev.track])
+    el.play && el.play()
+  }
+  pc.onconnectionstatechange = function () {
+    if (!pc) return
+    if (pc.connectionState === 'connected') post({ type: 'connected' })
+    else if (pc.connectionState === 'failed') post({ type: 'failed' })
+  }
+  return pc
+}
+function addLocal(stream) {
+  localStream = stream
+  var el = document.getElementById('local')
+  if (el) {
+    el.srcObject = stream
+    el.play && el.play()
+  }
+  if (!pc) return
+  var tracks = stream.getTracks()
+  for (var i = 0; i < tracks.length; i++) pc.addTrack(tracks[i], stream)
+}
+function media(video) {
+  return navigator.mediaDevices.getUserMedia({ audio: true, video: !!video })
+}
+function hangLocal() {
+  try {
+    if (localStream) {
+      var ts = localStream.getTracks()
+      for (var i = 0; i < ts.length; i++) ts[i].stop()
+    }
+  } catch (e) {}
+  try { if (pc) pc.close() } catch (e2) {}
+  pc = null
+  localStream = null
+}
+window.__callJson = function (msg) {
+  if (!msg) return
+  var cmd = msg.cmd
+  saveAuth(msg)
+  if (cmd === 'ui') return
+  if (cmd === 'startOffer') {
+    var ice = parseIce(msg.ice || '[]')
+    var video = msg.video === '1'
+    media(video).then(function (stream) {
+      ensurePc(ice)
+      addLocal(stream)
+      return pc.createOffer().then(function (offer) {
+        return pc.setLocalDescription(offer).then(function () {
+          var content = {
+            call_id: CALL,
+            version: 1,
+            party_id: PARTY,
+            lifetime: 60000,
+            offer: { type: 'offer', sdp: offer.sdp }
+          }
+          mxSend('m.call.invite', content, function (ok) {
+            if (ok) post({ type: 'invited' })
+            else post({ type: 'offer', sdp: offer.sdp })
+          })
+        })
+      })
+    }).catch(function (e) {
+      post({ type: 'error', message: '无法打开麦克风/摄像头' })
+    })
+    return
+  }
+  if (cmd === 'startAnswer') {
+    var ice2 = parseIce(msg.ice || '[]')
+    var video2 = msg.video === '1'
+    var sdp = msg.sdp || ''
+    media(video2).then(function (stream) {
+      ensurePc(ice2)
+      addLocal(stream)
+      return pc.setRemoteDescription({ type: 'offer', sdp: sdp }).then(function () {
+        return pc.createAnswer().then(function (answer) {
+          return pc.setLocalDescription(answer).then(function () {
+            var content = {
+              call_id: CALL,
+              version: 1,
+              party_id: PARTY,
+              answer: { type: 'answer', sdp: answer.sdp }
+            }
+            mxSend('m.call.answer', content, function (ok) {
+              if (!ok) post({ type: 'answer', sdp: answer.sdp })
+              else post({ type: 'connected' })
+            })
+          })
+        })
+      })
+    }).catch(function (e) {
+      post({ type: 'error', message: '无法打开麦克风/摄像头' })
+    })
+    return
+  }
+  if (cmd === 'remoteAnswer') {
+    if (!pc) return
+    pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp || '' }).catch(function () {})
+    return
+  }
+  if (cmd === 'ice') {
+    if (!pc) return
+    pc.addIceCandidate({
+      candidate: msg.candidate || '',
+      sdpMid: msg.sdpMid || '',
+      sdpMLineIndex: msg.sdpMLineIndex
+    }).catch(function () {})
+    return
+  }
+  if (cmd === 'mute') {
+    muted = !muted
+    try {
+      if (localStream) {
+        var at = localStream.getAudioTracks()
+        for (var i = 0; i < at.length; i++) at[i].enabled = !muted
+      }
+    } catch (e) {}
+    return
+  }
+  if (cmd === 'hangup') {
+    hangLocal()
+  }
+}
+emit({ type: 'ready' })
+</script>
+</body>
+</html>
