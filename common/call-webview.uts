@@ -104,6 +104,7 @@ export function tuneCallWebView(): void {
 	}
 	try {
 		applyWebSettings(wv)
+		wv.setLayerType(2, null)
 		console.log('[call] webview audio unlocked')
 	} catch (e) {
 		console.warn('[call] tune webview', e)
@@ -213,6 +214,42 @@ export function destroyCallEngine(): void {
 	} catch (e2) {}
 }
 
+export function reloadEngineAsHttps(done: (ok: boolean) => void): void {
+	const wv = getCallWebView()
+	if (wv == null) {
+		console.warn('[call] https reload no webview')
+		done(false)
+		return
+	}
+	applyWebSettings(wv)
+	try { wv.setLayerType(2, null) } catch (e0) {}
+	try {
+		const fs = uni.getFileSystemManager()
+		fs.readFile({
+			filePath: '/static/call-engine.html',
+			encoding: 'utf-8',
+			success: (res) => {
+				try {
+					const html = '' + res.data
+					wv.loadDataWithBaseURL('https://localhost/', html, 'text/html', 'UTF-8', 'https://localhost/')
+					console.log('[call] https engine loaded', html.length)
+					done(true)
+				} catch (e1) {
+					console.warn('[call] https load fail', e1)
+					done(false)
+				}
+			},
+			fail: (err) => {
+				console.warn('[call] read engine fail', err.errMsg)
+				done(false)
+			}
+		})
+	} catch (e) {
+		console.warn('[call] https reload', e)
+		done(false)
+	}
+}
+
 export function pullCallHtmlMsg(handler: (kind: string, payload: string, cand: UTSJSONObject) => void): void {
 	const wv = getCallWebView()
 	if (wv == null) return
@@ -272,6 +309,9 @@ export function ensureCallEngine(): void {
 }
 export function destroyCallEngine(): void {}
 export function pullCallHtmlMsg(_handler: (kind: string, payload: string, cand: UTSJSONObject) => void): void {}
+export function reloadEngineAsHttps(done: (ok: boolean) => void): void {
+	done(false)
+}
 export function getCallWebView(): any | null {
 	return null
 }

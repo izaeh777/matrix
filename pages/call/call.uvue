@@ -39,7 +39,7 @@
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted, nextTick, getCurrentInstance } from 'vue'
 	import { getCallManager, CallManager, CallSnapshot } from '@/common/call.uts'
-	import { tuneCallWebView, makeNativeEval, pingCallEngine, destroyCallEngine } from '@/common/call-webview.uts'
+	import { tuneCallWebView, makeNativeEval, pingCallEngine, destroyCallEngine, reloadEngineAsHttps } from '@/common/call-webview.uts'
 	// #ifdef APP-ANDROID
 	import WebView from 'android.webkit.WebView'
 	import FrameLayout from 'android.widget.FrameLayout'
@@ -52,6 +52,7 @@
 	})
 	let off: (() => void) | null = null
 	let closing: boolean = false
+	let httpsTried: boolean = false
 	let engineH = 520
 	try {
 		const info = uni.getSystemInfoSync()
@@ -67,6 +68,7 @@
 	const engineSrc = ref<string>(makeEngineSrc())
 
 	function refreshEngineSrc(): void {
+		if (httpsTried) return
 		const next = makeEngineSrc()
 		if (engineSrc.value == next) return
 		engineSrc.value = next
@@ -257,36 +259,67 @@
 		}
 	}
 
+	let lastKickKey = ''
 	function kickEngine(): void {
 		const mgr = getCallManager()
 		if (mgr.phase == 'idle') return
 		const ok = bindWeb()
-		console.log('[call] kickEngine', mgr.phase, 'bind', ok, 'loaded', mgr.htmlLoaded)
+		console.log('[call] kickEngine', mgr.phase, 'bind', ok, 'loaded', mgr.htmlLoaded, 'https', httpsTried)
 		try { tuneCallWebView() } catch (e1) {}
+		if (!httpsTried) return
 		if (!ok) return
+		const key = mgr.callId + '|' + mgr.phase + (mgr.htmlLoaded ? '|1' : '|0')
+		if (mgr.htmlLoaded && lastKickKey == key) return
+		if (mgr.htmlLoaded) lastKickKey = key
+		if (mgr.htmlLoaded) {
+			runEngineCmd()
+			return
+		}
 		try {
 			pingCallEngine((ready: boolean): void => {
 				if (ready) {
 					mgr.htmlLoaded = true
+					lastKickKey = mgr.callId + '|' + mgr.phase + '|1'
 					console.log('[call] engine ping ready', mgr.phase)
+					runEngineCmd()
 				}
-				runEngineCmd()
 			})
 		} catch (e2) {
 			runEngineCmd()
 		}
-		if (mgr.htmlLoaded) runEngineCmd()
 	}
 
 	function onWebLoad(_e: UniWebViewLoadEvent): void {
 		const mgr = getCallManager()
-		console.log('[call] engine loaded', mgr.phase, mgr.callId)
+		console.log('[call] engine loaded', mgr.phase, mgr.callId, 'httpsTried', httpsTried)
+		bindWeb()
+		try { tuneCallWebView() } catch (e0) {}
+		if (!httpsTried) {
+			httpsTried = true
+			mgr.htmlLoaded = false
+			try {
+				reloadEngineAsHttps((ok: boolean): void => {
+					console.log('[call] https engine', ok)
+					setTimeout(() => {
+						mgr.htmlLoaded = true
+						kickEngine()
+					}, ok ? 500 : 0)
+				})
+			} catch (e1) {
+				mgr.htmlLoaded = true
+				kickEngine()
+			}
+			return
+		}
 		mgr.htmlLoaded = true
 		kickEngine()
 	}
 
 	function onWebError(e: UniWebViewErrorEvent): void {
-		console.warn('[call] web-view error', e.detail.errMsg)
+		const msg = e.detail.errMsg
+		console.warn('[call] web-view error', msg)
+		if (httpsTried) return
+		if (msg.indexOf('page error') >= 0) return
 		uni.showToast({ title: '通话页加载失败', icon: 'none' })
 	}
 
@@ -387,6 +420,7 @@
 			mgr.adoptIfIdle()
 		}
 		ui.value = mgr.getSnapshot()
+		let watchPhase = mgr.phase
 		off = mgr.onChange((s: CallSnapshot) => {
 			ui.value = s
 			refreshEngineSrc()
@@ -396,7 +430,10 @@
 				}, 400)
 				return
 			}
-			kickEngine()
+			if (s.phase != watchPhase) {
+				watchPhase = s.phase
+				kickEngine()
+			}
 		})
 		if (mgr.phase == 'idle') {
 			console.log('[call] still idle, stay and wait')
@@ -406,11 +443,8 @@
 		refreshEngineSrc()
 		console.log('[call] engine src', engineSrc.value)
 		kickEngine()
-		setTimeout(() => { kickEngine() }, 300)
-		setTimeout(() => { kickEngine() }, 900)
-		setTimeout(() => { kickEngine() }, 1800)
-		setTimeout(() => { kickEngine() }, 3500)
-		setTimeout(() => { kickEngine() }, 6000)
+		setTimeout(() => { kickEngine() }, 400)
+		setTimeout(() => { kickEngine() }, 1600)
 		mgr.attachDom()
 		// #ifdef H5
 		if (mgr.phase == 'outgoing') {
@@ -463,6 +497,7 @@
 			mgr.htmlReady = false
 			mgr.htmlLoaded = false
 		}
+		httpsTried = false
 		if (getCallManager().phase == 'idle') pageDestroyEngine()
 	})
 </script>

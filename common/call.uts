@@ -127,6 +127,7 @@ export class CallManager {
 	connectedAt: number = 0
 	initiatorId: string = ''
 	outgoingReady: boolean = false
+	incomingArmed: boolean = false
 	lastInvite: UTSJSONObject | null = null
 	leaveGen: number = 0
 	signalTimer: number | null = null
@@ -692,6 +693,7 @@ export class CallManager {
 		this.htmlPollN = 0
 		this.inviteeId = ''
 		this.outgoingReady = false
+		this.incomingArmed = false
 		this.lastInvite = null
 		this.streamId = 'usermedia'
 		this.sub = isVideo ? '正在呼叫（视频）…' : '正在呼叫（语音）…'
@@ -956,7 +958,7 @@ export class CallManager {
 		this.fillHtmlIce(msg)
 		this.sendToHtml(msg)
 		this.armTimeout()
-		this.sub = '正在呼叫…'
+		this.sub = this.isVideo ? '正在呼叫（视频）…' : '正在呼叫…'
 		this.emit()
 		this.pushUi()
 		this.htmlPollN = 0
@@ -996,6 +998,11 @@ export class CallManager {
 			console.log('[call] armIncoming wait engine')
 			return
 		}
+		if (this.incomingArmed) {
+			this.pushUi()
+			return
+		}
+		this.incomingArmed = true
 		const msg = this.buildHtmlStart('armAnswer', this.pendingRemoteSdp)
 		this.fillHtmlIce(msg)
 		msg['name'] = this.peerName
@@ -1014,6 +1021,7 @@ export class CallManager {
 		setTimeout(() => {
 			if (this.phase != 'outgoing' && this.phase != 'connecting') return
 			if (this.connectedAt > 0) return
+			if (this.answerSent) return
 			if (this.phase == 'outgoing' && this.invitePosted) return
 			const flush: UTSJSONObject = {}
 			flush['cmd'] = 'flush'
@@ -1348,6 +1356,7 @@ export class CallManager {
 		this.htmlPollN = 0
 		this.invitePosted = false
 		this.outgoingReady = false
+		this.incomingArmed = false
 		this.lastInvite = null
 		this.htmlBoot = ''
 		this.htmlLoaded = false
@@ -1542,6 +1551,7 @@ export class CallManager {
 				this.answerSent = false
 				this.offerStarted = false
 				this.invitePosted = false
+				this.incomingArmed = false
 				this.connectedAt = 0
 				this.htmlEval = null
 				this.htmlReady = false
@@ -1574,6 +1584,7 @@ export class CallManager {
 			this.answerSent = false
 			this.htmlPollN = 0
 			this.invitePosted = false
+			this.incomingArmed = false
 			const cached = matrix != null ? matrix.getCachedUserName(sender) : ''
 			this.peerName = cached.length > 0 ? cached : localPart(sender)
 			this.sub = this.isVideo ? '邀请你视频通话' : '邀请你语音通话'
