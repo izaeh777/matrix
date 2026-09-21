@@ -30,6 +30,8 @@ body.call-audio #remote,body.call-audio #local{width:0;height:0;opacity:0;border
 var pc = null
 var localStream = null
 var muted = false
+var camFacing = 'user'
+var camFlipping = false
 var started = false
 var remoteSet = false
 var iceBuf = []
@@ -278,6 +280,7 @@ function addLocal(stream) {
     el.setAttribute('playsinline', 'true')
     el.setAttribute('webkit-playsinline', 'true')
     el.srcObject = stream
+    el.style.transform = camFacing === 'environment' ? 'none' : 'scaleX(-1)'
     safePlay(el)
   }
   if (!pc) return
@@ -286,10 +289,58 @@ function addLocal(stream) {
 }
 function videoConstraints() {
   return {
-    facingMode: 'user',
+    facingMode: { ideal: camFacing },
     width: { ideal: 640 },
     height: { ideal: 480 }
   }
+}
+function applyLocalMirror() {
+  var el = document.getElementById('local')
+  if (!el) return
+  el.style.transform = camFacing === 'environment' ? 'none' : 'scaleX(-1)'
+}
+function applyNewVideo(ns, want) {
+  var nt = ns.getVideoTracks && ns.getVideoTracks()[0]
+  if (!nt || !localStream) throw new Error('no video')
+  if (pc && pc.getSenders) {
+    var senders = pc.getSenders()
+    for (var i = 0; i < senders.length; i++) {
+      var t = senders[i].track
+      if (t && t.kind === 'video' && senders[i].replaceTrack) senders[i].replaceTrack(nt)
+    }
+  }
+  var olds = localStream.getVideoTracks()
+  for (var j = 0; j < olds.length; j++) {
+    try { localStream.removeTrack(olds[j]) } catch (e0) {}
+    try { olds[j].stop() } catch (e1) {}
+  }
+  localStream.addTrack(nt)
+  camFacing = want
+  var el = document.getElementById('local')
+  if (el) {
+    el.srcObject = localStream
+    applyLocalMirror()
+    safePlay(el)
+  }
+}
+function flipCamera(want) {
+  if (camFlipping || !localStream) return
+  var olds = localStream.getVideoTracks ? localStream.getVideoTracks() : []
+  if (!olds.length) return
+  var next = want || (camFacing === 'user' ? 'environment' : 'user')
+  camFlipping = true
+  var exact = { audio: false, video: { facingMode: { exact: next }, width: { ideal: 640 }, height: { ideal: 480 } } }
+  var soft = { audio: false, video: { facingMode: { ideal: next }, width: { ideal: 640 }, height: { ideal: 480 } } }
+  navigator.mediaDevices.getUserMedia(exact).catch(function () {
+    return navigator.mediaDevices.getUserMedia(soft)
+  }).then(function (ns) {
+    applyNewVideo(ns, next)
+    camFlipping = false
+    console.log('[engine] flipped', next)
+  }).catch(function (e) {
+    camFlipping = false
+    console.log('[engine] flip fail', e && e.message)
+  })
 }
 function audioConstraints() {
   return {
@@ -345,6 +396,8 @@ function hangLocal() {
   pc = null
   localStream = null
   started = false
+  camFacing = 'user'
+  camFlipping = false
   remoteSet = false
   iceBuf = []
 }
@@ -492,6 +545,10 @@ window.__callJson = function (msg) {
         for (var i = 0; i < vt.length; i++) vt[i].enabled = !off
       }
     } catch (e) {}
+    return
+  }
+  if (cmd === 'flip') {
+    flipCamera(msg.facing || '')
     return
   }
   if (cmd === 'hangup') {

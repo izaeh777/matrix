@@ -92,6 +92,8 @@ export class CallManager {
 	sub: string = ''
 	muted: boolean = false
 	cameraOff: boolean = false
+	camRear: boolean = false
+	camFlipping: boolean = false
 	partyId: string = 'p' + Date.now().toString()
 
 	listeners: Array<CallListener> = []
@@ -612,7 +614,7 @@ export class CallManager {
 					autoGainControl: true,
 					channelCount: 1
 				},
-				video: this.isVideo ? { facingMode: 'user' } : false
+				video: this.isVideo ? { facingMode: this.camRear ? 'environment' : 'user' } : false
 			})
 			const stream = this.localStream
 			const pc = this.rtcPc
@@ -699,6 +701,7 @@ export class CallManager {
 		this.sub = isVideo ? '正在呼叫（视频）…' : '正在呼叫（语音）…'
 		this.muted = false
 		this.cameraOff = false
+		this.camRear = false
 		this.peerName = '对方'
 		this.emit()
 		// #ifdef APP-ANDROID
@@ -1424,6 +1427,67 @@ export class CallManager {
 		this.emit()
 	}
 
+	flipCamera(): void {
+		if (this.isVideo == false) return
+		if (this.cameraOff) return
+		if (this.camFlipping) return
+		this.camFlipping = true
+		this.camRear = !this.camRear
+		const facing = this.camRear ? 'environment' : 'user'
+		// #ifndef H5
+		const m: UTSJSONObject = {}
+		m['cmd'] = 'flip'
+		m['facing'] = facing
+		this.sendToHtml(m)
+		console.log('[call] flip camera', facing)
+		// #endif
+		// #ifdef H5
+		this.flipH5Camera(facing)
+		// #endif
+		setTimeout(() => {
+			this.camFlipping = false
+		}, 1500)
+	}
+
+	async flipH5Camera(facing: string): Promise<void> {
+		// #ifdef H5
+		try {
+			const nv = await (window as any).navigator.mediaDevices.getUserMedia({
+				audio: false,
+				video: { facingMode: { ideal: facing }, width: { ideal: 640 }, height: { ideal: 480 } }
+			})
+			const nt = nv.getVideoTracks()[0]
+			if (nt == null) {
+				this.camRear = !this.camRear
+				return
+			}
+			const pc = this.rtcPc
+			if (pc != null) {
+				const senders = pc.getSenders()
+				for (let i = 0; i < senders.length; i++) {
+					const tr = senders[i].track
+					if (tr != null && tr.kind == 'video') {
+						senders[i].replaceTrack(nt)
+					}
+				}
+			}
+			const stream = this.localStream
+			if (stream != null) {
+				const olds = stream.getVideoTracks()
+				for (let j = 0; j < olds.length; j++) {
+					try { stream.removeTrack(olds[j]) } catch (e0) {}
+					try { olds[j].stop() } catch (e1) {}
+				}
+				stream.addTrack(nt)
+				this.attachStream('.call-local', stream, true)
+			}
+		} catch (e) {
+			this.camRear = !this.camRear
+			console.warn('[call] flip camera fail', e)
+		}
+		// #endif
+	}
+
 	armTimeout(): void {
 		this.clearTimer()
 		this.timer = setTimeout((): void => {
@@ -1590,6 +1654,7 @@ export class CallManager {
 			this.sub = this.isVideo ? '邀请你视频通话' : '邀请你语音通话'
 			this.muted = false
 			this.cameraOff = false
+			this.camRear = false
 			this.htmlBoot = 'in'
 			this.emit()
 			this.armTimeout()

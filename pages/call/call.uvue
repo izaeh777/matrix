@@ -28,6 +28,9 @@
 				<view v-if="showCamBtn()" class="call-btn call-btn-cam" @click="onCam">
 					<text class="call-btn-text">{{ ui.cameraOff ? '开摄像头' : '关摄像头' }}</text>
 				</view>
+				<view v-if="showFlipBtn()" class="call-btn call-btn-cam" @click="onFlip">
+					<text class="call-btn-text">翻转</text>
+				</view>
 				<view v-if="showHangBtn()" class="call-btn call-btn-hang" @click="onHang">
 					<text class="call-btn-text">挂断</text>
 				</view>
@@ -78,12 +81,18 @@
 	function showInCall(): boolean {
 		const p = ui.value.phase
 		if (p == 'outgoing') return true
+		if (p == 'connecting') return true
 		if (p == 'connected') return true
 		return false
 	}
 	function showCamBtn(): boolean {
 		if (ui.value.isVideo == false) return false
 		return showInCall()
+	}
+	function showFlipBtn(): boolean {
+		if (showCamBtn() == false) return false
+		if (ui.value.cameraOff) return false
+		return true
 	}
 	function showHangBtn(): boolean {
 		const p = ui.value.phase
@@ -470,6 +479,9 @@
 	}
 	function onCam() {
 		getCallManager().toggleCamera()
+	}
+	function onFlip() {
+		getCallManager().flipCamera()
 	}
 
 	onMounted(() => {
