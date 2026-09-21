@@ -215,8 +215,12 @@ export class CallManager {
 			const ts = parseInt(tsRaw)
 			if (ts > 0 && Date.now() - ts > 120000) return
 		}
-		this.phase = fieldStr(snap, 'phase')
-		if (this.phase.length == 0) this.phase = 'ringing'
+		const phase = fieldStr(snap, 'phase')
+		if (phase == 'connected' || phase == 'ended' || phase == 'idle') {
+			this.clearSnap()
+			return
+		}
+		this.phase = (phase.length > 0) ? phase : 'ringing'
 		this.callId = cid
 		this.roomId = fieldStr(snap, 'roomId')
 		this.pendingRemoteSdp = fieldStr(snap, 'sdp')
@@ -294,6 +298,7 @@ export class CallManager {
 			getCallManager().handleEvent(event, rid)
 		})
 		this.startSignalPoll()
+		this.dropZombieConnected()
 		console.log('[call] voip handler bound', matrix.userId)
 	}
 
@@ -311,6 +316,7 @@ export class CallManager {
 
 	async tickSignalPoll(): Promise<void> {
 		if (this.signalBusy) return
+		if (this.phase == 'idle' || this.phase == 'ended') return
 		const matrix = getMatrix()
 		if (matrix == null) return
 		this.signalBusy = true
@@ -599,7 +605,12 @@ export class CallManager {
 		// #ifdef H5
 		try {
 			this.localStream = await (window as any).navigator.mediaDevices.getUserMedia({
-				audio: true,
+				audio: {
+					echoCancellation: true,
+					noiseSuppression: true,
+					autoGainControl: true,
+					channelCount: 1
+				},
 				video: this.isVideo ? { facingMode: 'user' } : false
 			})
 			const stream = this.localStream
@@ -652,7 +663,10 @@ export class CallManager {
 
 	async startOutgoing(roomId: string, isVideo: boolean): Promise<boolean> {
 		this.bindMatrix()
-		if (Date.now() - this.lastHangAt < 1500) return false
+		if (Date.now() - this.lastHangAt < 1500) {
+			uni.showToast({ title: '请稍后再拨', icon: 'none' })
+			return false
+		}
 		if (this.phase != 'idle') {
 			uni.showToast({ title: '已在通话中', icon: 'none' })
 			return false
@@ -776,7 +790,7 @@ export class CallManager {
 	}
 
 	packHtmlMsg(msg: UTSJSONObject): string {
-		const keys: Array<string> = ['cmd', 'ice', 'video', 'sdp', 'hs', 'token', 'room', 'call', 'party', 'invitee', 'name', 'sub', 'phase', 'incoming', 'candidate', 'sdpMid']
+		const keys: Array<string> = ['cmd', 'ice', 'video', 'sdp', 'hs', 'token', 'room', 'call', 'party', 'invitee', 'name', 'sub', 'phase', 'incoming', 'candidate', 'sdpMid', 'off']
 		const parts: Array<string> = []
 		for (let i = 0; i < keys.length; i++) {
 			const k = keys[i]
@@ -1381,6 +1395,12 @@ export class CallManager {
 
 	toggleCamera(): void {
 		this.cameraOff = !this.cameraOff
+		// #ifndef H5
+		const m: UTSJSONObject = {}
+		m['cmd'] = 'camera'
+		m['off'] = this.cameraOff ? '1' : '0'
+		this.sendToHtml(m)
+		// #endif
 		// #ifdef H5
 		try {
 			const stream = this.localStream
@@ -1440,6 +1460,28 @@ export class CallManager {
 		return false
 	}
 
+	eventAgeMs(event: MatrixEvent): number {
+		let ts = event.origin_server_ts != null ? event.origin_server_ts : 0
+		if (ts > 0 && ts < 1000000000000) ts = ts * 1000
+		if (ts <= 0) return 0
+		return Date.now() - ts
+	}
+
+	dropZombieConnected(): void {
+		if (this.phase != 'connected') return
+		if (this.htmlEval != null) return
+		if (this.rtcPc != null) return
+		console.log('[call] drop zombie connected', this.callId)
+		this.phase = 'idle'
+		this.callId = ''
+		this.roomId = ''
+		this.sub = ''
+		this.connectedAt = 0
+		this.remoteDescReady = false
+		this.clearSnap()
+		this.emit()
+	}
+
 	handleEvent(event: MatrixEvent, rid: string): void {
 		const type = event.type
 		const sender = (event.sender != null) ? event.sender : ''
@@ -1458,6 +1500,11 @@ export class CallManager {
 		let key = eid
 		if (key.length == 0) key = type + '|' + callId + '|' + ('' + ts0)
 		if (this.alreadySeen(key)) return
+		const age = this.eventAgeMs(event)
+		if (age > 90000) {
+			console.log('[call] ignore stale', type, age)
+			return
+		}
 		console.log('[call] handle', type, 'id=', callId, 'from=', sender, 'room=', roomId)
 		const matrix = getMatrix()
 		const myId = (matrix != null) ? matrix.userId : ''
@@ -1544,6 +1591,14 @@ export class CallManager {
 		if (Date.now() - this.lastHangAt < 1500 && this.phase == 'idle') return
 
 		if (type == 'm.call.answer') {
+			if (this.phase != 'outgoing' && this.phase != 'connecting') {
+				console.log('[call] ignore answer, not calling', this.phase)
+				return
+			}
+			if (this.callId.length == 0 || this.callId != callId) {
+				console.log('[call] ignore answer, call mismatch')
+				return
+			}
 			const answer = content.getJSON('answer')
 			let sdp = ''
 			if (answer != null) sdp = fieldStr(answer, 'sdp')
@@ -1578,6 +1633,8 @@ export class CallManager {
 		}
 
 		if (type == 'm.call.negotiate') {
+			if (this.phase == 'idle' || this.phase == 'ended') return
+			if (this.callId.length == 0 || this.callId != callId) return
 			const desc = content.getJSON('description')
 			let sdp = ''
 			if (desc != null) sdp = fieldStr(desc, 'sdp')
@@ -1595,6 +1652,8 @@ export class CallManager {
 		}
 
 		if (type == 'm.call.candidates') {
+			if (this.phase == 'idle' || this.phase == 'ended') return
+			if (this.callId.length == 0 || this.callId != callId) return
 			const raw = content.getArray('candidates')
 			if (raw == null) return
 			for (let i = 0; i < raw.length; i++) {
@@ -1685,6 +1744,7 @@ export function getCallManager(): CallManager {
 	if (matrix != null) {
 		matrix.voipHold = mgr
 	}
+	mgr.dropZombieConnected()
 	mgr.adoptIfIdle()
 	return mgr
 }

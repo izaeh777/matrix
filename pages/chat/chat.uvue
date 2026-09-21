@@ -1547,11 +1547,14 @@
 		startingCall = true
 		showMorePanel.value = false
 		showEmojiPanel.value = false
-		const mgr = getCallManager()
-		mgr.bindMatrix()
-		const ok = await mgr.startOutgoing(roomId.value, isVideo)
+		try {
+			const mgr = getCallManager()
+			mgr.bindMatrix()
+			await mgr.startOutgoing(roomId.value, isVideo)
+		} catch (e) {
+			uni.showToast({ title: errText(e, '发起通话失败'), icon: 'none' })
+		}
 		startingCall = false
-		if (!ok) return
 	}
 	function onCallRecordTap(msg: ChatMsg): void {
 		const t = pickStr(msg.info, 'call_type')

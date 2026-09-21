@@ -5,6 +5,7 @@ import WebView from 'android.webkit.WebView'
 import WebChromeClient from 'android.webkit.WebChromeClient'
 import PermissionRequest from 'android.webkit.PermissionRequest'
 import FrameLayout from 'android.widget.FrameLayout'
+import AudioManager from 'android.media.AudioManager'
 
 let injectedWv: WebView | null = null
 
@@ -67,7 +68,35 @@ function applyWebSettings(wv: WebView): void {
 	} catch (e2) {}
 }
 
+function setVoipAudioMode(): void {
+	try {
+		const act = UTSAndroid.getUniActivity()
+		if (act == null) return
+		const svc = act.getSystemService('audio')
+		if (svc == null) return
+		const am = svc as AudioManager
+		am.setMode(AudioManager.MODE_IN_COMMUNICATION)
+		am.setSpeakerphoneOn(true)
+		console.log('[call] audio mode communication')
+	} catch (e) {
+		console.warn('[call] audio mode', e)
+	}
+}
+
+function restoreVoipAudioMode(): void {
+	try {
+		const act = UTSAndroid.getUniActivity()
+		if (act == null) return
+		const svc = act.getSystemService('audio')
+		if (svc == null) return
+		const am = svc as AudioManager
+		am.setSpeakerphoneOn(false)
+		am.setMode(AudioManager.MODE_NORMAL)
+	} catch (e) {}
+}
+
 export function tuneCallWebView(): void {
+	setVoipAudioMode()
 	const wv = getCallWebView()
 	if (wv == null) {
 		console.warn('[call] native webview missing')
@@ -168,6 +197,7 @@ export function ensureCallEngine(): void {
 }
 
 export function destroyCallEngine(): void {
+	restoreVoipAudioMode()
 	const wv = injectedWv
 	injectedWv = null
 	if (wv == null) return

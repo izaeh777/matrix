@@ -12,8 +12,7 @@
 			@error="onWebError"
 		></web-view>
 		<!-- #endif -->
-		<!-- #ifdef H5 -->
-		<view class="call-mask">
+		<view class="call-bar">
 			<text class="call-name">{{ ui.peerName }}</text>
 			<text class="call-sub">{{ ui.sub }}</text>
 			<view class="call-actions">
@@ -34,14 +33,13 @@
 				</view>
 			</view>
 		</view>
-		<!-- #endif -->
 	</view>
 </template>
 
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted, nextTick, getCurrentInstance } from 'vue'
 	import { getCallManager, CallManager, CallSnapshot } from '@/common/call.uts'
-	import { tuneCallWebView, makeNativeEval, pingCallEngine, ensureCallEngine, destroyCallEngine } from '@/common/call-webview.uts'
+	import { tuneCallWebView, makeNativeEval, pingCallEngine, destroyCallEngine } from '@/common/call-webview.uts'
 	// #ifdef APP-ANDROID
 	import WebView from 'android.webkit.WebView'
 	import FrameLayout from 'android.widget.FrameLayout'
@@ -54,15 +52,17 @@
 	})
 	let off: (() => void) | null = null
 	let closing: boolean = false
-	let webCtx: WebViewContext | null = null
-	let engineH = 800
+	let engineH = 520
 	try {
 		const info = uni.getSystemInfoSync()
-		if (info.windowHeight > 200) engineH = info.windowHeight
+		if (info.windowHeight > 360) engineH = info.windowHeight - 220
 	} catch (e) {}
 
 	function makeEngineSrc(): string {
-		return '/static/call-engine.html'
+		const mgr = getCallManager()
+		const mode = mgr.isIncoming ? 'in' : 'out'
+		const v = mgr.isVideo ? '1' : '0'
+		return '/static/call-engine.html?p=' + mode + '&v=' + v
 	}
 	const engineSrc = ref<string>(makeEngineSrc())
 
@@ -109,7 +109,7 @@
 	function bindWeb(): boolean {
 		const mgr = getCallManager()
 		if (mgr.htmlEval != null) return true
-		console.log('[call] bind v4')
+		console.log('[call] bind webview')
 		try {
 			const inst = getCurrentInstance()
 			if (inst != null && inst.proxy != null) {
@@ -130,31 +130,6 @@
 				return bindCallEval((js: string): void => { wv.evalJS(js) }, 'element')
 			}
 		} catch (e0) {}
-		try {
-			const inst2 = getCurrentInstance()
-			const proxy = (inst2 != null) ? inst2.proxy : null
-			const u = uni as any
-			let ctx: WebViewContext | null = null
-			try {
-				if (proxy != null) ctx = u.createWebviewContext('callWeb', proxy) as WebViewContext
-			} catch (eH0) {}
-			if (ctx == null) {
-				try { ctx = u.createWebviewContext('callWeb') as WebViewContext } catch (eH1) {}
-			}
-			if (ctx == null) {
-				try {
-					if (proxy != null) ctx = u.createWebViewContext('callWeb', proxy) as WebViewContext
-				} catch (eA0) {}
-			}
-			if (ctx == null) {
-				try { ctx = u.createWebViewContext('callWeb') as WebViewContext } catch (eA1) {}
-			}
-			if (ctx != null) {
-				webCtx = ctx
-				const bound = ctx
-				return bindCallEval((js: string): void => { bound.evalJS(js) }, 'context')
-			}
-		} catch (e) {}
 		try {
 			const nativeFn = makeNativeEval()
 			if (nativeFn != null) {
@@ -285,16 +260,10 @@
 	function kickEngine(): void {
 		const mgr = getCallManager()
 		if (mgr.phase == 'idle') return
-		let ok = bindWeb()
-		if (!ok) {
-			console.log('[call] ensure engine')
-			try { ensureCallEngine() } catch (e0) { console.warn('[call] ensure fail', e0) }
-			ok = bindWeb()
-			if (!ok) pageEnsureEngine()
-			ok = bindWeb()
-		}
+		const ok = bindWeb()
 		console.log('[call] kickEngine', mgr.phase, 'bind', ok, 'loaded', mgr.htmlLoaded)
 		try { tuneCallWebView() } catch (e1) {}
+		if (!ok) return
 		try {
 			pingCallEngine((ready: boolean): void => {
 				if (ready) {
@@ -306,14 +275,7 @@
 		} catch (e2) {
 			runEngineCmd()
 		}
-		if (ok && mgr.htmlLoaded) runEngineCmd()
-		if (!ok || mgr.htmlLoaded == false) {
-			setTimeout(() => {
-				const ok2 = bindWeb()
-				console.log('[call] rebind', ok2)
-				if (ok2) runEngineCmd()
-			}, 400)
-		}
+		if (mgr.htmlLoaded) runEngineCmd()
 	}
 
 	function onWebLoad(_e: UniWebViewLoadEvent): void {
@@ -501,7 +463,6 @@
 			mgr.htmlReady = false
 			mgr.htmlLoaded = false
 		}
-		webCtx = null
 		if (getCallManager().phase == 'idle') pageDestroyEngine()
 	})
 </script>
@@ -515,9 +476,16 @@
 		flex-direction: column;
 	}
 	.call-engine {
-		flex: 1;
 		width: 750rpx;
-		height: 100%;
+	}
+	.call-bar {
+		width: 750rpx;
+		padding-top: 24rpx;
+		padding-bottom: 48rpx;
+		padding-left: 24rpx;
+		padding-right: 24rpx;
+		align-items: center;
+		background-color: #111111;
 	}
 	.call-web {
 		width: 8px;
@@ -530,17 +498,6 @@
 	.call-web-video {
 		width: 8px;
 		height: 8px;
-	}
-	.call-bar {
-		width: 750rpx;
-		flex: 1;
-		padding-top: 80rpx;
-		padding-bottom: 80rpx;
-		padding-left: 24rpx;
-		padding-right: 24rpx;
-		align-items: center;
-		justify-content: center;
-		background-color: #111111;
 	}
 	.call-stage {
 		position: absolute;

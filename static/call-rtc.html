@@ -103,7 +103,15 @@ function addLocal(stream) {
   for (var i = 0; i < tracks.length; i++) pc.addTrack(tracks[i], stream)
 }
 function media(video) {
-  return navigator.mediaDevices.getUserMedia({ audio: true, video: !!video })
+  return navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1
+    },
+    video: !!video
+  })
 }
 function hangLocal() {
   try {
