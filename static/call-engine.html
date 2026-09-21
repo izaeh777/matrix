@@ -21,12 +21,14 @@ var TOKEN = ''
 var ROOM = ''
 var CALL = ''
 var PARTY = ''
+var INVITEE = ''
 function saveAuth(msg) {
   if (msg.hs) HS = msg.hs
   if (msg.token) TOKEN = msg.token
   if (msg.room) ROOM = msg.room
   if (msg.call) CALL = msg.call
   if (msg.party) PARTY = msg.party
+  if (msg.invitee) INVITEE = msg.invitee
 }
 function mxSend(type, content, done) {
   if (!HS || !TOKEN || !ROOM) {
@@ -72,7 +74,7 @@ function ensurePc(ice) {
     if (!ev || !ev.candidate) return
     mxSend('m.call.candidates', {
       call_id: CALL,
-      version: 1,
+      version: '1',
       party_id: PARTY,
       candidates: [{
         candidate: ev.candidate.candidate,
@@ -139,17 +141,7 @@ window.__callJson = function (msg) {
       addLocal(stream)
       return pc.createOffer().then(function (offer) {
         return pc.setLocalDescription(offer).then(function () {
-          var content = {
-            call_id: CALL,
-            version: 1,
-            party_id: PARTY,
-            lifetime: 60000,
-            offer: { type: 'offer', sdp: offer.sdp }
-          }
-          mxSend('m.call.invite', content, function (ok) {
-            if (ok) post({ type: 'invited' })
-            else post({ type: 'offer', sdp: offer.sdp })
-          })
+          post({ type: 'offer', sdp: offer.sdp })
         })
       })
     }).catch(function (e) {
@@ -167,16 +159,7 @@ window.__callJson = function (msg) {
       return pc.setRemoteDescription({ type: 'offer', sdp: sdp }).then(function () {
         return pc.createAnswer().then(function (answer) {
           return pc.setLocalDescription(answer).then(function () {
-            var content = {
-              call_id: CALL,
-              version: 1,
-              party_id: PARTY,
-              answer: { type: 'answer', sdp: answer.sdp }
-            }
-            mxSend('m.call.answer', content, function (ok) {
-              if (!ok) post({ type: 'answer', sdp: answer.sdp })
-              else post({ type: 'connected' })
-            })
+            post({ type: 'answer', sdp: answer.sdp })
           })
         })
       })
@@ -188,6 +171,11 @@ window.__callJson = function (msg) {
   if (cmd === 'remoteAnswer') {
     if (!pc) return
     pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp || '' }).catch(function () {})
+    return
+  }
+  if (cmd === 'remoteOffer') {
+    if (!pc) return
+    pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp || '' }).catch(function () {})
     return
   }
   if (cmd === 'ice') {
@@ -214,6 +202,16 @@ window.__callJson = function (msg) {
   }
 }
 emit({ type: 'ready' })
+function bootFromHash() {
+  try {
+    var h = location.hash ? location.hash.replace(/^#/, '') : ''
+    if (!h) return
+    var msg = JSON.parse(decodeURIComponent(h))
+    window.__callJson(msg)
+  } catch (e) {}
+}
+if (document.readyState === 'complete') bootFromHash()
+else window.addEventListener('load', bootFromHash)
 </script>
 </body>
 </html>

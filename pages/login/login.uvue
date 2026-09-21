@@ -105,7 +105,7 @@
 	}
 	.brand {
 		font-size: 44rpx;
-		font-weight: 800;
+		font-weight: 700;
 		color: #1e7dff;
 		letter-spacing: -1rpx;
 	}
@@ -152,7 +152,7 @@
 
 	.title {
 		font-size: 48rpx;
-		font-weight: 800;
+		font-weight: 700;
 		color: #1e6fff;
 		line-height: 68rpx;
 		z-index: 2;

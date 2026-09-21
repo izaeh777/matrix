@@ -124,7 +124,7 @@
 		</view>
 
 		<!-- 设备详情弹窗 -->
-		<view v-if="showDeviceModal && selectedDevice" class="modal-overlay" @click="closeDeviceModal">
+		<view v-if="showDeviceModal && selectedDevice != null" class="modal-overlay" @click="closeDeviceModal">
 			<view class="modal-card" @click="stopBubble">
 				<view class="modal-title">{{ deviceName(selectedDevice) }}</view>
 				<view class="device-detail-row">

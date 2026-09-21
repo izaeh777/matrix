@@ -17,6 +17,7 @@ export function bootstrapMatrix(): MatrixClient | null {
 }
 
 export function startMatrixSession(session: SessionInfo): MatrixClient {
+	try { getCallManager().unbind() } catch (e) {}
 	const client = new MatrixClient()
 	client.applySession(session.homeserver, session.access_token, session.user_id, session.device_id)
 	setMatrix(client)

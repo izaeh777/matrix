@@ -70,16 +70,6 @@ function ensurePc(ice) {
   pc = new RTCPeerConnection({ iceServers: ice })
   pc.onicecandidate = function (ev) {
     if (!ev || !ev.candidate) return
-    mxSend('m.call.candidates', {
-      call_id: CALL,
-      version: 1,
-      party_id: PARTY,
-      candidates: [{
-        candidate: ev.candidate.candidate,
-        sdpMid: ev.candidate.sdpMid,
-        sdpMLineIndex: ev.candidate.sdpMLineIndex
-      }]
-    })
     post({
       type: 'ice',
       candidate: ev.candidate.candidate,
@@ -139,17 +129,7 @@ window.__callJson = function (msg) {
       addLocal(stream)
       return pc.createOffer().then(function (offer) {
         return pc.setLocalDescription(offer).then(function () {
-          var content = {
-            call_id: CALL,
-            version: 1,
-            party_id: PARTY,
-            lifetime: 60000,
-            offer: { type: 'offer', sdp: offer.sdp }
-          }
-          mxSend('m.call.invite', content, function (ok) {
-            if (ok) post({ type: 'invited' })
-            else post({ type: 'offer', sdp: offer.sdp })
-          })
+          post({ type: 'offer', sdp: offer.sdp })
         })
       })
     }).catch(function (e) {
@@ -167,16 +147,7 @@ window.__callJson = function (msg) {
       return pc.setRemoteDescription({ type: 'offer', sdp: sdp }).then(function () {
         return pc.createAnswer().then(function (answer) {
           return pc.setLocalDescription(answer).then(function () {
-            var content = {
-              call_id: CALL,
-              version: 1,
-              party_id: PARTY,
-              answer: { type: 'answer', sdp: answer.sdp }
-            }
-            mxSend('m.call.answer', content, function (ok) {
-              if (!ok) post({ type: 'answer', sdp: answer.sdp })
-              else post({ type: 'connected' })
-            })
+            post({ type: 'answer', sdp: answer.sdp })
           })
         })
       })

@@ -59,6 +59,7 @@ export type MatrixRoom = {
 	other_user_id?: string
 	other_displayname?: string
 	other_avatar?: string
+	encrypted?: boolean
 }
 
 export type MatrixMessage = {
@@ -163,7 +164,75 @@ type HttpResult = {
 	list: Array<UTSJSONObject>
 }
 
+function clampHttpTimeout(timeoutMs: number): number {
+	// uni-app x Android：超过 60s 常被当成非法值，请求会立刻 request:fail timeout
+	if (timeoutMs < 8000) return 8000
+	if (timeoutMs > 60000) return 60000
+	return timeoutMs
+}
+
+function isRequestTimeout(msg: string): boolean {
+	return msg.indexOf('timeout') >= 0 || msg.indexOf('TIMEOUT') >= 0
+}
+
+function httpRawUpload(url: string, token: string, filePath: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		let path = filePath
+		if (path.indexOf('file://') == 0) {
+			path = path.substring(7)
+		}
+		const header: UTSJSONObject = {
+			'Authorization': 'Bearer ' + token,
+			'Content-Type': 'application/octet-stream'
+		}
+		const fs = uni.getFileSystemManager()
+		fs.readFile({
+			filePath: path,
+			success: (rf) => {
+				uni.request({
+					url: url,
+					method: 'POST',
+					header: header,
+					data: rf.data,
+					sslVerify: false,
+					timeout: 60000,
+					success: (up: RequestSuccess<any>) => {
+						let code = 0
+						try {
+							code = up.statusCode
+						} catch (e0) {
+							code = 0
+						}
+						if (code < 200 || code >= 300) {
+							reject(new Error('上传失败 ' + code))
+							return
+						}
+						try {
+							const resBody = toJsonObj(up.data)
+							const uri = jsonStr(resBody, 'content_uri')
+							if (uri.length == 0) {
+								reject(new Error('上传失败 无 content_uri'))
+								return
+							}
+							resolve(uri)
+						} catch (e1) {
+							reject(new Error('上传失败 解析响应'))
+						}
+					},
+					fail: (err: RequestFail) => {
+						reject(new Error(err.errMsg))
+					}
+				})
+			},
+			fail: (_err) => {
+				reject(new Error('读取文件失败'))
+			}
+		})
+	})
+}
+
 function httpJson(url: string, method: string, header: UTSJSONObject, body: UTSJSONObject, timeoutMs: number): Promise<HttpResult> {
+	const waitMs = clampHttpTimeout(timeoutMs)
 	return new Promise((resolve, reject) => {
 		const onOk = (res: RequestSuccess<any>) => {
 			try {
@@ -195,13 +264,13 @@ function httpJson(url: string, method: string, header: UTSJSONObject, body: UTSJ
 			reject(new Error(err.errMsg))
 		}
 		if (method == 'GET') {
+			// GET 不要带 data，否则部分 App 端会再拼一次 query，长轮询更容易超时
 			uni.request({
 				url: url,
 				method: 'GET',
 				header: header,
-				data: body,
 				sslVerify: false,
-				timeout: timeoutMs,
+				timeout: waitMs,
 				success: onOk,
 				fail: onBad
 			})
@@ -212,7 +281,7 @@ function httpJson(url: string, method: string, header: UTSJSONObject, body: UTSJ
 				header: header,
 				data: body,
 				sslVerify: false,
-				timeout: timeoutMs,
+				timeout: waitMs,
 				success: onOk,
 				fail: onBad
 			})
@@ -223,7 +292,7 @@ function httpJson(url: string, method: string, header: UTSJSONObject, body: UTSJ
 				header: header,
 				data: body,
 				sslVerify: false,
-				timeout: timeoutMs,
+				timeout: waitMs,
 				success: onOk,
 				fail: onBad
 			})
@@ -234,7 +303,7 @@ function httpJson(url: string, method: string, header: UTSJSONObject, body: UTSJ
 				header: header,
 				data: body,
 				sslVerify: false,
-				timeout: timeoutMs,
+				timeout: waitMs,
 				success: onOk,
 				fail: onBad
 			})
@@ -333,7 +402,7 @@ export type SearchResult = {
 	next_batch: string
 }
 
-type LastMessagePreview = {
+export type LastMessagePreview = {
 	body: string
 	ts: number
 	sender: string
@@ -447,10 +516,12 @@ export class MatrixClient {
 	listRoomsInflight: Promise<MatrixRoom[]> | null = null
 	// 同步状态
 	isSyncing: boolean = false
+	syncEpoch: number = 0
 	syncAbort: (() => void) | null = null
 	since: string = ''
 	// 事件回调（向后兼容：onRoomTimeline 等同于 _timelineHandlers 的最后一项）
 	onRoomTimeline: ((event: MatrixEvent, roomId: string) => void) | null = null
+	onRoomListEvent: ((event: MatrixEvent, roomId: string) => void) | null = null
 	onRoomInvite: ((roomId: string) => void) | null = null
 	onSyncStateChange: ((state: string, error: string) => void) | null = null
 	onTyping: ((userIds: Array<string>, roomId: string) => void) | null = null
@@ -460,6 +531,10 @@ export class MatrixClient {
 	onPresence: ((content: UTSJSONObject) => void) | null = null
 	// 多订阅者列表（推荐用法）
 	timelineHandlers: Array<(event: MatrixEvent, roomId: string) => void> = []
+	voipHandlers: Array<(event: MatrixEvent, roomId: string) => void> = []
+	pendingVoipEvents: Array<MatrixEvent> = []
+	pendingVoipRooms: Array<string> = []
+	onVoipEvent: ((event: MatrixEvent, roomId: string) => void) | null = null
 	inviteHandlers: Array<(roomId: string) => void> = []
 	syncStateHandlers: Array<(state: string, error: string) => void> = []
 	typingHandlers: Array<(userIds: Array<string>, roomId: string) => void> = []
@@ -755,11 +830,13 @@ export class MatrixClient {
 	startSync(): void {
 		if (this.isSyncing) return
 		this.isSyncing = true
-		this.syncLoop()
+		this.syncEpoch = this.syncEpoch + 1
+		this.syncLoop(this.syncEpoch)
 	}
 
 	stopSync(): void {
 		this.isSyncing = false
+		this.syncEpoch = this.syncEpoch + 1
 		if (this.pollTimer != null) {
 			const t = this.pollTimer
 			clearTimeout(t)
@@ -771,7 +848,7 @@ export class MatrixClient {
 		}
 	}
 
-	async syncLoop(): Promise<void> {
+	async syncLoop(epoch: number): Promise<void> {
 		const fireState = (state: string, error: string): void => {
 			for (const h of this.syncStateHandlers) {
 				try { h(state, error) } catch (e) { console.error('sync handler error', e) }
@@ -782,13 +859,16 @@ export class MatrixClient {
 		}
 
 		let failCount = 0
-		while (this.isSyncing) {
+		let timeoutHits = 0
+		while (this.isSyncing && this.syncEpoch == epoch) {
 			try {
 				fireState('SYNCING', '')
 				const first = this.since.length == 0
-				const query: UTSJSONObject = { timeout: first ? '0' : '30000' }
+				// 服务端长轮询最多等 20s；HTTP 必须更长，且不能超过 App 端 60s 上限
+				const query: UTSJSONObject = { timeout: first ? '0' : '20000' }
 				if (this.since.length > 0) query['since'] = this.since
-				const httpMs = first ? 120000 : 45000
+				query['filter'] = '{"presence":{"not_types":["*"]},"room":{"state":{"lazy_load_members":true},"timeline":{"limit":100,"lazy_load_members":true}}}'
+				const httpMs = 60000
 				const data = (await this.request(
 					'GET',
 					'/_matrix/client/v3/sync',
@@ -797,7 +877,7 @@ export class MatrixClient {
 					httpMs
 				)) as UTSJSONObject
 
-				if (!this.isSyncing) break
+				if (!this.isSyncing || this.syncEpoch != epoch) break
 
 				const nextVal = data.getString('next_batch')
 				if (nextVal != null && nextVal.length > 0) {
@@ -807,9 +887,18 @@ export class MatrixClient {
 
 				await this.processSyncResponse(data)
 				failCount = 0
+				timeoutHits = 0
 				fireState('PREPARED', '')
 			} catch (e) {
+				if (!this.isSyncing || this.syncEpoch != epoch) break
 				const msg = `${e}`
+				if (isRequestTimeout(msg)) {
+					timeoutHits = timeoutHits + 1
+					if (timeoutHits == 1 || timeoutHits % 10 == 0) {
+						console.warn(TAG, 'sync idle timeout, retry', timeoutHits)
+					}
+					continue
+				}
 				console.error(TAG, 'sync error:', msg)
 				fireState('ERROR', msg)
 				if (msg.indexOf('M_UNKNOWN_TOKEN') >= 0) {
@@ -825,6 +914,19 @@ export class MatrixClient {
 	}
 
 	async processSyncResponse(data: UTSJSONObject): Promise<void> {
+		const toDevice = jsonObj(data, 'to_device')
+		const tdEvents = jsonArr(toDevice, 'events')
+		for (let ti = 0; ti < tdEvents.length; ti++) {
+			const ev = tdEvents[ti]
+			const evType = jsonStr(ev, 'type')
+			if (evType.indexOf('m.call.') != 0) continue
+			const parsedTd = this.parseEvent(ev)
+			const ccTd = jsonObj(ev, 'content')
+			let ridTd = jsonStr(ccTd, 'room_id')
+			if (ridTd.length == 0) ridTd = jsonStr(ev, 'room_id')
+			console.log('[sync] to-device voip', evType, 'call_id=', jsonStr(ccTd, 'call_id'), 'from=', jsonStr(ev, 'sender'), 'room=', ridTd)
+			this.fireVoip(parsedTd, ridTd)
+		}
 		const rooms = jsonObj(data, 'rooms')
 		const join = jsonObj(rooms, 'join')
 		const roomIds = jsonKeys(join)
@@ -848,6 +950,11 @@ export class MatrixClient {
 						const ev = events[ei]
 						const parsed = this.parseEvent(ev)
 						const evType = jsonStr(ev, 'type')
+						if (evType.indexOf('m.call.') == 0) {
+							const cc = jsonObj(ev, 'content')
+							console.log('[sync] voip', evType, 'call_id=', jsonStr(cc, 'call_id'), 'from=', jsonStr(ev, 'sender'), 'room=', roomId)
+							this.fireVoip(parsed, roomId)
+						}
 
 						if (evType == 'm.room.redaction') {
 							const redacts = jsonStr(ev, 'redacts')
@@ -906,15 +1013,25 @@ export class MatrixClient {
 							const sender = jsonStr(ev, 'sender')
 							const c = jsonObj(ev, 'content')
 							let body = jsonStr(c, 'body')
+							const mt = jsonStr(c, 'msgtype')
 							if (evType == 'm.room.encrypted') body = '[加密消息]'
+							else if (mt == 'm.audio') body = '[语音]'
+							else if (mt == 'm.image') body = '[图片]'
+							else if (mt == 'm.file') body = '[文件]'
+							else if (mt == 'm.call' && body.length == 0) body = '[通话]'
 							const ts = jsonNum(ev, 'origin_server_ts')
 							this.roomLastMessage.set(roomId, { body: body, ts: ts, sender: sender })
 						}
-						for (let hi = 0; hi < this.timelineHandlers.length; hi++) {
-							try { this.timelineHandlers[hi](parsed, roomId) } catch (e) { console.error('handler error', e) }
+						const directTl = this.onRoomTimeline
+						if (directTl != null) {
+							try { directTl(parsed, roomId) } catch (e0) { console.error('timeline direct error', e0) }
 						}
-						if (this.onRoomTimeline != null) {
-							try { this.onRoomTimeline(parsed, roomId) } catch (e) { console.error('legacy onRoomTimeline error', e) }
+						const listSink = this.onRoomListEvent
+						if (listSink != null) {
+							try { listSink(parsed, roomId) } catch (e0b) { console.error('room list event error', e0b) }
+						}
+						for (let hi = 0; hi < this.timelineHandlers.length; hi++) {
+							try { this.timelineHandlers[hi](parsed, roomId) } catch (e1) { console.error('handler error', e1) }
 						}
 						if (evType != 'm.room.message' && evType != 'm.reaction' && evType != 'm.room.redaction') {
 							for (let hi = 0; hi < this.stateEventHandlers.length; hi++) {
@@ -942,6 +1059,10 @@ export class MatrixClient {
 
 				const unread = jsonObj(room, 'unread_notifications')
 				const count = jsonNum(unread, 'notification_count')
+				const unreadDirect = this.onUnread
+				if (unreadDirect != null) {
+					try { unreadDirect(roomId, count) } catch (eU0) { console.error(eU0) }
+				}
 				for (let hi = 0; hi < this.unreadHandlers.length; hi++) {
 					try { this.unreadHandlers[hi](roomId, count) } catch (e) { console.error(e) }
 				}
@@ -1027,6 +1148,47 @@ export class MatrixClient {
 		return () => {
 			const idx = this.timelineHandlers.indexOf(handler)
 			if (idx >= 0) this.timelineHandlers.splice(idx, 1)
+		}
+	}
+
+	onVoip(handler: (event: MatrixEvent, roomId: string) => void): () => void {
+		this.voipHandlers.push(handler)
+		if (this.pendingVoipEvents.length > 0) {
+			const evs = this.pendingVoipEvents
+			const rooms = this.pendingVoipRooms
+			const emptyEv: Array<MatrixEvent> = []
+			const emptyRid: Array<string> = []
+			this.pendingVoipEvents = emptyEv
+			this.pendingVoipRooms = emptyRid
+			console.log('[sync] flush queued voip', evs.length)
+			for (let i = 0; i < evs.length; i++) {
+				try { handler(evs[i], rooms[i]) } catch (e) { console.error('voip handler error', e) }
+			}
+		}
+		return () => {
+			const idx = this.voipHandlers.indexOf(handler)
+			if (idx >= 0) this.voipHandlers.splice(idx, 1)
+		}
+	}
+
+	fireVoip(event: MatrixEvent, roomId: string): void {
+		const direct = this.onVoipEvent
+		if (direct != null) {
+			try { direct(event, roomId) } catch (e) { console.error('voip direct error', e) }
+			return
+		}
+		if (this.voipHandlers.length == 0) {
+			this.pendingVoipEvents.push(event)
+			this.pendingVoipRooms.push(roomId)
+			if (this.pendingVoipEvents.length > 40) {
+				this.pendingVoipEvents.splice(0, 1)
+				this.pendingVoipRooms.splice(0, 1)
+			}
+			console.warn('[sync] voip queued (no handler)', event.type)
+			return
+		}
+		for (let hi = 0; hi < this.voipHandlers.length; hi++) {
+			try { this.voipHandlers[hi](event, roomId) } catch (e) { console.error('voip handler error', e) }
 		}
 	}
 
@@ -1138,7 +1300,16 @@ export class MatrixClient {
 		const now = Date.now()
 		if (this.listRoomsCache != null && now - this.listRoomsCache.loaded_at < 30000) {
 			console.log('[listRooms] CACHE_HIT')
-			return this.listRoomsCache.rooms
+			const cachedRooms = this.listRoomsCache.rooms
+			for (let ci = 0; ci < cachedRooms.length; ci++) {
+				const last = this.roomLastMessage.get(cachedRooms[ci].room_id)
+				if (last == null) continue
+				cachedRooms[ci].last_message_preview = last.body
+				cachedRooms[ci].last_message_ts = last.ts
+				cachedRooms[ci].last_message_sender = last.sender
+			}
+			cachedRooms.sort((a, b) => (b.last_message_ts ?? 0) - (a.last_message_ts ?? 0))
+			return cachedRooms
 		}
 		console.log('[listRooms] called')
 		// 用 inflight 去重锁：把整个 listRooms 过程打包成一个 Promise
@@ -1171,6 +1342,13 @@ export class MatrixClient {
 					console.warn(TAG, 'listRooms: 获取房间详情失败', rid, e)
 				}
 			}
+			for (let li = 0; li < rooms.length; li++) {
+				const last = this.roomLastMessage.get(rooms[li].room_id)
+				if (last == null) continue
+				rooms[li].last_message_preview = last.body
+				rooms[li].last_message_ts = last.ts
+				rooms[li].last_message_sender = last.sender
+			}
 			// 按最后消息时间倒序
 			rooms.sort((a, b) => (b.last_message_ts ?? 0) - (a.last_message_ts ?? 0))
 			this.listRoomsCache = { rooms, loaded_at: Date.now() }
@@ -1195,7 +1373,14 @@ export class MatrixClient {
 			const loadedAt = loadedAtVal != null ? loadedAtVal : 0
 			if (now - loadedAt < 30000) {
 				console.log('[getRoomSummary]', roomId, 'CACHE_HIT', (now - loadedAt) + 'ms')
-				return cachedEntry['summary'] as MatrixRoom
+				const cachedRoom = cachedEntry['summary'] as MatrixRoom
+				const lastHit = this.roomLastMessage.get(roomId)
+				if (lastHit != null) {
+					cachedRoom.last_message_preview = lastHit.body
+					cachedRoom.last_message_ts = lastHit.ts
+					cachedRoom.last_message_sender = lastHit.sender
+				}
+				return cachedRoom
 			}
 		}
 		this.requestCount = this.requestCount + 1
@@ -1220,6 +1405,8 @@ export class MatrixClient {
 				room.canonical_alias = jsonStr(content, 'alias')
 			} else if (type == 'm.room.avatar') {
 				room.avatar_url = jsonStr(content, 'avatar_url')
+			} else if (type == 'm.room.encryption') {
+				room.encrypted = true
 			} else if (type == 'm.room.member') {
 				const sk = jsonStr(ev, 'state_key')
 				if (sk.length > 0 && sk != this.userId) {
@@ -1378,7 +1565,7 @@ export class MatrixClient {
 					const sk = chunk[i]['state_key'] as string
 					if (sk != null && sk.length > 0) userIds.push(sk)
 				}
-				if (userIds.length === 2 && userIds.includes(this.userId) && userIds.includes(targetUserId)) {
+				if (userIds.length == 2 && userIds.includes(this.userId) && userIds.includes(targetUserId)) {
 					return r.room_id
 				}
 			} catch (e) {}
@@ -1599,28 +1786,9 @@ export class MatrixClient {
 		// #endif
 
 		// #ifndef H5
-		return await new Promise((resolve, reject) => {
-			uni.uploadFile({
-				url: uploadUrl,
-				filePath: localPath,
-				name: 'file',
-				header: {
-					'Authorization': 'Bearer ' + this.accessToken,
-					'Content-Type': mimeType
-				},
-				success: (up: UploadFileSuccess) => {
-					if (up.statusCode < 200 || up.statusCode >= 300) {
-						reject(new Error('上传失败 ' + up.statusCode))
-						return
-					}
-					const resBody = toJsonObj(up.data)
-					resolve((resBody['content_uri'] as string) ?? '')
-				},
-				fail: (err: UploadFileFail) => {
-					reject(new Error(err.errMsg))
-				}
-			})
-		})
+		// Matrix 媒体接口要原始字节。uni.uploadFile 是 multipart，
+		// 再覆盖 Content-Type 会丢掉 boundary，homeserver 直接 415。
+		return await httpRawUpload(uploadUrl, this.accessToken, localPath)
 		// #endif
 	}
 
@@ -1658,18 +1826,25 @@ export class MatrixClient {
 
 	async sendAudio(roomId: string, mxc: string, mimeType: string, duration: number): Promise<MatrixMessage> {
 		const txnId = Date.now().toString() + Math.floor(Math.random() * 10000).toString()
-		const content: UTSJSONObject = {
-			msgtype: 'm.audio',
-			body: '语音',
-			url: mxc,
-			info: {
-				mimetype: mimeType,
-				duration: duration > 1000 ? duration : duration * 1000,
-				'org.matrix.msc1767.audio': {
-					duration: duration > 1000 ? duration : duration * 1000
-				}
-			}
-		}
+		const durMs = duration > 1000 ? duration : duration * 1000
+		const voiceFlag: UTSJSONObject = {}
+		const audioMeta: UTSJSONObject = {}
+		audioMeta['duration'] = durMs
+		const fileMeta: UTSJSONObject = {}
+		fileMeta['url'] = mxc
+		fileMeta['mimetype'] = mimeType
+		const info: UTSJSONObject = {}
+		info['mimetype'] = mimeType
+		info['duration'] = durMs
+		info['org.matrix.msc1767.audio'] = audioMeta
+		const content: UTSJSONObject = {}
+		content['msgtype'] = 'm.audio'
+		content['body'] = '语音'
+		content['url'] = mxc
+		content['info'] = info
+		content['org.matrix.msc3245.voice'] = voiceFlag
+		content['org.matrix.msc1767.audio'] = audioMeta
+		content['org.matrix.msc1767.file'] = fileMeta
 		return await this.sendRawEvent(roomId, 'm.room.message', content, txnId)
 	}
 
@@ -2036,19 +2211,58 @@ export class MatrixClient {
 		)
 	}
 
+	completePasswordAuth(authData: UTSJSONObject): UTSJSONObject {
+		const auth: UTSJSONObject = {}
+		const t = jsonStr(authData, 'type')
+		const password = jsonStr(authData, 'password')
+		const session = jsonStr(authData, 'session')
+		if (t.length > 0) auth['type'] = t
+		if (password.length > 0) auth['password'] = password
+		if (session.length > 0) auth['session'] = session
+		if (t == 'm.login.password') {
+			auth['user'] = this.userId
+			const ident: UTSJSONObject = {
+				type: 'm.id.user',
+				user: this.userId
+			}
+			auth['identifier'] = ident
+		}
+		return auth
+	}
+
 	/**
 	 * 远程登出某一个设备（需要 UIA 二次验证时填 authData）
+	 * spec: DELETE body 为 { auth?: Authentication Data }
 	 */
 	async deleteDevice(deviceId: string, authData: UTSJSONObject): Promise<void> {
-		await this.request('DELETE', `/_matrix/client/v3/devices/${encodeURIComponent(deviceId)}`, authData)
+		const body: UTSJSONObject = {}
+		if (jsonKeys(authData).length > 0) {
+			body['auth'] = this.completePasswordAuth(authData)
+		}
+		await this.request('DELETE', `/_matrix/client/v3/devices/${encodeURIComponent(deviceId)}`, body)
 	}
 
 	/**
 	 * 远程登出所有设备（除了当前），相当于把账号在其他地方都踢下线
-	 * 需要 UIA auth（密码 / 验证码）
+	 * spec: POST /_matrix/client/v3/delete_devices
+	 * body: { devices: string[], auth?: Authentication Data }
 	 */
 	async deleteAllDevices(authData: UTSJSONObject): Promise<void> {
-		await this.request('POST', '/_matrix/client/v3/delete_devices', authData)
+		const list = await this.getDevices()
+		const ids: Array<string> = []
+		let i = 0
+		while (i < list.length) {
+			const id = list[i].device_id
+			if (id.length > 0 && id != this.deviceId) ids.push(id)
+			i++
+		}
+		if (ids.length == 0) return
+		const body: UTSJSONObject = {}
+		body['devices'] = ids
+		if (jsonKeys(authData).length > 0) {
+			body['auth'] = this.completePasswordAuth(authData)
+		}
+		await this.request('POST', '/_matrix/client/v3/delete_devices', body)
 	}
 
 	// ============================================================
@@ -2261,6 +2475,17 @@ export class MatrixClient {
 		)
 	}
 
+	async sendToDeviceUser(userId: string, eventType: string, eventContent: UTSJSONObject): Promise<void> {
+		if (userId.length == 0) return
+		const devices: UTSJSONObject = {}
+		devices['*'] = eventContent
+		const messages: UTSJSONObject = {}
+		messages[userId] = devices
+		const body: UTSJSONObject = {}
+		body['messages'] = messages
+		await this.sendToDevice(eventType, body)
+	}
+
 	// ============================================================
 	// 已读 / 未读便捷方法
 	// ============================================================
@@ -2323,13 +2548,48 @@ export class MatrixClient {
 // 全局单例
 // ============================================================
 let _instance: MatrixClient | null = null
+let _voipSink: ((event: MatrixEvent, roomId: string) => void) | null = null
+
+function flushVoipQueue(client: MatrixClient, fn: (event: MatrixEvent, roomId: string) => void): void {
+	if (client.pendingVoipEvents.length == 0) return
+	const evs = client.pendingVoipEvents
+	const rooms = client.pendingVoipRooms
+	const emptyEv: Array<MatrixEvent> = []
+	const emptyRid: Array<string> = []
+	client.pendingVoipEvents = emptyEv
+	client.pendingVoipRooms = emptyRid
+	console.log('[sync] flush voip sink', evs.length)
+	for (let i = 0; i < evs.length; i++) {
+		try { fn(evs[i], rooms[i]) } catch (e) { console.error('voip sink error', e) }
+	}
+}
+
+export function setVoipSink(fn: (event: MatrixEvent, roomId: string) => void): void {
+	_voipSink = fn
+	const client = _instance
+	if (client != null) {
+		flushVoipQueue(client, fn)
+	}
+}
 
 export function getMatrix(): MatrixClient | null {
 	return _instance
 }
 
 export function setMatrix(client: MatrixClient): void {
+	const prev = _instance
+	if (prev != null && prev != client) {
+		const sink = _voipSink
+		if (sink != null) {
+			flushVoipQueue(prev, sink)
+		}
+		prev.stopSync()
+	}
 	_instance = client
+	const sink2 = _voipSink
+	if (sink2 != null) {
+		flushVoipQueue(client, sink2)
+	}
 }
 
 export function clearMatrix(): void {

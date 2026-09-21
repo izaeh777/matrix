@@ -1,6 +1,7 @@
 <script setup lang="uts">
 	import { bootstrapMatrix } from '@/common/app.uts'
 	import { getMatrix } from '@/common/matrix.uts'
+	import { bindCallToMatrix } from '@/common/call.uts'
 
 	// #ifdef APP-ANDROID || APP-HARMONY
 	let firstBackTime = 0
@@ -8,8 +9,8 @@
 
 	onLaunch(() => {
 		console.log('App Launch')
-		// 启动时如果有 session，恢复 Matrix 客户端实例
 		const matrix = bootstrapMatrix()
+		bindCallToMatrix()
 		if (matrix != null) {
 			matrix.startSync()
 		}
@@ -17,6 +18,9 @@
 
 	onAppShow(() => {
 		console.log('App Show')
+		bindCallToMatrix()
+		const m = getMatrix()
+		if (m != null) m.startSync()
 	})
 
 	onAppHide(() => {

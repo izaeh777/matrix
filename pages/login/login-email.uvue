@@ -140,7 +140,7 @@
 	.back-icon {
 		font-size: 64rpx;
 		color: #1e6fff;
-		font-weight: 300;
+		font-weight: 400;
 		line-height: 64rpx;
 	}
 	.top-title {
@@ -158,13 +158,13 @@
 
 	.brand {
 		font-size: 40rpx;
-		font-weight: 800;
+		font-weight: 700;
 		color: #1e7dff;
 		margin-bottom: 12rpx;
 	}
 	.card-title {
 		font-size: 48rpx;
-		font-weight: 800;
+		font-weight: 700;
 		color: #0f172a;
 		margin-bottom: 10rpx;
 	}

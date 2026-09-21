@@ -1,5 +1,17 @@
 <template>
 	<view class="call-page">
+		<!-- #ifndef H5 -->
+		<web-view
+			v-if="showEngine()"
+			id="callWeb"
+			class="call-engine"
+			:src="engineSrc"
+			@message="onWebMsg"
+			@on-post-message="onWebMsg"
+			@load="onWebLoad"
+			@error="onWebError"
+		></web-view>
+		<!-- #endif -->
 		<!-- #ifdef H5 -->
 		<view class="call-stage"></view>
 		<view class="call-mask">
@@ -55,6 +67,16 @@
 	let off: (() => void) | null = null
 	let closing: boolean = false
 	let webCtx: WebViewContext | null = null
+	const engineSrc = ref<string>('/static/call-engine.html')
+
+	function refreshEngineSrc(): void {
+		const boot = getCallManager().htmlBoot
+		if (boot.length == 0) {
+			engineSrc.value = '/static/call-engine.html'
+			return
+		}
+		engineSrc.value = '/static/call-engine.html#' + encodeURIComponent(boot)
+	}
 
 	function showInCall(): boolean {
 		const p = ui.value.phase
@@ -67,6 +89,12 @@
 		return showInCall()
 	}
 	function showHangBtn(): boolean {
+		const p = ui.value.phase
+		if (p == 'idle') return false
+		if (p == 'ringing' && ui.value.isIncoming) return false
+		return true
+	}
+	function showEngine(): boolean {
 		const p = ui.value.phase
 		if (p == 'idle') return false
 		if (p == 'ringing' && ui.value.isIncoming) return false
@@ -171,19 +199,27 @@
 		}
 	}
 
+	function goBack(): void {
+		if (closing) return
+		closing = true
+		uni.navigateBack()
+	}
+
 	async function setupCall(): Promise<void> {
 		const mgr = getCallManager()
 		mgr.bindMatrix()
 		ui.value = mgr.getSnapshot()
 		off = mgr.onChange((s: CallSnapshot) => {
 			ui.value = s
+			refreshEngineSrc()
+			if (s.phase == 'idle') goBack()
 		})
 		if (mgr.phase == 'idle') {
-			closing = true
-			uni.navigateBack()
+			goBack()
 			return
 		}
 		await nextTick()
+		refreshEngineSrc()
 		bindWeb()
 		mgr.attachDom()
 		// #ifdef H5
@@ -198,9 +234,11 @@
 	}
 	function onReject() {
 		getCallManager().reject()
+		goBack()
 	}
 	function onHang() {
 		getCallManager().hangup(true)
+		goBack()
 	}
 	function onMute() {
 		getCallManager().toggleMute()
@@ -214,9 +252,9 @@
 	})
 
 	onBackPress(() => {
-		const mgr = getCallManager()
-		if (mgr.leaving) return false
-		mgr.hangup(true)
+		if (closing) return false
+		getCallManager().hangup(true)
+		goBack()
 		return true
 	})
 

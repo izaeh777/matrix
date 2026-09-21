@@ -12,6 +12,21 @@
 			<text class="wx-search-text">搜索</text>
 		</view>
 
+		<view v-if="incomingCall" class="incoming-call-bar">
+			<view class="incoming-call-info">
+				<text class="incoming-call-title">{{ incomingCallTitle }}</text>
+				<text class="incoming-call-sub">{{ incomingCallSub }}</text>
+			</view>
+			<view class="incoming-call-actions">
+				<view class="incoming-call-reject" @click="rejectIncomingCall">
+					<text class="incoming-call-btn-text">拒绝</text>
+				</view>
+				<view class="incoming-call-accept" @click="acceptIncomingCall">
+					<text class="incoming-call-btn-text">接听</text>
+				</view>
+			</view>
+		</view>
+
 		<!-- 新邀请横幅 -->
 		<view v-if="invites.length > 0" class="invite-banner">
 			<view class="invite-banner-head">
@@ -141,12 +156,16 @@
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted, computed } from 'vue'
 	import { getMatrix, MatrixRoom, MatrixEvent, errText, InvitedRoomInfo, CreateRoomOpts } from '@/common/matrix.uts'
-	import { loadSession, SessionInfo } from '@/common/storage.uts'
+	import { loadSession, SessionInfo, loadRoomList, saveRoomList, loadRoomChat } from '@/common/storage.uts'
 	import { openChat } from '@/common/app.uts'
+	import { getCallManager, CallSnapshot } from '@/common/call.uts'
 
 	const rooms = ref<Array<MatrixRoom>>([])
 	const invites = ref<Array<InvitedRoomInfo>>([])
 	const loading = ref<boolean>(false)
+	const incomingCall = ref<boolean>(false)
+	const incomingCallTitle = ref<string>('')
+	const incomingCallSub = ref<string>('')
 	const syncState = ref<string>('INITIAL')
 	const syncError = ref<string>('')
 	const session = ref<SessionInfo | null>(null)
@@ -262,28 +281,218 @@
 	})
 
 	let timer: number | null = null
+	let persistTimer: number | null = null
 	let offSync: (() => void) | null = null
 	let offInvite: (() => void) | null = null
 	let offTimeline: (() => void) | null = null
 	let offUnread: (() => void) | null = null
+	let offCall: (() => void) | null = null
 
 	function stopOff(handler: (() => void) | null): void {
 		if (handler == null) return
 		try { handler() } catch (e) {}
 	}
 
+	function pickStr(obj: UTSJSONObject, key: string): string {
+		const s = obj.getString(key)
+		if (s != null && s.length > 0) return s
+		const v = obj[key]
+		if (v == null) return ''
+		const t = '' + v
+		if (t == 'null' || t == 'undefined' || t == '[object Object]') return ''
+		return t
+	}
+
+	function roomToRow(r: MatrixRoom): UTSJSONObject {
+		const o: UTSJSONObject = {}
+		o['room_id'] = r.room_id
+		const name = r.name
+		if (name != null && name.length > 0) o['name'] = name
+		const topic = r.topic
+		if (topic != null && topic.length > 0) o['topic'] = topic
+		const av = r.avatar_url
+		if (av != null && av.length > 0) o['avatar_url'] = av
+		const alias = r.canonical_alias
+		if (alias != null && alias.length > 0) o['canonical_alias'] = alias
+		const preview = r.last_message_preview
+		if (preview != null && preview.length > 0) o['last_message_preview'] = preview
+		const ts = r.last_message_ts
+		if (ts != null) o['last_message_ts'] = ts
+		const sender = r.last_message_sender
+		if (sender != null && sender.length > 0) o['last_message_sender'] = sender
+		const unread = r.unread_count
+		if (unread != null) o['unread_count'] = unread
+		const otherId = r.other_user_id
+		if (otherId != null && otherId.length > 0) o['other_user_id'] = otherId
+		const otherName = r.other_displayname
+		if (otherName != null && otherName.length > 0) o['other_displayname'] = otherName
+		const otherAv = r.other_avatar
+		if (otherAv != null && otherAv.length > 0) o['other_avatar'] = otherAv
+		return o
+	}
+
+	function rowToRoom(o: UTSJSONObject): MatrixRoom {
+		const room: MatrixRoom = { room_id: pickStr(o, 'room_id') }
+		const name = pickStr(o, 'name')
+		if (name.length > 0) room.name = name
+		const topic = pickStr(o, 'topic')
+		if (topic.length > 0) room.topic = topic
+		const av = pickStr(o, 'avatar_url')
+		if (av.length > 0) room.avatar_url = av
+		const alias = pickStr(o, 'canonical_alias')
+		if (alias.length > 0) room.canonical_alias = alias
+		const preview = pickStr(o, 'last_message_preview')
+		if (preview.length > 0) room.last_message_preview = preview
+		const ts = o.getNumber('last_message_ts')
+		if (ts != null) room.last_message_ts = ts
+		const sender = pickStr(o, 'last_message_sender')
+		if (sender.length > 0) room.last_message_sender = sender
+		const unread = o.getNumber('unread_count')
+		if (unread != null) room.unread_count = unread
+		const otherId = pickStr(o, 'other_user_id')
+		if (otherId.length > 0) room.other_user_id = otherId
+		const otherName = pickStr(o, 'other_displayname')
+		if (otherName.length > 0) room.other_displayname = otherName
+		const otherAv = pickStr(o, 'other_avatar')
+		if (otherAv.length > 0) room.other_avatar = otherAv
+		return room
+	}
+
+	function persistRoomListNow(): void {
+		const s = session.value
+		if (s == null) return
+		const list = rooms.value
+		const rows: Array<UTSJSONObject> = []
+		for (let i = 0; i < list.length; i++) {
+			rows.push(roomToRow(list[i]))
+		}
+		saveRoomList(s.user_id, rows)
+	}
+
+	function schedulePersistRooms(): void {
+		const old = persistTimer
+		persistTimer = null
+		if (old != null) {
+			clearTimeout(old)
+		}
+		persistTimer = setTimeout(() => {
+			persistTimer = null
+			persistRoomListNow()
+		}, 400) as number | null
+	}
+
+	function previewFromChatRow(o: UTSJSONObject): string {
+		const mt = pickStr(o, 'msgtype')
+		if (mt == 'm.audio') return '[语音]'
+		if (mt == 'm.image') return '[图片]'
+		if (mt == 'm.file') return '[文件]'
+		if (mt == 'm.call') {
+			const body = pickStr(o, 'body')
+			if (body.length > 0) return body
+			return '[通话]'
+		}
+		const body = pickStr(o, 'body')
+		if (body.length > 0) return body
+		return ''
+	}
+
+	function fillPreviewFromChatCache(room: MatrixRoom): boolean {
+		const s = session.value
+		if (s == null) return false
+		const preview = room.last_message_preview
+		if (preview != null && preview.length > 0 && preview != '暂无消息') return false
+		const cached = loadRoomChat(s.user_id, room.room_id)
+		if (cached == null || cached.msgs.length == 0) return false
+		const last = cached.msgs[cached.msgs.length - 1]
+		const text = previewFromChatRow(last)
+		if (text.length == 0) return false
+		room.last_message_preview = text
+		const ts = last.getNumber('ts')
+		if (ts != null && ts > 0) room.last_message_ts = ts
+		const sender = pickStr(last, 'sender')
+		if (sender.length > 0) room.last_message_sender = sender
+		return true
+	}
+
+	function applyRoomListCache(): boolean {
+		const s = session.value
+		if (s == null) return false
+		const rows = loadRoomList(s.user_id)
+		if (rows.length == 0) return false
+		const out: Array<MatrixRoom> = []
+		for (let i = 0; i < rows.length; i++) {
+			const room = rowToRoom(rows[i])
+			if (room.room_id.length == 0) continue
+			fillPreviewFromChatCache(room)
+			out.push(room)
+		}
+		if (out.length == 0) return false
+		out.sort((a, b) => {
+			const ta = a.last_message_ts != null ? a.last_message_ts : 0
+			const tb = b.last_message_ts != null ? b.last_message_ts : 0
+			return tb - ta
+		})
+		rooms.value = out
+		return true
+	}
+
+	function applyLastFromSync(): void {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		const list = rooms.value
+		if (list.length == 0) return
+		let changed = false
+		for (let i = 0; i < list.length; i++) {
+			const room = list[i]
+			const last = matrix.roomLastMessage.get(room.room_id)
+			if (last != null && last.body.length > 0) {
+				const curTs = room.last_message_ts != null ? room.last_message_ts : 0
+				const curPrev = room.last_message_preview != null ? room.last_message_preview : ''
+				if (last.ts >= curTs && (last.ts != curTs || curPrev != last.body)) {
+					room.last_message_preview = last.body
+					room.last_message_ts = last.ts
+					room.last_message_sender = last.sender
+					changed = true
+				}
+			} else if (fillPreviewFromChatCache(room)) {
+				changed = true
+			}
+		}
+		if (!changed) return
+		list.sort((a, b) => {
+			const ta = a.last_message_ts != null ? a.last_message_ts : 0
+			const tb = b.last_message_ts != null ? b.last_message_ts : 0
+			return tb - ta
+		})
+		rooms.value = list.slice()
+		schedulePersistRooms()
+	}
+
 	onUnmounted(() => {
 		const t = timer
 		timer = null
 		if (t != null) clearInterval(t)
+		const pt = persistTimer
+		persistTimer = null
+		if (pt != null) clearTimeout(pt)
+		persistRoomListNow()
+		const mClient = getMatrix()
+		if (mClient != null) {
+			mClient.onRoomListEvent = null
+			if (mClient.onUnread != null) {
+				mClient.onUnread = null
+			}
+		}
 		stopOff(offSync)
 		stopOff(offInvite)
 		stopOff(offTimeline)
 		stopOff(offUnread)
+		stopOff(offCall)
 		offSync = null
 		offInvite = null
 		offTimeline = null
 		offUnread = null
+		offCall = null
 	})
 
 	async function loadRooms(): Promise<void> {
@@ -293,6 +502,8 @@
 			if (rooms.value.length == 0) loading.value = true
 			rooms.value = await matrix.listRooms()
 			loading.value = false
+			applyLastFromSync()
+			schedulePersistRooms()
 		} catch (e: any) {
 			loading.value = false
 			console.error('loadRooms error', e)
@@ -325,12 +536,23 @@
 				if (idx2 < 0) {
 					rooms.value.unshift(summary)
 					rooms.value = rooms.value.slice()
+					schedulePersistRooms()
 				}
 				return
 			}
 			const c = event.content != null ? event.content : ({} as UTSJSONObject)
-			const mt = (c['msgtype'] as string) ?? ''
-			const body: string = (c['body'] as string) ?? (mt == 'm.image' ? '[图片]' : '[消息]')
+			const mtRaw = c.getString('msgtype')
+			const mt = (mtRaw != null) ? mtRaw : ''
+			let body = ''
+			const bodyRaw = c.getString('body')
+			if (bodyRaw != null) body = bodyRaw
+			if (mt == 'm.audio') body = '[语音]'
+			else if (mt == 'm.image') body = '[图片]'
+			else if (mt == 'm.file') body = '[文件]'
+			else if (mt == 'm.call') {
+				if (body.length == 0) body = '[通话]'
+			}
+			else if (body.length == 0) body = '[消息]'
 			const ts: number = event.origin_server_ts != null ? event.origin_server_ts : Date.now()
 			const sender: string = event.sender != null ? event.sender : ''
 			const cur = rooms.value[idx]
@@ -345,6 +567,7 @@
 				rooms.value.unshift(cur)
 			}
 			rooms.value = rooms.value.slice() // 触发响应式
+			schedulePersistRooms()
 		} catch (e) {
 			// 静默
 		}
@@ -352,6 +575,7 @@
 
 	async function setupRooms(): Promise<void> {
 		session.value = loadSession()
+		const hadCache = applyRoomListCache()
 		const matrix = getMatrix()
 		if (matrix == null) {
 			uni.reLaunch({ url: '/pages/login/login' })
@@ -364,6 +588,7 @@
 		offSync = matrix.onSync((state: string, error: string) => {
 			syncState.value = state
 			if (error.length > 0) syncError.value = error
+			if (state == 'PREPARED') applyLastFromSync()
 		})
 		offInvite = matrix.onInvite((_roomId: string) => {
 			uni.showToast({ title: '你收到一条新邀请', icon: 'none' })
@@ -373,27 +598,57 @@
 			if (event.type != 'm.room.message') return
 			refreshOneRoom(rid, event)
 		})
+		matrix.onRoomListEvent = (event: MatrixEvent, rid: string) => {
+			if (event.type != 'm.room.message') return
+			refreshOneRoom(rid, event)
+		}
+		const callMgr = getCallManager()
+		callMgr.bindMatrix()
+		stopOff(offCall)
+		offCall = callMgr.onChange((s: CallSnapshot) => {
+			incomingCall.value = s.phase == 'ringing' && s.isIncoming
+			incomingCallTitle.value = s.peerName
+			incomingCallSub.value = s.sub
+		})
+		const snap = callMgr.getSnapshot()
+		incomingCall.value = snap.phase == 'ringing' && snap.isIncoming
+		incomingCallTitle.value = snap.peerName
+		incomingCallSub.value = snap.sub
 		const unreadHandler = (rid: string, count: number) => {
 			const idx = rooms.value.findIndex((r: MatrixRoom) => r.room_id == rid)
 			if (idx >= 0) {
 				rooms.value[idx].unread_count = count
 				rooms.value = rooms.value.slice()
+				schedulePersistRooms()
 			}
 		}
 		matrix.unreadHandlers.push(unreadHandler)
+		matrix.onUnread = unreadHandler
 		offUnread = () => {
 			const i = matrix.unreadHandlers.indexOf(unreadHandler)
 			if (i >= 0) matrix.unreadHandlers.splice(i, 1)
+			if (matrix.onUnread == unreadHandler) {
+				matrix.onUnread = null
+			}
 		}
 		matrix.startSync()
 		await loadInvites()
-		await loadRooms()
+		if (hadCache) {
+			loadRooms()
+			applyLastFromSync()
+		} else {
+			await loadRooms()
+			applyLastFromSync()
+		}
+		let liveTick = 0
 		timer = setInterval(() => {
-			if (syncState.value == 'PREPARED') {
+			applyLastFromSync()
+			liveTick = liveTick + 1
+			if (liveTick % 30 == 0 && syncState.value == 'PREPARED') {
 				loadInvites()
 				loadRooms()
 			}
-		}, 60000) as number | null
+		}, 2000) as number | null
 	}
 
 
@@ -560,6 +815,18 @@
 
 	function onProfile() {
 		uni.redirectTo({ url: '/pages/profile/profile' })
+	}
+
+	function acceptIncomingCall() {
+		const mgr = getCallManager()
+		mgr.openPage()
+		setTimeout(() => {
+			mgr.accept()
+		}, 400)
+	}
+	function rejectIncomingCall() {
+		getCallManager().reject()
+		incomingCall.value = false
 	}
 
 	function onSearch() {
@@ -733,6 +1000,42 @@
 		font-size: 28rpx;
 		color: #888888;
 	}
+	.incoming-call-bar {
+		flex-direction: row;
+		align-items: center;
+		margin: 8rpx 24rpx 12rpx;
+		padding: 16rpx 20rpx;
+		background-color: #111111;
+		border-radius: 12rpx;
+	}
+	.incoming-call-info {
+		flex: 1;
+		flex-direction: column;
+	}
+	.incoming-call-title {
+		font-size: 30rpx;
+		color: #ffffff;
+		font-weight: 600;
+	}
+	.incoming-call-sub {
+		font-size: 22rpx;
+		color: #bbbbbb;
+		margin-top: 4rpx;
+	}
+	.incoming-call-actions {
+		flex-direction: row;
+	}
+	.incoming-call-reject, .incoming-call-accept {
+		padding: 10rpx 22rpx;
+		border-radius: 32rpx;
+		margin-left: 12rpx;
+	}
+	.incoming-call-reject { background-color: #fa5151; }
+	.incoming-call-accept { background-color: #07c160; }
+	.incoming-call-btn-text {
+		color: #ffffff;
+		font-size: 26rpx;
+	}
 	.wx-tabbar {
 		flex-direction: row;
 		background-color: #f7f7f7;
@@ -775,7 +1078,7 @@
 
 	.topbar-title {
 		font-size: 44rpx;
-		font-weight: 800;
+		font-weight: 700;
 		color: #1a1a1a;
 		letter-spacing: -1rpx;
 	}

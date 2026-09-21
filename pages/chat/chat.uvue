@@ -9,13 +9,31 @@
 				<text class="topbar-title">{{ roomTitleBar }}</text>
 			</view>
 			<view class="topbar-right" @click="showRoomInfo">
-				<text class="topbar-more">···</text>
+				<view class="more-icon">
+					<view class="more-dot"></view>
+					<view class="more-dot"></view>
+					<view class="more-dot"></view>
+				</view>
 			</view>
 		</view>
 
 			<view v-if="roomEncrypted" class="encrypt-banner">
 				<text class="encrypt-banner-text">此对话已加密，对方消息需解密后才能完整显示</text>
 			</view>
+		<view v-if="incomingCall" class="incoming-call-bar">
+			<view class="incoming-call-info">
+				<text class="incoming-call-title">{{ incomingCallTitle }}</text>
+				<text class="incoming-call-sub">{{ incomingCallSub }}</text>
+			</view>
+			<view class="incoming-call-actions">
+				<view class="incoming-call-reject" @click="rejectIncomingCall">
+					<text class="incoming-call-btn-text">拒绝</text>
+				</view>
+				<view class="incoming-call-accept" @click="acceptIncomingCall">
+					<text class="incoming-call-btn-text">接听</text>
+				</view>
+			</view>
+		</view>
 		<scroll-view
 			class="messages"
 			scroll-y
@@ -35,12 +53,21 @@
 			<view
 				v-for="msg in messages"
 				:key="msg.event_id"
-				class="msg-row"
-				:class="[msg.sender == currentUserId ? 'msg-row-me' : 'msg-row-other', msg._highlight ? 'msg-highlight' : '']"
-				@longpress="onLongPress(msg)"
+				class="msg-block"
 			>
+				<view v-if="msg._showStamp" class="msg-time-divider">
+					<text class="msg-time-divider-text">{{ msg._stamp }}</text>
+				</view>
+				<view
+					class="msg-row"
+					:class="[msg.sender == currentUserId ? 'msg-row-me' : 'msg-row-other', msg._highlight ? 'msg-highlight' : '']"
+					@longpress="onLongPress(msg)"
+				>
 				<view v-if="msg.sender != currentUserId" class="msg-avatar">
 					<text class="avatar-letter">{{ senderInitial(msg.sender) }}</text>
+				</view>
+				<view v-if="msg.sender == currentUserId && msg._failed" class="msg-fail">
+					<text class="msg-fail-bang">!</text>
 				</view>
 				<view class="msg-main">
 				<view class="msg-bubble" :class="{ 'msg-bubble-img': msg.msgtype == 'm.image' }">
@@ -73,10 +100,15 @@
 					</view>
 
 					<!-- 音频 -->
-					<view v-else-if="msg.msgtype == 'm.audio'" class="msg-audio" :style="{ width: audioBubbleWidth(msg) }" @click="playAudio(msg)">
+					<view v-else-if="isAudioMsg(msg)" class="msg-audio" :style="{ width: audioBubbleWidth(msg) }" @click="playAudio(msg)">
 						<text class="audio-icon">{{ playingAudioId == msg.event_id ? '⏸' : '▶' }}</text>
 						<text class="audio-label">语音</text>
 						<text class="audio-dur">{{ audioSeconds(msg) }}″</text>
+					</view>
+
+					<view v-else-if="isCallMsg(msg)" class="msg-call" @click="onCallRecordTap(msg)">
+						<text class="msg-call-icon">{{ callRecordIcon(msg) }}</text>
+						<text class="msg-call-text">{{ callRecordText(msg) }}</text>
 					</view>
 
 					<!-- 位置 -->
@@ -90,17 +122,13 @@
 						<text class="msg-redacted">消息已撤回</text>
 					</view>
 
-					<view v-if="msg.msgtype != 'm.text' && msg.msgtype != 'm.notice' && msg.msgtype != 'm.emote' && msg.msgtype != 'm.image' && msg.msgtype != 'm.audio' && msg.msgtype != 'm.location' && msg.msgtype != 'm.file' && msg.msgtype != 'm.encrypted' && msg.type != 'm.room.calling'" class="msg-content">
+					<view v-if="msg.msgtype != 'm.text' && msg.msgtype != 'm.notice' && msg.msgtype != 'm.emote' && msg.msgtype != 'm.image' && msg.msgtype != 'm.audio' && msg.msgtype != 'm.location' && msg.msgtype != 'm.file' && msg.msgtype != 'm.encrypted' && msg.msgtype != 'm.call' && msg.type != 'm.room.calling' && !isAudioMsg(msg) && !isCallMsg(msg)" class="msg-content">
 						<text class="msg-text">{{ msg.body }}</text>
 					</view>
-					<view v-else-if="msg.type == 'm.room.calling'" class="msg-call">
+					<view v-else-if="msg.type == 'm.room.calling'" class="msg-call" @click="onCallRecordTap(msg)">
 						<text class="msg-call-icon">📹</text>
-						<text class="msg-call-text">视频通话邀请</text>
+						<text class="msg-call-text">视频通话</text>
 					</view>
-
-					<!-- 已读/未读标记 -->
-					<text v-if="msg.sender == currentUserId" class="msg-read">{{ msg.read_by_other ? '已读' : '已发送' }}</text>
-					<text v-if="msg._failed" class="msg-read msg-failed">发送失败</text>
 				</view>
 				<view v-if="hasReactions(msg)" class="msg-reactions">
 					<text v-for="pill in reactionPills(msg)" :key="pill" class="reaction-pill">{{ pill }}</text>
@@ -109,6 +137,7 @@
 				<view v-if="msg.sender == currentUserId" class="msg-avatar msg-avatar-me">
 					<image v-if="myAvatarSrc.length > 0" class="msg-avatar-img" :src="myAvatarSrc" mode="aspectFill"></image>
 					<text v-else class="avatar-letter">{{ myInitial }}</text>
+				</view>
 				</view>
 			</view>
 			<view id="chat-bottom" class="chat-bottom-anchor"></view>
@@ -286,7 +315,8 @@
 <script setup lang="uts">
 	import { ref, onUnmounted, onMounted, computed, nextTick } from 'vue'
 	import { getMatrix, MatrixClient, MatrixMessage, MatrixEvent, errText } from '@/common/matrix.uts'
-	import { getCallManager } from '@/common/call.uts'
+	import { getCallManager, CallSnapshot } from '@/common/call.uts'
+	import { loadRoomChat, saveRoomChat } from '@/common/storage.uts'
 
 	type ChatMsg = {
 		event_id: string
@@ -305,6 +335,9 @@
 		_pending: boolean
 		_src: string
 		_blobUrl: string
+		_time: string
+		_stamp: string
+		_showStamp: boolean
 		info: UTSJSONObject
 		reactions: UTSJSONObject
 	}
@@ -336,6 +369,9 @@
 			_pending: false,
 			_src: '',
 			_blobUrl: '',
+			_time: '',
+			_stamp: '',
+			_showStamp: false,
 			info: {} as UTSJSONObject,
 			reactions: {} as UTSJSONObject
 		}
@@ -370,6 +406,9 @@
 	})
 	const roomTopic = ref<string>('')
 	const roomEncrypted = ref<boolean>(false)
+	const incomingCall = ref<boolean>(false)
+	const incomingCallTitle = ref<string>('')
+	const incomingCallSub = ref<string>('')
 	const messages = ref<Array<ChatMsg>>([])
 	const inputText = ref<string>('')
 	const sending = ref<boolean>(false)
@@ -380,6 +419,7 @@
 	const myInitial = ref<string>('我')
 	const myAvatarSrc = ref<string>('')
 	const senderMap = ref<UTSJSONObject>({})
+	const nameFetching: Array<string> = []
 	const typingUsers = ref<Array<string>>([])
 	const replyTo = ref<ReplyTarget | null>(null)
 	const actionSheet = ref<ActionSheetState>({
@@ -396,6 +436,12 @@
 	let offRedaction: (() => void) | null = null
 	let offUnread: (() => void) | null = null
 	let offTimeline: (() => void) | null = null
+	let offCall: (() => void) | null = null
+	let bufPollTimer: number | null = null
+	let lastBufCount: number = 0
+	let livePulling: boolean = false
+	let prevRoomTimeline: ((event: MatrixEvent, roomId: string) => void) | null = null
+	let persistTimer: number | null = null
 	function stopOff(handler: (() => void) | null): void {
 		if (handler == null) return
 		try { handler() } catch (e) {}
@@ -528,7 +574,68 @@
 		if (ts == 0) return ''
 		const d = new Date(ts)
 		const pad = (n: number): string => n < 10 ? '0' + n : '' + n
-		return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+		return pad(d.getHours()) + ':' + pad(d.getMinutes())
+	}
+	function formatMsgStamp(ts: number): string {
+		if (ts == 0) return ''
+		const d = new Date(ts)
+		const now = new Date()
+		const pad = (n: number): string => n < 10 ? '0' + n : '' + n
+		const hm = pad(d.getHours()) + ':' + pad(d.getMinutes())
+		const sameDay = d.getFullYear() == now.getFullYear() && d.getMonth() == now.getMonth() && d.getDate() == now.getDate()
+		if (sameDay) return hm
+		const yest = new Date(now.getTime() - 86400000)
+		const isYest = d.getFullYear() == yest.getFullYear() && d.getMonth() == yest.getMonth() && d.getDate() == yest.getDate()
+		if (isYest) return '昨天 ' + hm
+		if (d.getFullYear() == now.getFullYear()) {
+			return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm
+		}
+		return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm
+	}
+	function shouldShowTime(msg: ChatMsg): boolean {
+		if (msg.ts == 0) return false
+		const list = messages.value
+		let idx = -1
+		for (let i = 0; i < list.length; i++) {
+			if (list[i].event_id == msg.event_id) {
+				idx = i
+				break
+			}
+		}
+		if (idx <= 0) return true
+		const prev = list[idx - 1]
+		if (prev.ts == 0) return true
+		if (msg.ts - prev.ts >= 300000) return true
+		const a = new Date(prev.ts)
+		const b = new Date(msg.ts)
+		if (a.getFullYear() != b.getFullYear()) return true
+		if (a.getMonth() != b.getMonth()) return true
+		if (a.getDate() != b.getDate()) return true
+		return false
+	}
+	function refreshMsgTimes(): void {
+		const list = messages.value
+		for (let i = 0; i < list.length; i++) {
+			const m = list[i]
+			let ts = m.ts
+			if (ts == 0) ts = Date.now()
+			m._time = formatTime(ts)
+			m._stamp = formatMsgStamp(ts)
+			let show = i == 0
+			if (i > 0) {
+				const prev = list[i - 1]
+				if (prev.ts == 0 || ts - prev.ts >= 300000) {
+					show = true
+				} else {
+					const a = new Date(prev.ts)
+					const b = new Date(ts)
+					if (a.getFullYear() != b.getFullYear() || a.getMonth() != b.getMonth() || a.getDate() != b.getDate()) {
+						show = true
+					}
+				}
+			}
+			m._showStamp = show
+		}
 	}
 	function safeDecode(raw: string): string {
 		const d = decodeURIComponent(raw)
@@ -581,37 +688,177 @@
 			// #endif
 		})
 	}
+	function pickStr(obj: UTSJSONObject, key: string): string {
+		const s = obj.getString(key)
+		if (s != null && s.length > 0) return s
+		const v = obj[key]
+		if (v == null) return ''
+		const t = '' + v
+		if (t == 'null' || t == 'undefined' || t == '[object Object]') return ''
+		return t
+	}
+
+	function chatToRow(m: ChatMsg): UTSJSONObject {
+		const o: UTSJSONObject = {}
+		o['event_id'] = m.event_id
+		o['sender'] = m.sender
+		o['type'] = m.type
+		o['body'] = m.body
+		o['msgtype'] = m.msgtype
+		o['ts'] = m.ts
+		o['url'] = m.url
+		o['mxc'] = m.mxc
+		o['edited'] = m.edited
+		o['redacted'] = m.redacted
+		o['info'] = m.info
+		o['reactions'] = m.reactions
+		return o
+	}
+
+	function rowToChat(o: UTSJSONObject): ChatMsg {
+		const msg = emptyChatMsg()
+		msg.event_id = pickStr(o, 'event_id')
+		msg.sender = pickStr(o, 'sender')
+		msg.type = pickStr(o, 'type')
+		if (msg.type.length == 0) msg.type = 'm.room.message'
+		msg.body = pickStr(o, 'body')
+		msg.msgtype = pickStr(o, 'msgtype')
+		if (msg.msgtype.length == 0) msg.msgtype = 'm.text'
+		const tsRaw = o.getNumber('ts')
+		msg.ts = tsRaw != null ? tsRaw : 0
+		msg.url = pickStr(o, 'url')
+		msg.mxc = pickStr(o, 'mxc')
+		if (msg.mxc.length == 0) msg.mxc = msg.url
+		const edited = o.getBoolean('edited')
+		msg.edited = edited != null ? edited : false
+		const redacted = o.getBoolean('redacted')
+		msg.redacted = redacted != null ? redacted : false
+		try {
+			const info = o.getJSON('info')
+			if (info != null) msg.info = info
+		} catch (e0) {}
+		try {
+			const reactions = o.getJSON('reactions')
+			if (reactions != null) msg.reactions = reactions
+		} catch (e1) {}
+		return msg
+	}
+
+	function persistRoomChatNow(): void {
+		const uid = currentUserId.value
+		const rid = roomId.value
+		if (uid.length == 0 || rid.length == 0) return
+		const list = messages.value
+		const rows: Array<UTSJSONObject> = []
+		const cap = 200
+		const start = list.length > cap ? list.length - cap : 0
+		for (let i = start; i < list.length; i++) {
+			const m = list[i]
+			if (m._pending) continue
+			if (m.event_id.length == 0) continue
+			rows.push(chatToRow(m))
+		}
+		if (rows.length == 0) return
+		saveRoomChat(uid, rid, prevBatch, rows)
+	}
+
+	function schedulePersist(): void {
+		const old = persistTimer
+		persistTimer = null
+		if (old != null) {
+			clearTimeout(old)
+		}
+		persistTimer = bindTimeout(() => {
+			persistTimer = null
+			persistRoomChatNow()
+		}, 400)
+	}
+
+	function applyLocalCache(): boolean {
+		const uid = currentUserId.value
+		const rid = roomId.value
+		const cached = loadRoomChat(uid, rid)
+		if (cached == null) return false
+		const rows = cached.msgs
+		if (rows.length == 0) return false
+		const out: Array<ChatMsg> = []
+		for (let i = 0; i < rows.length; i++) {
+			out.push(rowToChat(rows[i]))
+		}
+		out.sort((a, b) => a.ts - b.ts)
+		messages.value = out
+		refreshMsgTimes()
+		if (cached.prev.length > 0) prevBatch = cached.prev
+		return true
+	}
+
 	function buildMessage(eventId: string, sender: string, type: string, content: UTSJSONObject, ts: number): ChatMsg {
-		const mxc = content.getString('url')
-		const mxc2 = (mxc != null) ? mxc : ''
-		let msgtypeRaw = content.getString('msgtype')
-		let msgtype = (msgtypeRaw != null && msgtypeRaw.length > 0) ? msgtypeRaw : 'm.text'
-		let bodyRaw = content.getString('body')
-		let body = (bodyRaw != null) ? bodyRaw : ''
+		let mxc = pickStr(content, 'url')
+		let msgtype = pickStr(content, 'msgtype')
+		if (msgtype.length == 0) msgtype = 'm.text'
+		let body = pickStr(content, 'body')
+		let info: UTSJSONObject = {} as UTSJSONObject
+		try {
+			const infoRaw = content.getJSON('info')
+			if (infoRaw != null) info = infoRaw
+		} catch (eInfo) {}
+		if (mxc.length == 0) mxc = pickStr(info, 'url')
+		try {
+			const file1767 = content.getJSON('org.matrix.msc1767.file')
+			if (mxc.length == 0 && file1767 != null) mxc = pickStr(file1767, 'url')
+		} catch (e0) {}
+		const mime = pickStr(info, 'mimetype')
+		if (msgtype != 'm.audio' && mime.indexOf('audio/') == 0) msgtype = 'm.audio'
 		if (type == 'm.room.encrypted') {
 			msgtype = 'm.encrypted'
 			body = '加密消息，当前版本无法解密'
 		}
+		if (msgtype == 'm.audio' && body.length == 0) body = '语音'
 		const msg = emptyChatMsg()
 		msg.event_id = eventId
 		msg.sender = sender
 		msg.type = type
 		msg.body = body
 		msg.msgtype = msgtype
-		msg.mxc = mxc2
-		msg.url = mxc2
+		msg.mxc = mxc
+		msg.url = mxc
 		msg.ts = ts
-		const info = content.getJSON('info')
-		if (info != null) msg.info = info
-		if (msgtype == 'm.image' && mxc2.length > 0) {
-			msg._src = getMxcUrl(mxc2, 800, 800)
+		msg.info = info
+		const callType = pickStr(content, 'call_type')
+		if (callType.length > 0) info['call_type'] = callType
+		const callStatus = pickStr(content, 'call_status')
+		if (callStatus.length > 0) info['call_status'] = callStatus
+		const callInit = pickStr(content, 'call_initiator')
+		if (callInit.length > 0) info['call_initiator'] = callInit
+		const callDur = content.getNumber('call_duration')
+		if (callDur != null) info['call_duration'] = callDur
+		const callId = pickStr(content, 'call_id')
+		if (callId.length > 0) info['call_id'] = callId
+		if (msgtype == 'm.call' && body.length == 0) body = '语音通话'
+		msg.body = body
+		if (msgtype == 'm.image' && mxc.length > 0) {
+			msg._src = getMxcUrl(mxc, 800, 800)
 		}
 		return msg
 	}
 	function msgDomId(msg: ChatMsg): string {
 		return 'msg-' + msg.event_id
 	}
+	function isAudioMsg(msg: ChatMsg): boolean {
+		if (msg.msgtype == 'm.audio') return true
+		const mime = pickStr(msg.info, 'mimetype')
+		if (mime.indexOf('audio/') == 0) return true
+		return false
+	}
+	function isCallMsg(msg: ChatMsg): boolean {
+		if (msg.msgtype == 'm.call') return true
+		if (msg.type == 'm.room.calling') return true
+		const st = pickStr(msg.info, 'call_status')
+		return st.length > 0
+	}
 	function isTextMsg(msg: ChatMsg): boolean {
+		if (isAudioMsg(msg)) return false
+		if (isCallMsg(msg)) return false
 		const t = msg.msgtype
 		if (t == 'm.text') return true
 		if (t == 'm.notice') return true
@@ -619,9 +866,48 @@
 		if (t.length == 0) return true
 		return false
 	}
+	function callRecordIcon(msg: ChatMsg): string {
+		const t = pickStr(msg.info, 'call_type')
+		if (t == 'video' || msg.type == 'm.room.calling') return '📹'
+		return '📞'
+	}
+	function formatCallClock(sec: number): string {
+		let s = sec
+		if (s < 0) s = 0
+		const m = Math.floor(s / 60)
+		const r = s - m * 60
+		const mm = (m < 10 ? '0' : '') + m.toString()
+		const ss = (r < 10 ? '0' : '') + r.toString()
+		return mm + ':' + ss
+	}
+	function callRecordText(msg: ChatMsg): string {
+		const video = pickStr(msg.info, 'call_type') == 'video' || msg.type == 'm.room.calling'
+		const kind = video ? '视频通话' : '语音通话'
+		const status = pickStr(msg.info, 'call_status')
+		const initiator = pickStr(msg.info, 'call_initiator')
+		const me = currentUserId.value
+		const iAmInitiator = initiator.length > 0 ? initiator == me : msg.sender == me
+		if (status == 'answered') {
+			const durRaw = msg.info.getNumber('call_duration')
+			const dur = (durRaw != null) ? durRaw : 0
+			if (dur > 0) return kind + ' ' + formatCallClock(dur)
+			return kind
+		}
+		if (status == 'cancelled') {
+			return iAmInitiator ? '已取消' : '对方已取消'
+		}
+		if (status == 'rejected') {
+			return iAmInitiator ? '对方已拒绝' : '已拒绝'
+		}
+		if (status == 'missed') {
+			return iAmInitiator ? '对方无应答' : '未接听'
+		}
+		if (msg.body.length > 0) return msg.body.replace('[', '').replace(']', '')
+		return kind
+	}
 	function isOtherMsg(msg: ChatMsg): boolean {
 		const t = msg.msgtype
-		if (t == 'm.text' || t.length == 0 || t == 'm.image' || t == 'm.audio' || t == 'm.location' || t == 'm.file') return false
+		if (t == 'm.text' || t.length == 0 || t == 'm.image' || t == 'm.audio' || t == 'm.location' || t == 'm.file' || t == 'm.call') return false
 		if (msg.type == 'm.room.calling') return false
 		return true
 	}
@@ -769,12 +1055,27 @@
 		isRecording.value = false
 		voiceCancelHint.value = false
 		if (dur <= 0) return
-		const mime = recordLastMime.length > 0 ? recordLastMime : 'audio/webm'
+		const pathLow = tempPath.toLowerCase()
+		let mime = recordLastMime
+		if (mime.length == 0 || (mime.indexOf('webm') >= 0 && pathLow.indexOf('.webm') < 0)) {
+			if (pathLow.indexOf('.mp3') >= 0) mime = 'audio/mpeg'
+			else if (pathLow.indexOf('.m4a') >= 0 || pathLow.indexOf('.mp4') >= 0) mime = 'audio/mp4'
+			else if (pathLow.indexOf('.aac') >= 0) mime = 'audio/aac'
+			else if (pathLow.indexOf('.amr') >= 0) mime = 'audio/amr'
+			else if (pathLow.indexOf('.wav') >= 0) mime = 'audio/wav'
+			else if (pathLow.indexOf('.ogg') >= 0) mime = 'audio/ogg'
+			else if (pathLow.indexOf('.3gp') >= 0) mime = 'audio/3gpp'
+			else if (pathLow.indexOf('.webm') >= 0) mime = 'audio/webm'
+			else if (mime.length == 0) mime = 'audio/mpeg'
+		}
 		const ext = (mime.indexOf('wav') >= 0) ? 'wav'
 			: (mime.indexOf('ogg') >= 0) ? 'ogg'
 			: (mime.indexOf('mpeg') >= 0 || mime.indexOf('mp3') >= 0) ? 'mp3'
 			: (mime.indexOf('mp4') >= 0 || mime.indexOf('aac') >= 0) ? 'm4a'
-			: 'webm'
+			: (mime.indexOf('amr') >= 0) ? 'amr'
+			: (mime.indexOf('3gp') >= 0) ? '3gp'
+			: (mime.indexOf('webm') >= 0) ? 'webm'
+			: 'mp3'
 		const filename = 'voice.' + ext
 		sending.value = true
 		try {
@@ -793,11 +1094,14 @@
 			msgObj.body = '语音'
 			msgObj.msgtype = 'm.audio'
 			msgObj.mxc = ''
+			msgObj.url = tempPath
 			msgObj.info = audioInfo
 			msgObj.ts = Date.now()
 			msgObj._pending = true
+			msgObj._blobUrl = tempPath
 			messages.value.push(msgObj)
 			messages.value = messages.value.slice()
+			refreshMsgTimes()
 			scrollToBottom()
 			let mxc = ''
 			if (tempPath.length > 0) {
@@ -824,12 +1128,15 @@
 				messages.value[idx0].mxc = mxc
 			}
 			const ev = await matrix.sendAudio(roomId.value, mxc, mime, dur)
+			console.log('[voice] sent', mxc, ev.event_id)
 			const idx = messages.value.findIndex(m => m.event_id == tempId)
-			if (idx >= 0 && ev.event_id.length > 0) {
-				messages.value[idx].event_id = ev.event_id
+			if (idx >= 0) {
+				if (ev.event_id.length > 0) messages.value[idx].event_id = ev.event_id
+				messages.value[idx].mxc = mxc
 				messages.value[idx]._pending = false
 				messages.value = messages.value.slice()
 			}
+			schedulePersist()
 		} catch (e) {
 			uni.showToast({ title: errText(e, '语音发送失败'), icon: 'none' })
 		}
@@ -1210,8 +1517,15 @@
 	}
 
 	function audioSeconds(msg: ChatMsg): number {
-		const d = msg.info['duration'] as number
-		if (d == null) return 1
+		const n = msg.info.getNumber('duration')
+		let d = (n != null) ? n : 0
+		if (d == 0) {
+			const audio1767 = msg.info.getJSON('org.matrix.msc1767.audio')
+			if (audio1767 != null) {
+				const n2 = audio1767.getNumber('duration')
+				if (n2 != null) d = n2
+			}
+		}
 		if (d > 1000) return Math.max(1, Math.round(d / 1000))
 		return d > 0 ? d : 1
 	}
@@ -1239,11 +1553,32 @@
 		startingCall = false
 		if (!ok) return
 	}
+	function onCallRecordTap(msg: ChatMsg): void {
+		const t = pickStr(msg.info, 'call_type')
+		startCall(t == 'video' || msg.type == 'm.room.calling')
+	}
 	function startCallVoice() {
 		startCall(false)
 	}
 	function startCallVideo() {
 		startCall(true)
+	}
+	function syncIncomingCall(s: CallSnapshot): void {
+		const show = s.phase == 'ringing' && s.isIncoming && (s.roomId.length == 0 || s.roomId == roomId.value)
+		incomingCall.value = show
+		incomingCallTitle.value = s.peerName
+		incomingCallSub.value = s.sub
+	}
+	function acceptIncomingCall() {
+		const mgr = getCallManager()
+		mgr.openPage()
+		setTimeout(() => {
+			mgr.accept()
+		}, 400)
+	}
+	function rejectIncomingCall() {
+		getCallManager().reject()
+		incomingCall.value = false
 	}
 
 
@@ -1330,13 +1665,8 @@
 
 	async function checkRoomEncrypted(matrix: MatrixClient): Promise<void> {
 		try {
-			await matrix.request(
-				'GET',
-				'/_matrix/client/v3/rooms/' + encodeURIComponent(roomId.value) + '/state/m.room.encryption/',
-				null,
-				null
-			)
-			roomEncrypted.value = true
+			const summary = await matrix.getRoomSummary(roomId.value)
+			roomEncrypted.value = summary.encrypted == true
 		} catch (e) {
 			roomEncrypted.value = false
 		}
@@ -1394,10 +1724,32 @@
 			applyBlobUrl(msg.event_id, url)
 			return url
 			// #endif
+			// #ifndef H5
+			return await new Promise((resolve: (p: string) => void) => {
+				uni.downloadFile({
+					url: downloadUrl,
+					header: { 'Authorization': 'Bearer ' + (matrix.accessToken ?? '') },
+					success: (res) => {
+						const p = res.tempFilePath
+						if (res.statusCode >= 200 && res.statusCode < 300 && p != null && p.length > 0) {
+							msg._blobUrl = p
+							applyBlobUrl(msg.event_id, p)
+							resolve(p)
+							return
+						}
+						resolve('')
+					},
+					fail: () => {
+						resolve('')
+					}
+				})
+			})
+			// #endif
 		} catch (e) {
 			console.error('fetch image blob failed', e)
 			return ''
 		}
+		return ''
 	}
 
 	function hydrateImages(): void {
@@ -1405,6 +1757,7 @@
 		for (let i = 0; i < list.length; i++) {
 			attachImageSrc(list[i])
 		}
+		refreshMsgTimes()
 		messages.value = messages.value.slice()
 		for (let i = 0; i < list.length; i++) {
 			const m = list[i]
@@ -1452,6 +1805,7 @@
 			merged.sort((a, b) => a.ts - b.ts)
 			messages.value = merged
 			hydrateImages()
+			schedulePersist()
 		} catch (e: any) {
 			uni.showToast({ title: errText(e, '加载历史失败'), icon: 'none' })
 		}
@@ -1490,6 +1844,7 @@
 				messages.value = merged.concat(messages.value)
 				messages.value = messages.value.slice()
 				hydrateImages()
+				schedulePersist()
 			}
 			if (oldFirst.length > 0) {
 				scrollInto.value = `msg-${oldFirst}`
@@ -1520,6 +1875,7 @@
 					break
 				}
 			}
+			schedulePersist()
 		} catch (e) {
 			uni.showToast({ title: errText(e, '发送失败'), icon: 'none' })
 			const list = messages.value
@@ -1566,6 +1922,7 @@
 			msgObj._pending = true
 			messages.value.push(msgObj)
 			messages.value = messages.value.slice()
+			refreshMsgTimes()
 			inputText.value = ''
 			replyTo.value = null
 			showEmojiPanel.value = false
@@ -1736,6 +2093,7 @@
 			return
 		}
 		playingAudioId.value = msg.event_id
+		const local = msg._blobUrl.length > 0 ? msg._blobUrl : ((msg.mxc.length == 0 && msg.url.length > 0 && msg.url.indexOf('mxc://') < 0) ? msg.url : '')
 		const go = (url: string) => {
 			if (url.length == 0) {
 				uni.showToast({ title: '语音无法播放', icon: 'none' })
@@ -1752,6 +2110,10 @@
 				playingCtx = null
 			})
 			ctx.play()
+		}
+		if (local.length > 0) {
+			go(local)
+			return
 		}
 		const raw = msg.mxc.length > 0 ? msg.mxc : msg.url
 		ensureImageBlob(msg).then((blobUrl: string) => {
@@ -1807,23 +2169,28 @@
 		}
 	}
 
+	function applySenderName(sender: string, name: string): void {
+		senderMap.value[sender] = name
+		senderMap.value = senderMap.value
+	}
+	async function fetchSenderName(sender: string): Promise<void> {
+		try {
+			const matrix = getMatrix()
+			if (matrix == null) return
+			const p = await matrix.getProfile(sender)
+			applySenderName(sender, p.display_name)
+		} catch (e) {
+			applySenderName(sender, sender.split(':')[0].replace('@', ''))
+		}
+	}
 	function senderName(sender: string): string {
 		const cached = senderMap.value.getString(sender)
 		if (cached != null && cached.length > 0) return cached
-		// 异步拉取
-		;(async () => {
-			try {
-				const matrix = await getMatrix2()
-				if (matrix == null) return
-				const p = await matrix.getProfile(sender)
-				senderMap.value[sender] = p.display_name
-				senderMap.value = senderMap.value
-			} catch (e) {
-				// 失败就用 local part
-				senderMap.value[sender] = sender.split(':')[0].replace('@', '')
-			}
-		})()
-		return sender.split(':')[0].replace('@', '')
+		const local = sender.split(':')[0].replace('@', '')
+		if (nameFetching.indexOf(sender) >= 0) return local
+		nameFetching.push(sender)
+		fetchSenderName(sender)
+		return local
 	}
 
 	function goBack() {
@@ -1945,6 +2312,161 @@
 		}
 	})
 
+	function ingestTimelineEvent(event: MatrixEvent, rid: string): void {
+		if (rid != roomId.value && safeDecode(rid) != safeDecode(roomId.value)) return
+		const evType = event.type
+		if (evType.indexOf('m.call.') == 0) return
+		if (evType != 'm.room.message' && evType != 'm.room.encrypted') return
+		const eid = event.event_id != null ? event.event_id : ''
+		const list = messages.value
+		const emptyC: UTSJSONObject = {}
+		const c = event.content != null ? event.content : emptyC
+		let callKey = pickStr(c, 'call_id')
+		if (callKey.length == 0) {
+			try {
+				const infoC = c.getJSON('info')
+				if (infoC != null) callKey = pickStr(infoC, 'call_id')
+			} catch (e0) {}
+		}
+		if (callKey.length > 0 && pickStr(c, 'msgtype') == 'm.call') {
+			for (let ci = 0; ci < list.length; ci++) {
+				if (pickStr(list[ci].info, 'call_id') == callKey) return
+			}
+		}
+		if (eid.length > 0) {
+			for (let di = 0; di < list.length; di++) {
+				if (list[di].event_id == eid) return
+			}
+		}
+		const sender = event.sender != null ? event.sender : ''
+		const bodyText = pickStr(c, 'body')
+		const liveType = pickStr(c, 'msgtype')
+		if (sender.length > 0 && sender == currentUserId.value) {
+			let pendingIdx = -1
+			for (let pi = 0; pi < list.length; pi++) {
+				if (!list[pi]._pending || list[pi].sender != sender) continue
+				const sameBody = bodyText.length > 0 && list[pi].body == bodyText
+				const sameAudio = list[pi].msgtype == 'm.audio' && liveType == 'm.audio'
+				if (sameBody || sameAudio) {
+					pendingIdx = pi
+					break
+				}
+			}
+			if (pendingIdx >= 0) {
+				if (eid.length > 0) list[pendingIdx].event_id = eid
+				const liveUrl = pickStr(c, 'url')
+				if (liveUrl.length > 0) {
+					list[pendingIdx].mxc = liveUrl
+					list[pendingIdx].url = liveUrl
+				}
+				list[pendingIdx]._pending = false
+				messages.value = messages.value.slice()
+				schedulePersist()
+				return
+			}
+		}
+		const matrix = matrixRef
+		const ts = event.origin_server_ts != null ? event.origin_server_ts : Date.now()
+		let newId = eid
+		if (newId.length == 0 && matrix != null) newId = matrix.genTxnId()
+		if (newId.length == 0) newId = Date.now().toString()
+		try {
+			const m = buildMessage(newId, sender, event.type, c, ts)
+			messages.value.push(m)
+			messages.value = messages.value.slice()
+			refreshMsgTimes()
+			if (m.msgtype == 'm.image') {
+				ensureImageBlob(m).then(() => {
+					messages.value = messages.value.slice()
+				})
+			}
+			scrollToBottom()
+			schedulePersist()
+			if (sender != currentUserId.value && matrix != null) {
+				matrix.readReceipt(rid, m.event_id)
+			}
+		} catch (e) {
+			console.warn('ingest message fail', e)
+		}
+	}
+
+	function mergeRoomBuffer(): void {
+		const matrix = matrixRef
+		if (matrix == null) return
+		if (roomId.value.length == 0) return
+		const buf = matrix.getBufferedEvents(roomId.value)
+		const start = lastBufCount
+		for (let i = start; i < buf.length; i++) {
+			ingestTimelineEvent(buf[i], roomId.value)
+		}
+		lastBufCount = buf.length
+	}
+
+	async function pullLatestLive(): Promise<void> {
+		if (livePulling) return
+		const matrix = matrixRef
+		if (matrix == null) return
+		if (roomId.value.length == 0) return
+		livePulling = true
+		try {
+			const page = await matrix.getMessagesPage(roomId.value, 10, '')
+			const history = page.messages
+			let added = false
+			for (let hi = 0; hi < history.length; hi++) {
+				const row = history[hi]
+				const rid = row.event_id
+				let exists = false
+				const list = messages.value
+				if (rid.length > 0) {
+					for (let di = 0; di < list.length; di++) {
+						if (list[di].event_id == rid) {
+							exists = true
+							break
+						}
+					}
+				}
+				if (exists) continue
+				let mergedPending = false
+				const mt = row.msgtype != null ? row.msgtype : ''
+				if (row.sender == currentUserId.value && mt == 'm.audio') {
+					for (let pi = 0; pi < list.length; pi++) {
+						if (list[pi]._pending && list[pi].msgtype == 'm.audio' && list[pi].sender == row.sender) {
+							if (rid.length > 0) list[pi].event_id = rid
+							const mx = row.mxc != null ? row.mxc : ''
+							if (mx.length > 0) {
+								list[pi].mxc = mx
+								list[pi].url = mx
+							}
+							list[pi]._pending = false
+							mergedPending = true
+							added = true
+							break
+						}
+					}
+				}
+				if (mergedPending) continue
+				messages.value.push(fromMatrixMessage(row))
+				added = true
+			}
+			if (added) {
+				const merged: Array<ChatMsg> = messages.value.slice()
+				merged.sort((a, b) => a.ts - b.ts)
+				messages.value = merged
+				scrollToBottom()
+				refreshMsgTimes()
+				schedulePersist()
+			}
+		} catch (e) {}
+		livePulling = false
+	}
+
+	function clearBufPoll(): void {
+		const t = bufPollTimer
+		bufPollTimer = null
+		if (t != null) {
+			clearInterval(t)
+		}
+	}
 
 	async function initChat() {
 		const matrix = await getMatrix2()
@@ -1955,6 +2477,22 @@
 		currentUserId.value = matrix.userId
 		myInitial.value = senderInitial(matrix.userId)
 		myAvatarSrc.value = ''
+		const hadCache = applyLocalCache()
+		if (hadCache) {
+			loadingHistory.value = false
+			nextTick(() => {
+				scrollToBottom()
+				hydrateImages()
+			})
+		}
+		const callMgr = getCallManager()
+		callMgr.bindMatrix()
+		callMgr.replayRoom(roomId.value)
+		stopOff(offCall)
+		offCall = callMgr.onChange((s: CallSnapshot) => {
+			syncIncomingCall(s)
+		})
+		syncIncomingCall(callMgr.getSnapshot())
 		try {
 			const p = await matrix.getProfile(matrix.userId)
 			const mxc = p.avatar_url
@@ -1986,54 +2524,26 @@
 
 		loadRoomTitle(matrix)
 		checkRoomEncrypted(matrix)
-		await loadHistory()
 
-		// 订阅房间消息事件（多订阅者模型，进出页面互不影响）
-		offTimeline = matrix.onTimeline((event: MatrixEvent, rid: string) => {
-			if (rid != roomId.value) return
-			const evType = event.type
-			if (evType.indexOf('m.call.') == 0) return
-			if (evType != 'm.room.message' && evType != 'm.room.encrypted') return
-			const eid = event.event_id != null ? event.event_id : ''
-			const list = messages.value
-			if (eid.length > 0) {
-				for (let di = 0; di < list.length; di++) {
-					if (list[di].event_id == eid) return
-				}
+		stopOff(offTimeline)
+		offTimeline = matrix.onTimeline(ingestTimelineEvent)
+		prevRoomTimeline = matrix.onRoomTimeline
+		matrix.onRoomTimeline = ingestTimelineEvent
+
+		if (messages.value.length == 0) {
+			await loadHistory()
+		}
+		mergeRoomBuffer()
+		clearBufPoll()
+		let liveTick = 0
+		bufPollTimer = bindInterval(() => {
+			mergeRoomBuffer()
+			liveTick = liveTick + 1
+			if (liveTick % 2 == 0) {
+				pullLatestLive()
 			}
-			const emptyC: UTSJSONObject = {}
-			const c = event.content != null ? event.content : emptyC
-			const sender = event.sender != null ? event.sender : ''
-			const bodyRaw = c.getString('body')
-			const bodyText = (bodyRaw != null) ? bodyRaw : ''
-			if (sender.length > 0 && sender == currentUserId.value) {
-				let pendingIdx = -1
-				for (let pi = 0; pi < list.length; pi++) {
-					if (list[pi]._pending && list[pi].sender == sender && list[pi].body == bodyText) {
-						pendingIdx = pi
-						break
-					}
-				}
-				if (pendingIdx >= 0) {
-					if (eid.length > 0) list[pendingIdx].event_id = eid
-					list[pendingIdx]._pending = false
-					return
-				}
-			}
-			const ts = event.origin_server_ts != null ? event.origin_server_ts : Date.now()
-			const m = buildMessage(eid.length > 0 ? eid : matrix.genTxnId(), sender, event.type, c, ts)
-			messages.value.push(m)
-			messages.value = messages.value.slice()
-			if (m.msgtype == 'm.image') {
-				ensureImageBlob(m).then(() => {
-					messages.value = messages.value.slice()
-				})
-			}
-			scrollToBottom()
-			if (sender != currentUserId.value) {
-				matrix.readReceipt(rid, m.event_id)
-			}
-		})
+		}, 1000)
+		pullLatestLive()
 
 		const redHandler = (red: UTSJSONObject, rid: string) => {
 			if (rid != roomId.value) return
@@ -2044,6 +2554,7 @@
 				messages.value[idx].redacted = true
 				messages.value[idx].body = '（消息已撤回）'
 				messages.value = messages.value.slice()
+				schedulePersist()
 			}
 		}
 		matrix.redactionHandlers.push(redHandler)
@@ -2110,21 +2621,21 @@
 			if (i >= 0) matrix.unreadHandlers.splice(i, 1)
 		}
 
-		const extraBuf = matrix.getBufferedEvents(roomId.value)
-		for (const ev of extraBuf) {
-			if (ev.type != 'm.room.message') continue
-			const eid = ev.event_id != null ? ev.event_id : ''
-			if (eid.length > 0 && messages.value.findIndex(m => m.event_id == eid) >= 0) continue
-			const c = ev.content != null ? ev.content : ({} as UTSJSONObject)
-			const sender = ev.sender != null ? ev.sender : ''
-			const ts = ev.origin_server_ts != null ? ev.origin_server_ts : Date.now()
-			messages.value.push(buildMessage(eid.length > 0 ? eid : matrix.genTxnId(), sender, ev.type, c, ts))
-		}
-		messages.value = messages.value.slice()
-
 		unloadHandler = () => {
+			clearBufPoll()
+			const pt = persistTimer
+			persistTimer = null
+			if (pt != null) {
+				clearTimeout(pt)
+			}
+			persistRoomChatNow()
 			stopOff(offTimeline)
 			offTimeline = null
+			const mClient = matrixRef
+			if (mClient != null) {
+				mClient.onRoomTimeline = prevRoomTimeline
+			}
+			prevRoomTimeline = null
 			stopOff(offTyping)
 			offTyping = null
 			stopOff(offReaction)
@@ -2133,6 +2644,8 @@
 			offRedaction = null
 			stopOff(offUnread)
 			offUnread = null
+			stopOff(offCall)
+			offCall = null
 		}
 
 		// 已读回执
@@ -2256,14 +2769,26 @@
 	}
 
 	.topbar-right {
+		width: 72rpx;
+		height: 72rpx;
 		flex-direction: row;
 		align-items: center;
+		justify-content: flex-end;
 	}
-	.topbar-more {
-		font-size: 40rpx;
-		color: #181818;
-		padding: 8rpx 12rpx;
-		letter-spacing: 2rpx;
+	.more-icon {
+		width: 48rpx;
+		height: 48rpx;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+	.more-dot {
+		width: 8rpx;
+		height: 8rpx;
+		border-radius: 4rpx;
+		background-color: #181818;
+		margin-left: 5rpx;
+		margin-right: 5rpx;
 	}
 
 	.portrait-circle {
@@ -2296,6 +2821,40 @@
 		font-size: 22rpx;
 		color: #ad6800;
 	}
+	.incoming-call-bar {
+		flex-direction: row;
+		align-items: center;
+		padding: 16rpx 20rpx;
+		background-color: #111111;
+	}
+	.incoming-call-info {
+		flex: 1;
+		flex-direction: column;
+	}
+	.incoming-call-title {
+		font-size: 30rpx;
+		color: #ffffff;
+		font-weight: 600;
+	}
+	.incoming-call-sub {
+		font-size: 22rpx;
+		color: #bbbbbb;
+		margin-top: 4rpx;
+	}
+	.incoming-call-actions {
+		flex-direction: row;
+	}
+	.incoming-call-reject, .incoming-call-accept {
+		padding: 10rpx 22rpx;
+		border-radius: 32rpx;
+		margin-left: 12rpx;
+	}
+	.incoming-call-reject { background-color: #fa5151; }
+	.incoming-call-accept { background-color: #07c160; }
+	.incoming-call-btn-text {
+		color: #ffffff;
+		font-size: 26rpx;
+	}
 	.msg-encrypted {
 		color: #888;
 		font-size: 26rpx;
@@ -2322,6 +2881,24 @@
 		color: #999;
 	}
 
+	.msg-block {
+		width: 100%;
+		flex-direction: column;
+	}
+
+	.msg-time-divider {
+		width: 100%;
+		align-items: center;
+		justify-content: center;
+		padding-top: 12rpx;
+		padding-bottom: 16rpx;
+	}
+
+	.msg-time-divider-text {
+		font-size: 22rpx;
+		color: #b2b2b2;
+	}
+
 	.msg-row {
 		flex-direction: row;
 		width: 100%;
@@ -2331,6 +2908,7 @@
 
 	.msg-row-me {
 		justify-content: flex-end;
+		align-items: center;
 	}
 
 	.msg-row-other {
@@ -2338,8 +2916,13 @@
 	}
 
 	.msg-main {
-		width: 520rpx;
+		max-width: 520rpx;
 		flex-direction: column;
+		flex-shrink: 1;
+	}
+
+	.msg-row-other .msg-main {
+		align-items: flex-start;
 	}
 
 	.msg-row-me .msg-main {
@@ -2389,6 +2972,8 @@
 		background-color: #ffffff;
 		border-radius: 14rpx 14rpx 14rpx 4rpx;
 		padding: 18rpx 22rpx;
+		max-width: 520rpx;
+		flex-direction: column;
 	}
 
 	.msg-row-me .msg-bubble {
@@ -2424,10 +3009,16 @@
 		display: none;
 	}
 
+	.msg-content {
+		max-width: 476rpx;
+		flex-direction: column;
+	}
+
 	.msg-text {
 		font-size: 30rpx;
 		color: #1a1a1a;
 		line-height: 1.55;
+		max-width: 476rpx;
 	}
 
 	.msg-row-me .msg-text {
@@ -2436,12 +3027,17 @@
 
 	.msg-time {
 		font-size: 20rpx;
-		color: #999;
+		color: #b2b2b2;
+	}
+
+	.msg-meta {
+		flex-direction: row;
+		align-items: center;
 		margin-top: 6rpx;
 	}
 
-	.msg-row-me .msg-time {
-		color: #888;
+	.msg-row-me .msg-meta {
+		justify-content: flex-end;
 	}
 
 	/* ---- 输入栏（微信手机版风格） ---- */
@@ -2752,16 +3348,23 @@
 		color: rgba(255,255,255,0.7);
 	}
 
-	/* 已读/未读 */
-	.msg-read {
-		font-size: 20rpx;
-		color: #888;
-		margin-top: 6rpx;
-		text-align: right;
+	/* 发送失败（微信感叹号） */
+	.msg-fail {
+		width: 40rpx;
+		height: 40rpx;
+		border-radius: 20rpx;
+		background-color: #fa5151;
+		align-items: center;
+		justify-content: center;
+		margin-right: 12rpx;
+		flex-shrink: 0;
 	}
 
-	.msg-failed {
-		color: #fa5151;
+	.msg-fail-bang {
+		color: #ffffff;
+		font-size: 28rpx;
+		line-height: 40rpx;
+		text-align: center;
 	}
 
 	/* reactions */
@@ -3109,17 +3712,21 @@
 	.msg-call {
 		flex-direction: row;
 		align-items: center;
-		padding: 8rpx;
+		padding: 4rpx 8rpx 4rpx 0;
 	}
 
 	.msg-call-icon {
 		font-size: 36rpx;
-		margin-right: 8rpx;
+		margin-right: 12rpx;
 	}
 
 	.msg-call-text {
-		font-size: 26rpx;
-		color: #07c160;
+		font-size: 30rpx;
+		color: #111111;
+	}
+
+	.msg-row-me .msg-call-text {
+		color: #111111;
 	}
 
 	/* ---- 长按操作面板 ---- */

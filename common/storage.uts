@@ -93,7 +93,115 @@ export function clearSession(): void {
 	try {
 		uni.removeStorageSync(KEY_SESSION)
 		uni.removeStorageSync(KEY_SYNC_SINCE)
+		clearRoomChats()
 	} catch (e) {
 		console.error('clearSession 失败', e)
 	}
+}
+
+const KEY_CHAT_PREFIX = 'matrix_chat_v1:'
+const KEY_ROOM_LIST_PREFIX = 'matrix_rooms_v1:'
+
+export type CachedRoomChat = {
+	prev: string
+	msgs: Array<UTSJSONObject>
+}
+
+export function saveRoomChat(userId: string, roomId: string, prev: string, msgs: Array<UTSJSONObject>): void {
+	if (userId.length == 0 || roomId.length == 0) return
+	const body: UTSJSONObject = {}
+	body['prev'] = prev
+	body['msgs'] = msgs
+	try {
+		uni.setStorageSync(KEY_CHAT_PREFIX + userId + ':' + roomId, JSON.stringify(body))
+	} catch (e) {
+		console.warn('saveRoomChat fail', e)
+	}
+}
+
+export function loadRoomChat(userId: string, roomId: string): CachedRoomChat | null {
+	if (userId.length == 0 || roomId.length == 0) return null
+	try {
+		const raw = uni.getStorageSync(KEY_CHAT_PREFIX + userId + ':' + roomId)
+		if (raw == null) return null
+		let text = ''
+		try {
+			text = ('' + raw).trim()
+		} catch (e0) {
+			text = ''
+		}
+		if (text.length == 0 || text.charAt(0) != '{') return null
+		const obj = JSON.parse(text) as UTSJSONObject
+		const prevRaw = obj.getString('prev')
+		const prev = prevRaw != null ? prevRaw : ''
+		const rawArr = obj.getArray('msgs')
+		const msgs: Array<UTSJSONObject> = []
+		if (rawArr != null) {
+			for (let i = 0; i < rawArr.length; i++) {
+				const one = rawArr[i]
+				if (one == null) continue
+				msgs.push(one as UTSJSONObject)
+			}
+		}
+		if (msgs.length == 0) return null
+		const out: CachedRoomChat = {
+			prev: prev,
+			msgs: msgs
+		}
+		return out
+	} catch (e) {
+		console.warn('loadRoomChat fail', e)
+	}
+	return null
+}
+
+export function saveRoomList(userId: string, rooms: Array<UTSJSONObject>): void {
+	if (userId.length == 0) return
+	const body: UTSJSONObject = {}
+	body['rooms'] = rooms
+	try {
+		uni.setStorageSync(KEY_ROOM_LIST_PREFIX + userId, JSON.stringify(body))
+	} catch (e) {
+		console.warn('saveRoomList fail', e)
+	}
+}
+
+export function loadRoomList(userId: string): Array<UTSJSONObject> {
+	const out: Array<UTSJSONObject> = []
+	if (userId.length == 0) return out
+	try {
+		const raw = uni.getStorageSync(KEY_ROOM_LIST_PREFIX + userId)
+		if (raw == null) return out
+		let text = ''
+		try {
+			text = ('' + raw).trim()
+		} catch (e0) {
+			text = ''
+		}
+		if (text.length == 0 || text.charAt(0) != '{') return out
+		const obj = JSON.parse(text) as UTSJSONObject
+		const rawArr = obj.getArray('rooms')
+		if (rawArr == null) return out
+		for (let i = 0; i < rawArr.length; i++) {
+			const one = rawArr[i]
+			if (one == null) continue
+			out.push(one as UTSJSONObject)
+		}
+	} catch (e) {
+		console.warn('loadRoomList fail', e)
+	}
+	return out
+}
+
+export function clearRoomChats(): void {
+	try {
+		const info = uni.getStorageInfoSync()
+		const keys = info.keys
+		for (let i = 0; i < keys.length; i++) {
+			const k = keys[i]
+			if (k.indexOf(KEY_CHAT_PREFIX) == 0 || k.indexOf(KEY_ROOM_LIST_PREFIX) == 0) {
+				uni.removeStorageSync(k)
+			}
+		}
+	} catch (e) {}
 }

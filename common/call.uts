@@ -2,7 +2,7 @@
  * 全局 Matrix 通话
  * 任意页面都可响铃；H5 使用 WebRTC，信令走 m.call.*
  */
-import { getMatrix, MatrixEvent } from './matrix.uts'
+import { getMatrix, MatrixEvent, setVoipSink } from './matrix.uts'
 
 export type CallSnapshot = {
 	phase: string
@@ -43,6 +43,57 @@ function webrtcReady(): boolean {
 	return true
 }
 
+function fieldStr(obj: UTSJSONObject, key: string): string {
+	const s = obj.getString(key)
+	if (s != null && s.length > 0) return s
+	const v = obj[key]
+	if (v != null) {
+		const t = '' + v
+		if (t.length > 0 && t != 'null' && t != 'undefined' && t != '[object Object]') return t
+	}
+	try {
+		const m = obj.toMap()
+		let found = ''
+		m.forEach((val: any | null, k: string) => {
+			if (k == key && val != null) {
+				const t2 = '' + val
+				if (t2.length > 0 && t2 != 'null' && t2 != '[object Object]') found = t2
+			}
+		})
+		if (found.length > 0) return found
+	} catch (e) {}
+	return ''
+}
+
+function makePartyId(): string {
+	const n = Date.now().toString()
+	const r = Math.floor(Math.random() * 1000000).toString()
+	return 'p' + n + r
+}
+
+function stubOfferSdp(isVideo: boolean): string {
+	let sdp = 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n'
+	sdp += 'm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\n'
+	sdp += 'a=rtpmap:111 opus/48000/2\r\na=ice-ufrag:stub\r\na=ice-pwd:stubpasswordstubpasswordst\r\n'
+	sdp += 'a=fingerprint:sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00\r\n'
+	sdp += 'a=setup:actpass\r\na=mid:0\r\na=sendrecv\r\na=rtcp-mux\r\n'
+	if (isVideo) {
+		sdp += 'm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:96 VP8/90000\r\n'
+		sdp += 'a=mid:1\r\na=sendrecv\r\n'
+	}
+	return sdp
+}
+
+function formatCallDur(sec: number): string {
+	let s = sec
+	if (s < 0) s = 0
+	const m = Math.floor(s / 60)
+	const r = s - m * 60
+	const mm = (m < 10 ? '0' : '') + m.toString()
+	const ss = (r < 10 ? '0' : '') + r.toString()
+	return mm + ':' + ss
+}
+
 export class CallManager {
 	phase: string = 'idle'
 	roomId: string = ''
@@ -57,6 +108,7 @@ export class CallManager {
 
 	listeners: Array<CallListener> = []
 	bound: boolean = false
+	boundToken: string = ''
 	offTimeline: (() => void) | null = null
 
 	rtcPc: any | null = null
@@ -73,6 +125,15 @@ export class CallManager {
 	htmlLoaded: boolean = false
 	offerSent: boolean = false
 	lastHangAt: number = 0
+	inviteeId: string = ''
+	peerUserId: string = ''
+	streamId: string = 'usermedia'
+	htmlBoot: string = ''
+	invitePosted: boolean = false
+	connectedAt: number = 0
+	initiatorId: string = ''
+	outgoingReady: boolean = false
+	lastInvite: UTSJSONObject | null = null
 
 	getSnapshot(): CallSnapshot {
 		return {
@@ -96,6 +157,12 @@ export class CallManager {
 		}
 	}
 
+	noteConnected(): void {
+		if (this.connectedAt == 0) this.connectedAt = Date.now()
+		this.phase = 'connected'
+		this.sub = this.isVideo ? '视频通话中' : '语音通话中'
+	}
+
 	emit(): void {
 		const snap = this.getSnapshot()
 		for (let i = 0; i < this.listeners.length; i++) {
@@ -109,18 +176,42 @@ export class CallManager {
 			this.offTimeline = null
 		}
 		this.bound = false
+		this.boundToken = ''
 	}
 
 	bindMatrix(): void {
-		if (this.bound) return
 		const matrix = getMatrix()
 		if (matrix == null) return
+		const token = matrix.userId + '|' + matrix.deviceId
+		matrix.onVoipEvent = (event: MatrixEvent, rid: string): void => {
+			this.handleEvent(event, rid)
+		}
+		if (matrix.pendingVoipEvents.length > 0) {
+			const evs = matrix.pendingVoipEvents
+			const rooms = matrix.pendingVoipRooms
+			const emptyEv: Array<MatrixEvent> = []
+			const emptyRid: Array<string> = []
+			matrix.pendingVoipEvents = emptyEv
+			matrix.pendingVoipRooms = emptyRid
+			console.log('[call] flush queued voip', evs.length)
+			for (let i = 0; i < evs.length; i++) {
+				this.handleEvent(evs[i], rooms[i])
+			}
+		}
+		if (this.bound && this.offTimeline != null && this.boundToken == token) return
+		if (this.offTimeline != null) {
+			try { this.offTimeline() } catch (e) {}
+			this.offTimeline = null
+		}
 		this.bound = true
-		this.offTimeline = matrix.onTimeline((event: MatrixEvent, rid: string) => {
+		this.boundToken = token
+		this.offTimeline = matrix.onVoip((event: MatrixEvent, rid: string) => {
 			const t = event.type
 			if (t.indexOf('m.call.') != 0) return
+			console.log('[call] voip', t, rid)
 			this.handleEvent(event, rid)
 		})
+		console.log('[call] voip handler bound', matrix.userId)
 	}
 
 	countCallPages(): number {
@@ -151,18 +242,85 @@ export class CallManager {
 	}
 
 	leavePageIfNeeded(): void {
-		if (this.leaving) return
-		this.leaving = true
 		this.pageOpen = false
+		this.leaving = true
 		setTimeout(() => {
-			uni.navigateBack()
-		}, 50)
+			try {
+				const pages = getCurrentPages()
+				if (pages.length > 1) {
+					const last = pages[pages.length - 1] as PageRef
+					if (last.route.indexOf('pages/call/call') >= 0) {
+						uni.navigateBack()
+					}
+				}
+			} catch (e) {}
+			this.leaving = false
+		}, 600)
 	}
 
 	async send(type: string, content: UTSJSONObject): Promise<void> {
 		const matrix = getMatrix()
-		if (matrix == null || this.roomId.length == 0) return
-		await matrix.sendRawEvent(this.roomId, type, content, matrix.genTxnId())
+		const rid = this.roomId
+		if (matrix == null || rid.length == 0) return
+		content['room_id'] = rid
+		const peer = this.peerUserId.length > 0 ? this.peerUserId : this.inviteeId
+		if (peer.length > 0 && (type == 'm.call.hangup' || type == 'm.call.reject' || type == 'm.call.invite' || type == 'm.call.answer')) {
+			try {
+				await matrix.sendToDeviceUser(peer, type, content)
+				console.log('[call] to-device', type, '->', peer)
+			} catch (e2) {
+				console.warn('[call] to-device fail', type, e2)
+			}
+		} else if (type == 'm.call.invite') {
+			console.warn('[call] invite without peer, to-device skipped')
+		}
+		try {
+			await matrix.sendRawEvent(rid, type, content, matrix.genTxnId())
+			console.log('[call] sent', type)
+		} catch (e) {
+			console.error('[call] send fail', type, e)
+			throw e
+		}
+	}
+
+	async notifyCall(type: string, content: UTSJSONObject, roomId: string, peerId: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (roomId.length > 0) content['room_id'] = roomId
+		if (roomId.length > 0) {
+			try {
+				await matrix.sendRawEvent(roomId, type, content, matrix.genTxnId())
+				console.log('[call] sent', type)
+			} catch (e) {
+				console.error('[call] send fail', type, e)
+			}
+		}
+		if (peerId.length > 0) {
+			try {
+				await matrix.sendToDeviceUser(peerId, type, content)
+				console.log('[call] to-device', type, '->', peerId)
+			} catch (e2) {
+				console.warn('[call] to-device fail', type, e2)
+			}
+		}
+	}
+
+	streamMeta(): UTSJSONObject {
+		const info: UTSJSONObject = {}
+		info['purpose'] = 'm.usermedia'
+		info['audio_muted'] = this.muted
+		info['video_muted'] = this.isVideo ? this.cameraOff : true
+		const meta: UTSJSONObject = {}
+		meta[this.streamId] = info
+		return meta
+	}
+
+	baseCallContent(): UTSJSONObject {
+		const payload: UTSJSONObject = {}
+		payload['call_id'] = this.callId
+		payload['version'] = '1'
+		payload['party_id'] = this.partyId
+		return payload
 	}
 
 	async buildIce(): Promise<Array<UTSJSONObject>> {
@@ -257,16 +415,15 @@ export class CallManager {
 		this.rtcPc = new (window as any).RTCPeerConnection({ iceServers: ice })
 		this.rtcPc.onicecandidate = (ev: any) => {
 			if (ev == null || ev.candidate == null) return
-			this.send('m.call.candidates', {
-				call_id: this.callId,
-				version: 1,
-				party_id: this.partyId,
-				candidates: [{
-					candidate: ev.candidate.candidate,
-					sdpMid: ev.candidate.sdpMid,
-					sdpMLineIndex: ev.candidate.sdpMLineIndex
-				}]
-			} as UTSJSONObject)
+			const c = this.baseCallContent()
+			const one: UTSJSONObject = {}
+			one['candidate'] = ev.candidate.candidate
+			one['sdpMid'] = ev.candidate.sdpMid
+			one['sdpMLineIndex'] = ev.candidate.sdpMLineIndex
+			const arr: Array<UTSJSONObject> = []
+			arr.push(one)
+			c['candidates'] = arr
+			this.send('m.call.candidates', c)
 		}
 		this.rtcPc.ontrack = (ev: any) => {
 			const stream = (ev.streams != null && ev.streams.length > 0) ? ev.streams[0] : new (window as any).MediaStream([ev.track])
@@ -276,8 +433,7 @@ export class CallManager {
 			try {
 				const s = this.rtcPc.connectionState as string
 				if (s == 'connected') {
-					this.phase = 'connected'
-					this.sub = this.isVideo ? '视频通话中' : '语音通话中'
+					this.noteConnected()
 					this.emit()
 				} else if (s == 'failed') {
 					this.sub = '连接失败'
@@ -305,6 +461,10 @@ export class CallManager {
 				for (let i = 0; i < tracks.length; i++) {
 					pc.addTrack(tracks[i], stream)
 				}
+			}
+			if (stream != null) {
+				const sid = stream.id
+				if (sid != null && ('' + sid).length > 0) this.streamId = '' + sid
 			}
 			if (this.isVideo && stream != null) this.attachStream('.call-local', stream, true)
 			return true
@@ -340,16 +500,24 @@ export class CallManager {
 		}
 		this.phase = 'outgoing'
 		this.leaving = false
+		this.pageOpen = false
+		this.connectedAt = 0
+		this.initiatorId = ''
 		this.roomId = roomId
 		this.isVideo = isVideo
 		this.isIncoming = false
 		this.callId = 'c' + Date.now().toString()
+		this.partyId = makePartyId()
+		this.offerSent = false
+		this.inviteeId = ''
+		this.outgoingReady = false
+		this.lastInvite = null
+		this.streamId = 'usermedia'
 		this.sub = isVideo ? '正在呼叫（视频）…' : '正在呼叫（语音）…'
 		this.muted = false
 		this.cameraOff = false
 		this.peerName = '对方'
 		this.emit()
-		this.openPage()
 		// #ifdef APP-ANDROID
 		try {
 			await new Promise((resolve: (ok: boolean) => void) => {
@@ -372,25 +540,41 @@ export class CallManager {
 			this.hangup(false)
 			return false
 		}
+		this.initiatorId = matrix.userId
 		try {
 			const members = await matrix.getJoinedMembers(roomId)
+			const others: Array<string> = []
 			for (let i = 0; i < members.length; i++) {
 				const u = members[i]
-				if (u != matrix.userId) {
-					const cached = matrix.getCachedUserName(u)
-					if (cached.length > 0) this.peerName = cached
-					else this.peerName = localPart(u)
-					this.emit()
-					break
-				}
+				if (u != matrix.userId) others.push(u)
+			}
+			if (others.length > 0) {
+				this.inviteeId = others[0]
+				this.peerUserId = others[0]
+			}
+			console.log('[call] room members', members.length, 'peers', others.length, others.join(','))
+			if (others.length == 0) {
+				uni.showToast({ title: '对方不在房间内，无法呼叫', icon: 'none' })
+			}
+			if (others.length > 0) {
+				const u0 = others[0]
+				const cached = matrix.getCachedUserName(u0)
+				if (cached.length > 0) this.peerName = cached
+				else this.peerName = localPart(u0)
+				this.emit()
 			}
 		} catch (e) {}
+		this.outgoingReady = true
+		this.openPage()
 		this.placeOutgoing()
 		return true
 	}
 
 	async placeOutgoing(): Promise<void> {
 		if (this.phase != 'outgoing') return
+		if (!this.outgoingReady) return
+		if (this.offerSent) return
+		this.offerSent = true
 		// #ifdef H5
 		if (!(await this.ensurePeer())) { this.hangup(false); return }
 		if (!(await this.addLocalMedia())) { this.hangup(false); return }
@@ -400,16 +584,7 @@ export class CallManager {
 			const offer = await pc.createOffer()
 			await pc.setLocalDescription(offer)
 			const sdp = `${offer.sdp}`
-			const payload: UTSJSONObject = {}
-			payload['call_id'] = this.callId
-			payload['version'] = 1
-			payload['party_id'] = this.partyId
-			payload['lifetime'] = 60000
-			const offerObj: UTSJSONObject = {}
-			offerObj['type'] = 'offer'
-			offerObj['sdp'] = sdp
-			payload['offer'] = offerObj
-			await this.send('m.call.invite', payload)
+			await this.sendInvite(sdp)
 		} catch (e) {
 			uni.showToast({ title: `${e}`, icon: 'none' })
 			this.hangup(false)
@@ -468,17 +643,42 @@ export class CallManager {
 	}
 
 	async appOffer(): Promise<void> {
-		if (this.offerSent) return
 		if (this.phase != 'outgoing') return
-		this.offerSent = true
-		const sdp = 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:111 opus/48000/2\r\n'
 		try {
-			await this.sendInvite(sdp)
+			await this.sendInvite(stubOfferSdp(this.isVideo))
+			console.log('[call] invite sent, waiting peer')
 		} catch (e) {
 			uni.showToast({ title: '发起通话失败', icon: 'none' })
+			this.hangup(false)
+			return
 		}
 		this.armTimeout()
-		this.sub = this.isVideo ? '正在呼叫（视频）…' : '正在呼叫（语音）…'
+		this.sub = '等待对方接听…'
+		this.emit()
+		const ice = await this.buildIce()
+		let iceText = '[]'
+		try {
+			iceText = JSON.stringify(ice)
+		} catch (e) {}
+		const matrix = getMatrix()
+		const msg: UTSJSONObject = {}
+		msg['cmd'] = 'startOffer'
+		msg['ice'] = iceText
+		msg['video'] = this.isVideo ? '1' : '0'
+		if (matrix != null) {
+			msg['hs'] = matrix.homeserver
+			msg['token'] = matrix.accessToken
+		}
+		msg['room'] = this.roomId
+		msg['call'] = this.callId
+		msg['party'] = this.partyId
+		msg['invitee'] = this.inviteeId
+		let boot = '{}'
+		try {
+			boot = JSON.stringify(msg)
+		} catch (e2) {}
+		this.htmlBoot = boot
+		this.sendToHtml(msg)
 		this.emit()
 	}
 
@@ -523,35 +723,62 @@ export class CallManager {
 		this.pendingIce = []
 	}
 
+	async trySendInvite(sdp: string): Promise<void> {
+		try {
+			await this.sendInvite(sdp)
+		} catch (e) {
+			uni.showToast({ title: '发起通话失败', icon: 'none' })
+		}
+	}
+
 	async sendInvite(sdp: string): Promise<void> {
 		if (sdp.length == 0) return
-		const payload: UTSJSONObject = {}
-		payload['call_id'] = this.callId
-		payload['version'] = 1
-		payload['party_id'] = this.partyId
-		payload['lifetime'] = 60000
+		if (this.invitePosted) {
+			await this.sendNegotiate(sdp)
+			return
+		}
+		this.offerSent = true
+		this.invitePosted = true
+		const payload = this.baseCallContent()
+		payload['lifetime'] = 90000
 		const offerObj: UTSJSONObject = {}
 		offerObj['type'] = 'offer'
 		offerObj['sdp'] = sdp
 		payload['offer'] = offerObj
+		const meta = this.streamMeta()
+		payload['sdp_stream_metadata'] = meta
+		payload['org.matrix.msc2746.sdp_stream_metadata'] = meta
+		if (this.inviteeId.length > 0) payload['invitee'] = this.inviteeId
+		payload['room_id'] = this.roomId
+		this.lastInvite = payload
 		await this.send('m.call.invite', payload)
 		this.sub = '等待对方接听…'
 		this.emit()
 		uni.showToast({ title: '已向对方发起通话', icon: 'none' })
 	}
 
+	async sendNegotiate(sdp: string): Promise<void> {
+		if (sdp.length == 0) return
+		const payload = this.baseCallContent()
+		payload['lifetime'] = 90000
+		const desc: UTSJSONObject = {}
+		desc['type'] = 'offer'
+		desc['sdp'] = sdp
+		payload['description'] = desc
+		await this.send('m.call.negotiate', payload)
+	}
+
 	async sendAnswer(sdp: string): Promise<void> {
-		const payload: UTSJSONObject = {}
-		payload['call_id'] = this.callId
-		payload['version'] = 1
-		payload['party_id'] = this.partyId
+		const payload = this.baseCallContent()
 		const answerObj: UTSJSONObject = {}
 		answerObj['type'] = 'answer'
 		answerObj['sdp'] = sdp
 		payload['answer'] = answerObj
+		const meta = this.streamMeta()
+		payload['sdp_stream_metadata'] = meta
+		payload['org.matrix.msc2746.sdp_stream_metadata'] = meta
 		await this.send('m.call.answer', payload)
-		this.phase = 'connected'
-		this.sub = this.isVideo ? '视频通话中' : '语音通话中'
+		this.noteConnected()
 		this.emit()
 		this.pushUi()
 	}
@@ -563,7 +790,7 @@ export class CallManager {
 			return
 		}
 		if (kind == 'offer') {
-			this.sendInvite(payload)
+			this.trySendInvite(payload)
 			return
 		}
 		if (kind == 'invited') {
@@ -577,10 +804,7 @@ export class CallManager {
 			return
 		}
 		if (kind == 'ice') {
-			const c: UTSJSONObject = {}
-			c['call_id'] = this.callId
-			c['version'] = 1
-			c['party_id'] = this.partyId
+			const c = this.baseCallContent()
 			const one: UTSJSONObject = {}
 			one['candidate'] = payload
 			one['sdpMid'] = '' + cand['sdpMid']
@@ -592,8 +816,7 @@ export class CallManager {
 			return
 		}
 		if (kind == 'connected') {
-			this.phase = 'connected'
-			this.sub = this.isVideo ? '视频通话中' : '语音通话中'
+			this.noteConnected()
 			this.emit()
 			this.pushUi()
 			return
@@ -622,6 +845,10 @@ export class CallManager {
 			uni.showToast({ title: '当前环境不支持通话', icon: 'none' })
 			return
 		}
+		this.phase = 'connecting'
+		this.sub = '正在接通…'
+		this.emit()
+		this.openPage()
 		// #ifndef H5
 		await this.appAnswer()
 		return
@@ -641,17 +868,8 @@ export class CallManager {
 			await this.flushIce()
 			const answer = await pc.createAnswer()
 			await pc.setLocalDescription(answer)
-			const payload: UTSJSONObject = {}
-			payload['call_id'] = this.callId
-			payload['version'] = 1
-			payload['party_id'] = this.partyId
-			const answerObj: UTSJSONObject = {}
-			answerObj['type'] = 'answer'
-			answerObj['sdp'] = `${answer.sdp}`
-			payload['answer'] = answerObj
-			await this.send('m.call.answer', payload)
-			this.phase = 'connected'
-			this.sub = this.isVideo ? '视频通话中' : '语音通话中'
+			await this.sendAnswer(`${answer.sdp}`)
+			this.noteConnected()
 			this.emit()
 		} catch (e) {
 			uni.showToast({ title: `${e}`, icon: 'none' })
@@ -661,31 +879,116 @@ export class CallManager {
 	}
 
 	reject(): void {
-		this.send('m.call.hangup', {
-			call_id: this.callId,
-			version: 1,
-			party_id: this.partyId,
-			reason: 'user_hangup'
-		} as UTSJSONObject)
-		this.hangup(false)
+		this.endCall(true, 'm.call.reject', 'rejected')
+	}
+
+	sendHangup(reason: string): void {
+		const hang = this.baseCallContent()
+		hang['reason'] = reason
+		this.send('m.call.hangup', hang)
+	}
+
+	sendReject(): void {
+		const rej = this.baseCallContent()
+		this.send('m.call.reject', rej)
 	}
 
 	hangup(notify: boolean): void {
-		if (this.leaving) return
-		this.lastHangAt = Date.now()
-		if (this.phase == 'idle') {
+		this.endCall(notify, 'm.call.hangup', '')
+	}
+
+	async sendCallRecord(roomId: string, isVideo: boolean, status: string, duration: number, initiator: string, callId: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null || roomId.length == 0) return
+		const kind = isVideo ? '视频通话' : '语音通话'
+		let body = '[' + kind + ']'
+		if (status == 'answered') {
+			body = '[' + kind + '] ' + formatCallDur(duration)
+		} else if (status == 'cancelled') {
+			body = '[' + kind + '] 已取消'
+		} else if (status == 'rejected') {
+			body = '[' + kind + '] 已拒绝'
+		} else if (status == 'missed') {
+			body = '[' + kind + '] 未接听'
+		}
+		const info: UTSJSONObject = {}
+		info['call_type'] = isVideo ? 'video' : 'voice'
+		info['call_status'] = status
+		info['call_duration'] = duration
+		info['call_initiator'] = initiator
+		info['call_id'] = callId
+		const content: UTSJSONObject = {}
+		content['msgtype'] = 'm.call'
+		content['body'] = body
+		content['call_type'] = isVideo ? 'video' : 'voice'
+		content['call_status'] = status
+		content['call_duration'] = duration
+		content['call_initiator'] = initiator
+		content['call_id'] = callId
+		content['info'] = info
+		const ev: MatrixEvent = {
+			type: 'm.room.message',
+			event_id: matrix.genTxnId(),
+			sender: matrix.userId,
+			origin_server_ts: Date.now(),
+			content: content
+		}
+		try {
+			for (let hi = 0; hi < matrix.timelineHandlers.length; hi++) {
+				try { matrix.timelineHandlers[hi](ev, roomId) } catch (e0) {}
+			}
+			const legacy = matrix.onRoomTimeline
+			if (legacy != null) {
+				try { legacy(ev, roomId) } catch (e1) {}
+			}
+		} catch (e2) {
+			console.warn('[call] record local ui', e2)
+		}
+		try {
+			await matrix.sendMessage(roomId, content)
+			console.log('[call] record sent', status, body)
+		} catch (e) {
+			console.warn('[call] record fail', e)
+		}
+	}
+
+	async endCall(notify: boolean, signalType: string, statusHint: string): Promise<void> {
+		if (this.phase == 'idle' || this.phase == 'ended') {
 			this.leavePageIfNeeded()
 			return
 		}
-		if (notify && this.callId.length > 0 && this.phase != 'ended') {
-			this.send('m.call.hangup', {
-				call_id: this.callId,
-				version: 1,
-				party_id: this.partyId,
-				reason: 'user_hangup'
-			} as UTSJSONObject)
+		const rid = this.roomId
+		const cid = this.callId
+		const peer = this.peerUserId.length > 0 ? this.peerUserId : this.inviteeId
+		const wasVideo = this.isVideo
+		const wasIncoming = this.isIncoming
+		const connectedAt = this.connectedAt
+		let initiator = this.initiatorId
+		const matrixNow = getMatrix()
+		if (initiator.length == 0 && matrixNow != null) {
+			initiator = wasIncoming ? peer : matrixNow.userId
 		}
+		let status = statusHint
+		if (status.length == 0) {
+			if (connectedAt > 0) status = 'answered'
+			else if (signalType == 'm.call.reject') status = 'rejected'
+			else if (wasIncoming) status = 'rejected'
+			else status = 'cancelled'
+		}
+		let duration = 0
+		if (connectedAt > 0) {
+			duration = Math.floor((Date.now() - connectedAt) / 1000)
+			if (duration < 1) duration = 1
+		}
+		const hang = this.baseCallContent()
+		hang['reason'] = signalType == 'm.call.reject' ? 'user_busy' : 'user_hangup'
+		hang['room_id'] = rid
+		const shouldNotify = notify && cid.length > 0
+		this.lastHangAt = Date.now()
 		this.clearTimer()
+		const hangMsg: UTSJSONObject = {}
+		hangMsg['cmd'] = 'hangup'
+		this.sendToHtml(hangMsg)
 		this.htmlEval = null
 		this.htmlReady = false
 		this.htmlLoaded = false
@@ -710,8 +1013,20 @@ export class CallManager {
 		this.pendingIce = []
 		this.remoteDescReady = false
 		this.offerSent = false
+		this.invitePosted = false
+		this.outgoingReady = false
+		this.lastInvite = null
+		this.htmlBoot = ''
 		this.htmlLoaded = false
+		this.connectedAt = 0
+		this.initiatorId = ''
 		this.clearDom()
+		if (shouldNotify) {
+			this.sendCallRecord(rid, wasVideo, status, duration, initiator, cid)
+			this.notifyCall(signalType, hang, rid, peer)
+		}
+		this.inviteeId = ''
+		this.peerUserId = ''
 		this.phase = 'idle'
 		this.callId = ''
 		this.roomId = ''
@@ -719,6 +1034,7 @@ export class CallManager {
 		this.peerName = ''
 		this.isIncoming = false
 		this.pageOpen = false
+		this.emit()
 		this.leavePageIfNeeded()
 	}
 
@@ -765,9 +1081,9 @@ export class CallManager {
 			if (this.phase == 'outgoing' || this.phase == 'ringing') {
 				this.sub = this.phase == 'outgoing' ? '无人接听' : '未接听'
 				this.emit()
-				this.hangup(this.phase == 'outgoing')
+				this.endCall(this.phase == 'outgoing', 'm.call.hangup', 'missed')
 			}
-		}, 45000)
+		}, 90000)
 	}
 
 	clearTimer(): void {
@@ -778,30 +1094,78 @@ export class CallManager {
 		}
 	}
 
+	replayRoom(rid: string): void {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (this.phase != 'idle') return
+		const events = matrix.getBufferedEvents(rid)
+		let i = 0
+		while (i < events.length) {
+			const ev = events[i]
+			const t = ev.type
+			if (t.indexOf('m.call.') == 0) this.handleEvent(ev, rid)
+			i++
+		}
+	}
+
 	handleEvent(event: MatrixEvent, rid: string): void {
 		const type = event.type
 		const sender = (event.sender != null) ? event.sender : ''
-		const content = (event.content != null) ? event.content : {} as UTSJSONObject
-		const callId = (content['call_id'] as string) ?? ''
-		if (callId.length == 0) return
+		const empty: UTSJSONObject = {}
+		const content = (event.content != null) ? event.content : empty
+		let roomId = rid
+		if (roomId.length == 0) roomId = fieldStr(content, 'room_id')
+		const callId = fieldStr(content, 'call_id')
+		console.log('[call] handle', type, 'id=', callId, 'from=', sender, 'room=', roomId)
+		if (callId.length == 0) {
+			console.warn('[call] missing call_id, keys ignored')
+			return
+		}
 		const matrix = getMatrix()
-		if (matrix != null && sender == matrix.userId) return
-		if (Date.now() - this.lastHangAt < 4000) return
+		const myId = (matrix != null) ? matrix.userId : ''
+		if (sender == myId) {
+			console.log('[call] ignore own event', type)
+			return
+		}
 
 		if (type == 'm.call.invite') {
-			if (this.callId.length > 0 && callId == this.callId) return
-			if (this.phase != 'idle') {
-				this.sendBusy(rid, callId)
+			console.log('[call] recv invite from', sender, 'call', callId)
+			const tsRaw = event.origin_server_ts != null ? event.origin_server_ts : 0
+			let ts = tsRaw
+			if (ts > 0 && ts < 1000000000000) ts = ts * 1000
+			if (ts > 0 && Date.now() - ts > 120000) {
+				console.log('[call] invite expired', Date.now() - ts)
 				return
 			}
-			const offer = (content['offer'] as UTSJSONObject) ?? {}
-			const sdp = (offer['sdp'] as string) ?? ''
+			const invitee = fieldStr(content, 'invitee')
+			if (invitee.length > 0 && invitee.indexOf('@') == 0 && myId.length > 0 && invitee != myId) {
+				console.log('[call] invitee mismatch', invitee, myId)
+				return
+			}
+			if (this.callId.length > 0 && callId == this.callId) return
+			if (this.phase != 'idle' && this.phase != 'ringing') {
+				this.sendBusy(roomId, callId)
+				return
+			}
+			const offer = content.getJSON('offer')
+			let sdp = ''
+			if (offer != null) sdp = fieldStr(offer, 'sdp')
 			this.pendingRemoteSdp = sdp
-			this.roomId = rid
+			this.roomId = roomId
 			this.callId = callId
+			this.partyId = makePartyId()
 			this.isVideo = sdp.indexOf('m=video') >= 0
 			this.isIncoming = true
 			this.phase = 'ringing'
+			this.inviteeId = ''
+			this.peerUserId = sender
+			this.initiatorId = sender
+			this.connectedAt = 0
+			this.leaving = false
+			this.pageOpen = false
+			this.offerSent = false
+			this.invitePosted = false
+			this.htmlBoot = ''
 			const cached = matrix != null ? matrix.getCachedUserName(sender) : ''
 			this.peerName = cached.length > 0 ? cached : localPart(sender)
 			this.sub = this.isVideo ? '邀请你视频通话' : '邀请你语音通话'
@@ -810,14 +1174,17 @@ export class CallManager {
 			this.emit()
 			this.armTimeout()
 			this.openPage()
+			uni.showToast({ title: this.sub, icon: 'none', duration: 3000 })
 			return
 		}
 
 		if (this.callId.length > 0 && callId != this.callId) return
+		if (Date.now() - this.lastHangAt < 1500 && this.phase == 'idle') return
 
 		if (type == 'm.call.answer') {
-			const answer = (content['answer'] as UTSJSONObject) ?? {}
-			const sdp = (answer['sdp'] as string) ?? ''
+			const answer = content.getJSON('answer')
+			let sdp = ''
+			if (answer != null) sdp = fieldStr(answer, 'sdp')
 			// #ifdef H5
 			const pc = this.rtcPc
 			if (pc != null && sdp.length > 0) {
@@ -827,8 +1194,7 @@ export class CallManager {
 				pc.setRemoteDescription(desc).then(() => {
 					this.remoteDescReady = true
 					this.flushIce()
-					this.phase = 'connected'
-					this.sub = this.isVideo ? '视频通话中' : '语音通话中'
+					this.noteConnected()
 					this.emit()
 				}).catch((e) => console.warn('[call] answer', e))
 			}
@@ -841,8 +1207,7 @@ export class CallManager {
 				this.sendToHtml(msg)
 				this.remoteDescReady = true
 				this.flushAppIce()
-				this.phase = 'connected'
-				this.sub = this.isVideo ? '视频通话中' : '语音通话中'
+				this.noteConnected()
 				this.emit()
 				this.pushUi()
 			}
@@ -850,16 +1215,36 @@ export class CallManager {
 			return
 		}
 
+		if (type == 'm.call.negotiate') {
+			const desc = content.getJSON('description')
+			let sdp = ''
+			if (desc != null) sdp = fieldStr(desc, 'sdp')
+			if (sdp.length == 0) return
+			this.pendingRemoteSdp = sdp
+			if (sdp.indexOf('m=video') >= 0) this.isVideo = true
+			// #ifndef H5
+			const neg: UTSJSONObject = {}
+			neg['cmd'] = 'remoteOffer'
+			neg['sdp'] = sdp
+			this.sendToHtml(neg)
+			// #endif
+			return
+		}
+
 		if (type == 'm.call.candidates') {
-			const arr = (content['candidates'] as Array<UTSJSONObject>) ?? []
-			for (let i = 0; i < arr.length; i++) {
-				const c = arr[i]
-				const cand = c['candidate'] as string
-				if (cand == null || cand.length == 0) continue
+			const raw = content.getArray('candidates')
+			if (raw == null) return
+			for (let i = 0; i < raw.length; i++) {
+				const one = raw[i]
+				if (one == null) continue
+				const c = one as UTSJSONObject
+				const cand = fieldStr(c, 'candidate')
+				if (cand.length == 0) continue
 				const ice: UTSJSONObject = {}
 				ice['candidate'] = cand
-				ice['sdpMid'] = c['sdpMid']
-				ice['sdpMLineIndex'] = c['sdpMLineIndex']
+				ice['sdpMid'] = fieldStr(c, 'sdpMid')
+				const midIdx = c.getNumber('sdpMLineIndex')
+				ice['sdpMLineIndex'] = (midIdx != null) ? midIdx : 0
 				// #ifdef H5
 				const pc = this.rtcPc
 				if (pc != null && this.remoteDescReady) {
@@ -873,8 +1258,8 @@ export class CallManager {
 					const msg: UTSJSONObject = {}
 					msg['cmd'] = 'ice'
 					msg['candidate'] = cand
-					msg['sdpMid'] = '' + c['sdpMid']
-					msg['sdpMLineIndex'] = c['sdpMLineIndex']
+					msg['sdpMid'] = fieldStr(c, 'sdpMid')
+					msg['sdpMLineIndex'] = ice['sdpMLineIndex']
 					this.sendToHtml(msg)
 				} else {
 					this.pendingIce.push(ice)
@@ -885,38 +1270,51 @@ export class CallManager {
 		}
 
 		if (type == 'm.call.hangup' || type == 'm.call.reject') {
-			if (this.phase != 'idle') {
-				this.sub = '对方已挂断'
-				this.emit()
-				setTimeout(() => { this.hangup(false) }, 600)
+			if (this.callId.length > 0 && callId != this.callId) return
+			if (this.phase == 'idle' || this.phase == 'ended') {
+				this.leavePageIfNeeded()
+				return
 			}
+			console.log('[call] peer ended', type)
+			uni.showToast({ title: type == 'm.call.reject' ? '对方已拒绝' : '对方已挂断', icon: 'none' })
+			this.endCall(false, 'm.call.hangup', '')
 		}
 	}
 
 	sendBusy(roomId: string, callId: string): void {
+		const hang: UTSJSONObject = {}
+		hang['call_id'] = callId
+		hang['version'] = '1'
+		hang['party_id'] = this.partyId
+		hang['reason'] = 'user_busy'
 		const matrix = getMatrix()
 		if (matrix == null) return
-		const hang: UTSJSONObject = {
-			call_id: callId,
-			version: 1,
-			party_id: this.partyId,
-			reason: 'user_busy'
-		}
 		matrix.sendRawEvent(roomId, 'm.call.hangup', hang, matrix.genTxnId())
 	}
 }
 
 let gCall: CallManager | null = null
 
+function attachVoipSink(): void {
+	setVoipSink((event: MatrixEvent, roomId: string): void => {
+		const mgr = gCall
+		if (mgr == null) return
+		mgr.handleEvent(event, roomId)
+	})
+}
+
 export function getCallManager(): CallManager {
 	let mgr = gCall
 	if (mgr == null) {
 		mgr = new CallManager()
 		gCall = mgr
+		attachVoipSink()
 	}
 	return mgr
 }
 
 export function bindCallToMatrix(): void {
-	getCallManager().bindMatrix()
+	const mgr = getCallManager()
+	attachVoipSink()
+	mgr.bindMatrix()
 }
