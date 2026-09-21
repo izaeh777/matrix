@@ -3,6 +3,7 @@
  * 任意页面都可响铃；H5 使用 WebRTC，信令走 m.call.*
  */
 import { getMatrix, MatrixEvent, setVoipSink } from './matrix.uts'
+import { tuneCallWebView, pullCallHtmlMsg, destroyCallEngine } from './call-webview.uts'
 
 export type CallSnapshot = {
 	phase: string
@@ -71,19 +72,6 @@ function makePartyId(): string {
 	return 'p' + n + r
 }
 
-function stubOfferSdp(isVideo: boolean): string {
-	let sdp = 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n'
-	sdp += 'm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\n'
-	sdp += 'a=rtpmap:111 opus/48000/2\r\na=ice-ufrag:stub\r\na=ice-pwd:stubpasswordstubpasswordst\r\n'
-	sdp += 'a=fingerprint:sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00\r\n'
-	sdp += 'a=setup:actpass\r\na=mid:0\r\na=sendrecv\r\na=rtcp-mux\r\n'
-	if (isVideo) {
-		sdp += 'm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=rtpmap:96 VP8/90000\r\n'
-		sdp += 'a=mid:1\r\na=sendrecv\r\n'
-	}
-	return sdp
-}
-
 function formatCallDur(sec: number): string {
 	let s = sec
 	if (s < 0) s = 0
@@ -124,16 +112,26 @@ export class CallManager {
 	htmlReady: boolean = false
 	htmlLoaded: boolean = false
 	offerSent: boolean = false
+	offerStarted: boolean = false
+	answerStarted: boolean = false
+	answerSent: boolean = false
+	htmlPollN: number = 0
 	lastHangAt: number = 0
 	inviteeId: string = ''
 	peerUserId: string = ''
 	streamId: string = 'usermedia'
 	htmlBoot: string = ''
+	turnIce: string = '[{"urls":"stun:stun.l.google.com:19302"}]'
+	turnBusy: boolean = false
 	invitePosted: boolean = false
 	connectedAt: number = 0
 	initiatorId: string = ''
 	outgoingReady: boolean = false
 	lastInvite: UTSJSONObject | null = null
+	leaveGen: number = 0
+	signalTimer: number | null = null
+	signalBusy: boolean = false
+	seenVoip: Array<string> = []
 
 	getSnapshot(): CallSnapshot {
 		return {
@@ -168,9 +166,93 @@ export class CallManager {
 		for (let i = 0; i < this.listeners.length; i++) {
 			try { this.listeners[i](snap) } catch (e) {}
 		}
+		this.saveSnap()
+	}
+
+	saveSnap(): void {
+		if (this.phase == 'idle' || this.phase == 'ended') {
+			this.clearSnap()
+			return
+		}
+		const snap: UTSJSONObject = {}
+		snap['phase'] = this.phase
+		snap['callId'] = this.callId
+		snap['roomId'] = this.roomId
+		snap['sdp'] = this.pendingRemoteSdp
+		snap['name'] = this.peerName
+		snap['sub'] = this.sub
+		snap['peer'] = this.peerUserId
+		snap['incoming'] = this.isIncoming ? '1' : '0'
+		snap['video'] = this.isVideo ? '1' : '0'
+		snap['ts'] = Date.now().toString()
+		const matrix = getMatrix()
+		if (matrix != null) {
+			matrix.callSnap = snap
+			matrix.callActiveId = this.callId
+			matrix.voipHold = this
+		}
+		try {
+			uni.setStorageSync('mx_active_call', JSON.stringify(snap))
+		} catch (e) {}
+	}
+
+	clearSnap(): void {
+		const matrix = getMatrix()
+		if (matrix != null) {
+			matrix.callSnap = null
+			matrix.callActiveId = ''
+		}
+		try {
+			uni.removeStorageSync('mx_active_call')
+		} catch (e) {}
+	}
+
+	applySnap(snap: UTSJSONObject): void {
+		const cid = fieldStr(snap, 'callId')
+		if (cid.length == 0) return
+		const tsRaw = fieldStr(snap, 'ts')
+		if (tsRaw.length > 0) {
+			const ts = parseInt(tsRaw)
+			if (ts > 0 && Date.now() - ts > 120000) return
+		}
+		this.phase = fieldStr(snap, 'phase')
+		if (this.phase.length == 0) this.phase = 'ringing'
+		this.callId = cid
+		this.roomId = fieldStr(snap, 'roomId')
+		this.pendingRemoteSdp = fieldStr(snap, 'sdp')
+		this.peerName = fieldStr(snap, 'name')
+		this.sub = fieldStr(snap, 'sub')
+		this.peerUserId = fieldStr(snap, 'peer')
+		this.isIncoming = fieldStr(snap, 'incoming') == '1'
+		this.isVideo = fieldStr(snap, 'video') == '1'
+		this.htmlBoot = this.isIncoming ? 'in' : 'out'
+		console.log('[call] adopt', this.phase, this.callId, this.pendingRemoteSdp.length)
+	}
+
+	adoptIfIdle(): void {
+		if (this.phase != 'idle') return
+		const matrix = getMatrix()
+		if (matrix != null && matrix.callSnap != null) {
+			this.applySnap(matrix.callSnap as UTSJSONObject)
+			if (this.phase != 'idle') return
+		}
+		try {
+			const raw = uni.getStorageSync('mx_active_call')
+			const s = (raw != null) ? ('' + raw) : ''
+			if (s.length > 8 && s != 'null') {
+				const parsed = JSON.parse(s)
+				const snap = parsed as UTSJSONObject
+				if (snap != null) this.applySnap(snap)
+			}
+		} catch (e) {}
 	}
 
 	unbind(): void {
+		const poll = this.signalTimer
+		if (poll != null) {
+			clearInterval(poll)
+			this.signalTimer = null
+		}
 		if (this.offTimeline != null) {
 			try { this.offTimeline() } catch (e) {}
 			this.offTimeline = null
@@ -184,7 +266,7 @@ export class CallManager {
 		if (matrix == null) return
 		const token = matrix.userId + '|' + matrix.deviceId
 		matrix.onVoipEvent = (event: MatrixEvent, rid: string): void => {
-			this.handleEvent(event, rid)
+			getCallManager().handleEvent(event, rid)
 		}
 		if (matrix.pendingVoipEvents.length > 0) {
 			const evs = matrix.pendingVoipEvents
@@ -195,7 +277,7 @@ export class CallManager {
 			matrix.pendingVoipRooms = emptyRid
 			console.log('[call] flush queued voip', evs.length)
 			for (let i = 0; i < evs.length; i++) {
-				this.handleEvent(evs[i], rooms[i])
+				getCallManager().handleEvent(evs[i], rooms[i])
 			}
 		}
 		if (this.bound && this.offTimeline != null && this.boundToken == token) return
@@ -209,9 +291,48 @@ export class CallManager {
 			const t = event.type
 			if (t.indexOf('m.call.') != 0) return
 			console.log('[call] voip', t, rid)
-			this.handleEvent(event, rid)
+			getCallManager().handleEvent(event, rid)
 		})
+		this.startSignalPoll()
 		console.log('[call] voip handler bound', matrix.userId)
+	}
+
+	startSignalPoll(): void {
+		const matrix = getMatrix()
+		if (matrix != null) {
+			if (matrix.callPollOn) return
+			matrix.callPollOn = true
+		}
+		if (this.signalTimer != null) return
+		this.signalTimer = setInterval(() => {
+			this.tickSignalPoll()
+		}, 4000)
+	}
+
+	async tickSignalPoll(): Promise<void> {
+		if (this.signalBusy) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		this.signalBusy = true
+		try {
+			const rooms: Array<string> = []
+			if (this.roomId.length > 0) rooms.push(this.roomId)
+			try {
+				const last = uni.getStorageSync('last_chat_room')
+				const s = (last != null) ? ('' + last) : ''
+				if (s.length > 0 && s != 'null' && rooms.indexOf(s) < 0) rooms.push(s)
+			} catch (e0) {}
+			for (let i = 0; i < rooms.length; i++) {
+				const evs = await matrix.getCallEvents(rooms[i])
+				for (let j = 0; j < evs.length; j++) {
+					const t = evs[j].type
+					if (t == 'm.call.candidates') continue
+					if (t == 'm.call.invite') continue
+					this.handleEvent(evs[j], rooms[i])
+				}
+			}
+		} catch (e) {}
+		this.signalBusy = false
 	}
 
 	countCallPages(): number {
@@ -228,23 +349,50 @@ export class CallManager {
 
 	openPage(): void {
 		if (this.phase == 'idle') return
-		if (this.pageOpen) return
+		this.leaving = false
+		if (this.pageOpen || this.navigating) return
 		if (this.countCallPages() > 0) {
 			this.pageOpen = true
+			console.log('[call] call page already in stack')
 			return
 		}
-		this.pageOpen = true
 		this.navigating = true
+		this.pageOpen = true
+		console.log('[call] navigate to call page')
+		const mode = this.isIncoming ? 'in' : 'out'
 		uni.navigateTo({
-			url: '/pages/call/call',
-			complete: () => { this.navigating = false }
+			url: '/pages/call/call?m=' + mode,
+			success: () => {
+				this.navigating = false
+				console.log('[call] call page opened')
+			},
+			fail: () => {
+				console.warn('[call] navigateTo fail, try redirectTo')
+				uni.redirectTo({
+					url: '/pages/call/call?m=' + mode,
+					success: () => {
+						this.navigating = false
+						console.log('[call] call page redirected')
+					},
+					fail: () => {
+						this.navigating = false
+						this.pageOpen = false
+						console.warn('[call] redirectTo fail')
+						uni.showToast({ title: '无法打开通话页', icon: 'none' })
+					}
+				})
+			}
 		})
 	}
 
 	leavePageIfNeeded(): void {
 		this.pageOpen = false
 		this.leaving = true
+		this.leaveGen = this.leaveGen + 1
+		const gen = this.leaveGen
 		setTimeout(() => {
+			if (gen != this.leaveGen) return
+			if (this.phase != 'idle') return
 			try {
 				const pages = getCurrentPages()
 				if (pages.length > 1) {
@@ -264,7 +412,7 @@ export class CallManager {
 		if (matrix == null || rid.length == 0) return
 		content['room_id'] = rid
 		const peer = this.peerUserId.length > 0 ? this.peerUserId : this.inviteeId
-		if (peer.length > 0 && (type == 'm.call.hangup' || type == 'm.call.reject' || type == 'm.call.invite' || type == 'm.call.answer')) {
+		if (peer.length > 0 && (type == 'm.call.hangup' || type == 'm.call.reject' || type == 'm.call.invite' || type == 'm.call.answer' || type == 'm.call.candidates' || type == 'm.call.negotiate')) {
 			try {
 				await matrix.sendToDeviceUser(peer, type, content)
 				console.log('[call] to-device', type, '->', peer)
@@ -487,6 +635,21 @@ export class CallManager {
 		// #endif
 	}
 
+	requestCallPerms(): void {
+		// #ifdef APP-ANDROID
+		try {
+			const act = UTSAndroid.getUniActivity()
+			if (act == null) return
+			const permissionNeed: Array<string> = ['android.permission.CAMERA', 'android.permission.RECORD_AUDIO']
+			UTSAndroid.requestSystemPermission(act, permissionNeed, (_ok: boolean, _list: Array<string>) => {
+				console.log('[call] perm ok')
+			}, (_again: boolean, _denied: Array<string>) => {
+				console.warn('[call] perm denied')
+			})
+		} catch (e) {}
+		// #endif
+	}
+
 	async startOutgoing(roomId: string, isVideo: boolean): Promise<boolean> {
 		this.bindMatrix()
 		if (Date.now() - this.lastHangAt < 1500) return false
@@ -509,6 +672,10 @@ export class CallManager {
 		this.callId = 'c' + Date.now().toString()
 		this.partyId = makePartyId()
 		this.offerSent = false
+		this.offerStarted = false
+		this.answerStarted = false
+		this.answerSent = false
+		this.htmlPollN = 0
 		this.inviteeId = ''
 		this.outgoingReady = false
 		this.lastInvite = null
@@ -565,6 +732,7 @@ export class CallManager {
 			}
 		} catch (e) {}
 		this.outgoingReady = true
+		this.htmlBoot = 'out'
 		this.openPage()
 		this.placeOutgoing()
 		return true
@@ -573,9 +741,9 @@ export class CallManager {
 	async placeOutgoing(): Promise<void> {
 		if (this.phase != 'outgoing') return
 		if (!this.outgoingReady) return
-		if (this.offerSent) return
-		this.offerSent = true
 		// #ifdef H5
+		if (this.offerStarted) return
+		this.offerStarted = true
 		if (!(await this.ensurePeer())) { this.hangup(false); return }
 		if (!(await this.addLocalMedia())) { this.hangup(false); return }
 		try {
@@ -597,15 +765,46 @@ export class CallManager {
 		// #endif
 	}
 
+	htmlStr(msg: UTSJSONObject, key: string): string {
+		const gs = msg.getString(key)
+		if (gs != null && gs.length > 0 && gs != 'null') return gs
+		const v = msg[key]
+		if (v == null) return ''
+		const s = '' + v
+		if (s.length == 0 || s == 'null' || s == 'undefined') return ''
+		return s
+	}
+
+	packHtmlMsg(msg: UTSJSONObject): string {
+		const keys: Array<string> = ['cmd', 'ice', 'video', 'sdp', 'hs', 'token', 'room', 'call', 'party', 'invitee', 'name', 'sub', 'phase', 'incoming', 'candidate', 'sdpMid']
+		const parts: Array<string> = []
+		for (let i = 0; i < keys.length; i++) {
+			const k = keys[i]
+			const s = this.htmlStr(msg, k)
+			if (s.length == 0) continue
+			parts.push('"' + k + '":' + JSON.stringify(s))
+		}
+		const mid = msg['sdpMLineIndex']
+		if (mid != null) {
+			parts.push('"sdpMLineIndex":' + ('' + mid))
+		}
+		return '{' + parts.join(',') + '}'
+	}
+
 	sendToHtml(msg: UTSJSONObject): void {
 		const fn = this.htmlEval
-		if (fn == null) return
-		let text = '{}'
-		try {
-			text = JSON.stringify(msg)
-		} catch (e) {
+		if (fn == null) {
+			if (this.htmlStr(msg, 'cmd') != 'hangup' && this.htmlStr(msg, 'cmd') != 'unlock') {
+				console.warn('[call] htmlEval null', this.htmlStr(msg, 'cmd'))
+			}
 			return
 		}
+		const text = this.packHtmlMsg(msg)
+		if (text == '{}') {
+			console.warn('[call] empty html payload')
+			return
+		}
+		console.log('[call] eval', this.htmlStr(msg, 'cmd'), text.length)
 		fn('window.__callJson(' + text + ')')
 	}
 
@@ -621,12 +820,12 @@ export class CallManager {
 
 	waitHtmlLoop(n: number): Promise<boolean> {
 		return new Promise((resolve: (ok: boolean) => void) => {
-			if (this.htmlEval != null && this.htmlLoaded) {
+			if (this.htmlEval != null) {
 				this.htmlReady = true
 				resolve(true)
 				return
 			}
-			if (n >= 150) {
+			if (n >= 80) {
 				resolve(false)
 				return
 			}
@@ -642,29 +841,13 @@ export class CallManager {
 		return this.waitHtmlLoop(0)
 	}
 
-	async appOffer(): Promise<void> {
-		if (this.phase != 'outgoing') return
-		try {
-			await this.sendInvite(stubOfferSdp(this.isVideo))
-			console.log('[call] invite sent, waiting peer')
-		} catch (e) {
-			uni.showToast({ title: '发起通话失败', icon: 'none' })
-			this.hangup(false)
-			return
-		}
-		this.armTimeout()
-		this.sub = '等待对方接听…'
-		this.emit()
-		const ice = await this.buildIce()
-		let iceText = '[]'
-		try {
-			iceText = JSON.stringify(ice)
-		} catch (e) {}
-		const matrix = getMatrix()
+	buildHtmlStart(cmd: string, sdp: string): UTSJSONObject {
 		const msg: UTSJSONObject = {}
-		msg['cmd'] = 'startOffer'
-		msg['ice'] = iceText
+		msg['cmd'] = cmd
+		msg['ice'] = '[]'
 		msg['video'] = this.isVideo ? '1' : '0'
+		if (sdp.length > 0) msg['sdp'] = sdp
+		const matrix = getMatrix()
 		if (matrix != null) {
 			msg['hs'] = matrix.homeserver
 			msg['token'] = matrix.accessToken
@@ -673,32 +856,18 @@ export class CallManager {
 		msg['call'] = this.callId
 		msg['party'] = this.partyId
 		msg['invitee'] = this.inviteeId
-		let boot = '{}'
-		try {
-			boot = JSON.stringify(msg)
-		} catch (e2) {}
-		this.htmlBoot = boot
-		this.sendToHtml(msg)
-		this.emit()
+		return msg
 	}
 
-	async appAnswer(): Promise<void> {
-		if (this.pendingRemoteSdp.length == 0) return
-		if (!(await this.waitHtml())) {
-			uni.showToast({ title: '通话引擎加载失败', icon: 'none' })
-			return
-		}
-		const ice = await this.buildIce()
-		let iceText = '[]'
-		try {
-			iceText = JSON.stringify(ice)
-		} catch (e) {}
-		const matrix = getMatrix()
+	packUiBoot(): string {
 		const msg: UTSJSONObject = {}
-		msg['cmd'] = 'startAnswer'
-		msg['ice'] = iceText
+		msg['cmd'] = 'ui'
+		msg['name'] = this.peerName
+		msg['sub'] = this.sub
+		msg['phase'] = this.phase
+		msg['incoming'] = this.isIncoming ? '1' : '0'
 		msg['video'] = this.isVideo ? '1' : '0'
-		msg['sdp'] = this.pendingRemoteSdp
+		const matrix = getMatrix()
 		if (matrix != null) {
 			msg['hs'] = matrix.homeserver
 			msg['token'] = matrix.accessToken
@@ -706,8 +875,141 @@ export class CallManager {
 		msg['room'] = this.roomId
 		msg['call'] = this.callId
 		msg['party'] = this.partyId
+		msg['invitee'] = this.inviteeId
+		return this.packHtmlMsg(msg)
+	}
+
+	kickTurn(): void {
+		if (this.turnBusy) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		this.turnBusy = true
+		matrix.getTurnServer().then((turn: UTSJSONObject) => {
+			this.turnBusy = false
+			try {
+				const uris: Array<string> = []
+				const urisRaw = turn.getArray('uris')
+				if (urisRaw != null) {
+					for (let i = 0; i < urisRaw.length; i++) {
+						const one = urisRaw[i]
+						if (one == null) continue
+						const s = '' + one
+						if (s.length > 0 && s != 'null') uris.push(s)
+					}
+				}
+				if (uris.length == 0) return
+				const usernameVal = turn.getString('username')
+				const credentialVal = turn.getString('password')
+				const username = (usernameVal != null) ? usernameVal : ''
+				const credential = (credentialVal != null) ? credentialVal : ''
+				const item: UTSJSONObject = {}
+				item['urls'] = uris
+				item['username'] = username
+				item['credential'] = credential
+				const stun: UTSJSONObject = {}
+				stun['urls'] = 'stun:stun.l.google.com:19302'
+				const list: Array<UTSJSONObject> = []
+				list.push(stun)
+				list.push(item)
+				const encoded = JSON.stringify(list)
+				if (encoded.length > 8) this.turnIce = encoded
+				console.log('[call] TURN cached', uris.length)
+			} catch (e) {}
+		}).catch((e) => {
+			this.turnBusy = false
+			console.warn('[call] TURN fail', e)
+		})
+	}
+
+	fillHtmlIce(msg: UTSJSONObject): void {
+		if (this.turnIce.length < 8) {
+			this.turnIce = '[{"urls":"stun:stun.l.google.com:19302"}]'
+		}
+		msg['ice'] = this.turnIce
+		this.kickTurn()
+	}
+
+	async appOffer(): Promise<void> {
+		if (this.phase != 'outgoing') return
+		if (this.offerSent || this.invitePosted) return
+		if (this.htmlEval == null || this.htmlLoaded == false) {
+			console.log('[call] startOffer wait engine')
+			return
+		}
+		if (this.offerStarted) return
+		this.offerStarted = true
+		const msg = this.buildHtmlStart('startOffer', '')
+		this.fillHtmlIce(msg)
+		this.sendToHtml(msg)
+		this.armTimeout()
+		this.sub = '正在呼叫…'
+		this.emit()
+		this.pushUi()
+		this.htmlPollN = 0
+		this.scheduleHtmlPoll()
+		console.log('[call] startOffer sent to engine')
+	}
+
+	async appAnswer(): Promise<void> {
+		if (this.answerStarted) return
+		if (this.pendingRemoteSdp.length == 0) {
+			console.warn('[call] appAnswer without remote sdp')
+			return
+		}
+		if (this.htmlEval == null || this.htmlLoaded == false) {
+			console.log('[call] startAnswer wait engine')
+			return
+		}
+		this.answerStarted = true
+		const sdp = this.pendingRemoteSdp
+		if (sdp.length == 0) {
+			this.answerStarted = false
+			return
+		}
+		const msg = this.buildHtmlStart('startAnswer', sdp)
+		this.fillHtmlIce(msg)
 		this.sendToHtml(msg)
 		this.flushAppIce()
+		this.htmlPollN = 0
+		this.scheduleHtmlPoll()
+		console.log('[call] startAnswer sent to engine, sdp', sdp.length)
+	}
+
+	async armIncoming(): Promise<void> {
+		if (this.phase != 'ringing') return
+		if (this.pendingRemoteSdp.length == 0) return
+		if (this.htmlEval == null || this.htmlLoaded == false) {
+			console.log('[call] armIncoming wait engine')
+			return
+		}
+		const msg = this.buildHtmlStart('armAnswer', this.pendingRemoteSdp)
+		this.fillHtmlIce(msg)
+		msg['name'] = this.peerName
+		msg['sub'] = this.sub
+		msg['phase'] = this.phase
+		msg['incoming'] = '1'
+		this.sendToHtml(msg)
+		this.pushUi()
+		console.log('[call] incoming armed', this.pendingRemoteSdp.length)
+	}
+
+	scheduleHtmlPoll(): void {
+		const n = this.htmlPollN
+		if (n == 0) tuneCallWebView()
+		if (n > 20) return
+		setTimeout(() => {
+			if (this.phase != 'outgoing' && this.phase != 'connecting') return
+			if (this.connectedAt > 0) return
+			if (this.phase == 'outgoing' && this.invitePosted) return
+			const flush: UTSJSONObject = {}
+			flush['cmd'] = 'flush'
+			this.sendToHtml(flush)
+			pullCallHtmlMsg((kind: string, payload: string, cand: UTSJSONObject): void => {
+				this.onHtmlMessage(kind, payload, cand)
+			})
+			this.htmlPollN = n + 1
+			this.scheduleHtmlPoll()
+		}, 400)
 	}
 
 	flushAppIce(): void {
@@ -769,6 +1071,12 @@ export class CallManager {
 	}
 
 	async sendAnswer(sdp: string): Promise<void> {
+		if (this.answerSent) return
+		if (sdp.length < 80) {
+			console.warn('[call] skip short answer', sdp.length)
+			return
+		}
+		this.answerSent = true
 		const payload = this.baseCallContent()
 		const answerObj: UTSJSONObject = {}
 		answerObj['type'] = 'answer'
@@ -784,9 +1092,15 @@ export class CallManager {
 	}
 
 	onHtmlMessage(kind: string, payload: string, cand: UTSJSONObject): void {
+		console.log('[call] html msg', kind, payload.length)
 		if (kind == 'ready') {
 			this.htmlReady = true
-			this.pushUi()
+			this.htmlLoaded = true
+			console.log('[call] engine ready', this.phase)
+			if (this.phase == 'outgoing') this.placeOutgoing()
+			else if (this.phase == 'ringing') this.armIncoming()
+			else if (this.phase == 'connecting') this.appAnswer()
+			else this.pushUi()
 			return
 		}
 		if (kind == 'offer') {
@@ -992,6 +1306,7 @@ export class CallManager {
 		this.htmlEval = null
 		this.htmlReady = false
 		this.htmlLoaded = false
+		destroyCallEngine()
 		// #ifdef H5
 		try {
 			const stream = this.localStream
@@ -1013,6 +1328,10 @@ export class CallManager {
 		this.pendingIce = []
 		this.remoteDescReady = false
 		this.offerSent = false
+		this.offerStarted = false
+		this.answerStarted = false
+		this.answerSent = false
+		this.htmlPollN = 0
 		this.invitePosted = false
 		this.outgoingReady = false
 		this.lastInvite = null
@@ -1034,6 +1353,7 @@ export class CallManager {
 		this.peerName = ''
 		this.isIncoming = false
 		this.pageOpen = false
+		this.clearSnap()
 		this.emit()
 		this.leavePageIfNeeded()
 	}
@@ -1108,6 +1428,18 @@ export class CallManager {
 		}
 	}
 
+	alreadySeen(key: string): boolean {
+		if (key.length == 0) return false
+		for (let i = 0; i < this.seenVoip.length; i++) {
+			if (this.seenVoip[i] == key) return true
+		}
+		this.seenVoip.push(key)
+		if (this.seenVoip.length > 80) {
+			this.seenVoip.splice(0, 20)
+		}
+		return false
+	}
+
 	handleEvent(event: MatrixEvent, rid: string): void {
 		const type = event.type
 		const sender = (event.sender != null) ? event.sender : ''
@@ -1116,11 +1448,17 @@ export class CallManager {
 		let roomId = rid
 		if (roomId.length == 0) roomId = fieldStr(content, 'room_id')
 		const callId = fieldStr(content, 'call_id')
+		if (callId.length == 0) return
+		const matrix0 = getMatrix()
+		const activeId = (matrix0 != null) ? matrix0.callActiveId : ''
+		if (type == 'm.call.invite' && activeId.length > 0 && activeId == callId) return
+		if (type == 'm.call.invite' && this.callId == callId && this.phase != 'idle') return
+		const eid = (event.event_id != null) ? event.event_id : ''
+		const ts0 = event.origin_server_ts != null ? event.origin_server_ts : 0
+		let key = eid
+		if (key.length == 0) key = type + '|' + callId + '|' + ('' + ts0)
+		if (this.alreadySeen(key)) return
 		console.log('[call] handle', type, 'id=', callId, 'from=', sender, 'room=', roomId)
-		if (callId.length == 0) {
-			console.warn('[call] missing call_id, keys ignored')
-			return
-		}
 		const matrix = getMatrix()
 		const myId = (matrix != null) ? matrix.userId : ''
 		if (sender == myId) {
@@ -1129,6 +1467,7 @@ export class CallManager {
 		}
 
 		if (type == 'm.call.invite') {
+			if (this.callId.length > 0 && callId == this.callId) return
 			console.log('[call] recv invite from', sender, 'call', callId)
 			const tsRaw = event.origin_server_ts != null ? event.origin_server_ts : 0
 			let ts = tsRaw
@@ -1142,14 +1481,34 @@ export class CallManager {
 				console.log('[call] invitee mismatch', invitee, myId)
 				return
 			}
-			if (this.callId.length > 0 && callId == this.callId) return
 			if (this.phase != 'idle' && this.phase != 'ringing') {
-				this.sendBusy(roomId, callId)
-				return
+				const live = this.connectedAt > 0 || this.invitePosted || this.answerSent
+				if (live) {
+					console.warn('[call] busy, phase', this.phase)
+					this.sendBusy(roomId, callId)
+					return
+				}
+				console.log('[call] drop zombie', this.phase, this.callId)
+				this.phase = 'idle'
+				this.callId = ''
+				this.answerStarted = false
+				this.answerSent = false
+				this.offerStarted = false
+				this.invitePosted = false
+				this.connectedAt = 0
+				this.htmlEval = null
+				this.htmlReady = false
+				this.htmlLoaded = false
+				this.clearSnap()
 			}
 			const offer = content.getJSON('offer')
 			let sdp = ''
 			if (offer != null) sdp = fieldStr(offer, 'sdp')
+			if (sdp.length == 0) sdp = fieldStr(content, 'sdp')
+			if (sdp.length < 80 || sdp.indexOf('ice-ufrag:stub') >= 0) {
+				console.warn('[call] ignore invalid invite sdp', sdp.length)
+				return
+			}
 			this.pendingRemoteSdp = sdp
 			this.roomId = roomId
 			this.callId = callId
@@ -1162,19 +1521,22 @@ export class CallManager {
 			this.initiatorId = sender
 			this.connectedAt = 0
 			this.leaving = false
-			this.pageOpen = false
 			this.offerSent = false
+			this.offerStarted = false
+			this.answerStarted = false
+			this.answerSent = false
+			this.htmlPollN = 0
 			this.invitePosted = false
-			this.htmlBoot = ''
 			const cached = matrix != null ? matrix.getCachedUserName(sender) : ''
 			this.peerName = cached.length > 0 ? cached : localPart(sender)
 			this.sub = this.isVideo ? '邀请你视频通话' : '邀请你语音通话'
 			this.muted = false
 			this.cameraOff = false
+			this.htmlBoot = 'in'
 			this.emit()
 			this.armTimeout()
 			this.openPage()
-			uni.showToast({ title: this.sub, icon: 'none', duration: 3000 })
+			this.requestCallPerms()
 			return
 		}
 
@@ -1222,6 +1584,7 @@ export class CallManager {
 			if (sdp.length == 0) return
 			this.pendingRemoteSdp = sdp
 			if (sdp.indexOf('m=video') >= 0) this.isVideo = true
+			if (this.phase == 'ringing') return
 			// #ifndef H5
 			const neg: UTSJSONObject = {}
 			neg['cmd'] = 'remoteOffer'
@@ -1297,19 +1660,32 @@ let gCall: CallManager | null = null
 
 function attachVoipSink(): void {
 	setVoipSink((event: MatrixEvent, roomId: string): void => {
-		const mgr = gCall
-		if (mgr == null) return
+		const mgr = getCallManager()
 		mgr.handleEvent(event, roomId)
 	})
 }
 
 export function getCallManager(): CallManager {
+	const matrix = getMatrix()
+	if (matrix != null) {
+		const held = matrix.voipHold
+		if (held != null) {
+			const fromHs = held as CallManager
+			gCall = fromHs
+			fromHs.adoptIfIdle()
+			return fromHs
+		}
+	}
 	let mgr = gCall
 	if (mgr == null) {
 		mgr = new CallManager()
 		gCall = mgr
 		attachVoipSink()
 	}
+	if (matrix != null) {
+		matrix.voipHold = mgr
+	}
+	mgr.adoptIfIdle()
 	return mgr
 }
 

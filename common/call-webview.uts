@@ -1,0 +1,248 @@
+// #ifdef APP-ANDROID
+import View from 'android.view.View'
+import ViewGroup from 'android.view.ViewGroup'
+import WebView from 'android.webkit.WebView'
+import WebChromeClient from 'android.webkit.WebChromeClient'
+import PermissionRequest from 'android.webkit.PermissionRequest'
+import FrameLayout from 'android.widget.FrameLayout'
+
+let injectedWv: WebView | null = null
+
+function findWebView(v: View | null): WebView | null {
+	if (v == null) return null
+	if (v instanceof WebView) return v as WebView
+	if (v instanceof ViewGroup) {
+		const g = v as ViewGroup
+		const n = g.getChildCount()
+		let i: Int = 0
+		while (i < n) {
+			const child = g.getChildAt(i)
+			const found = findWebView(child)
+			if (found != null) return found
+			i++
+		}
+	}
+	return null
+}
+
+export function getCallWebView(): WebView | null {
+	try {
+		const act = UTSAndroid.getUniActivity()
+		if (act == null) return null
+		const win = act.getWindow()
+		if (win == null) return null
+		const decor = win.getDecorView()
+		return findWebView(decor)
+	} catch (e) {
+		console.warn('[call] find webview', e)
+		return null
+	}
+}
+
+class CallChrome extends WebChromeClient {
+	constructor() {
+		super()
+	}
+	override onPermissionRequest(request: PermissionRequest): void {
+		try {
+			request.grant(request.getResources())
+		} catch (e) {}
+	}
+}
+
+function applyWebSettings(wv: WebView): void {
+	try {
+		const s = wv.getSettings()
+		s.setJavaScriptEnabled(true)
+		s.setDomStorageEnabled(true)
+		s.setMediaPlaybackRequiresUserGesture(false)
+		s.setAllowFileAccess(true)
+		s.setAllowContentAccess(true)
+		s.setAllowFileAccessFromFileURLs(true)
+		s.setAllowUniversalAccessFromFileURLs(true)
+		s.setMixedContentMode(0)
+	} catch (e) {}
+	try {
+		wv.setWebChromeClient(new CallChrome())
+	} catch (e2) {}
+}
+
+export function tuneCallWebView(): void {
+	const wv = getCallWebView()
+	if (wv == null) {
+		console.warn('[call] native webview missing')
+		return
+	}
+	try {
+		applyWebSettings(wv)
+		console.log('[call] webview audio unlocked')
+	} catch (e) {
+		console.warn('[call] tune webview', e)
+	}
+}
+
+export function makeNativeEval(): ((js: string) => void) | null {
+	const wv = getCallWebView()
+	if (wv == null) return null
+	applyWebSettings(wv)
+	const bound = wv
+	return (js: string): void => {
+		try {
+			bound.evaluateJavascript(js, (_v: string) => {})
+		} catch (e) {}
+	}
+}
+
+export function pingCallEngine(cb: (ready: boolean) => void): void {
+	const wv = getCallWebView()
+	if (wv == null) {
+		console.log('[call] ping no webview')
+		cb(false)
+		return
+	}
+	try {
+		applyWebSettings(wv)
+		wv.evaluateJavascript('(function(){try{return (window.__callJson?"1":"0")+"|"+document.readyState;}catch(e){return "0";}})()', (value: string) => {
+			const v = (value != null) ? value : ''
+			console.log('[call] engine ping', v)
+			cb(v.indexOf('1') >= 0)
+		})
+	} catch (e) {
+		cb(false)
+	}
+}
+
+function loadEngineHtml(wv: WebView): void {
+	try {
+		const fs = uni.getFileSystemManager()
+		fs.readFile({
+			filePath: '/static/call-engine.html',
+			encoding: 'utf-8',
+			success: (res) => {
+				const html = '' + res.data
+				console.log('[call] load engine html', html.length)
+				wv.loadDataWithBaseURL('https://call.local/', html, 'text/html', 'UTF-8', '')
+			},
+			fail: (err) => {
+				console.warn('[call] read engine html fail', err.errMsg)
+				wv.loadUrl('file:///android_asset/static/call-engine.html')
+			}
+		})
+	} catch (e) {
+		console.warn('[call] load engine html', e)
+		try {
+			wv.loadUrl('file:///android_asset/static/call-engine.html')
+		} catch (e2) {}
+	}
+}
+
+export function ensureCallEngine(): void {
+	console.log('[call] ensureCallEngine android')
+	if (injectedWv != null) {
+		console.log('[call] inject already')
+		return
+	}
+	const existed = getCallWebView()
+	if (existed != null) {
+		console.log('[call] webview already in tree')
+		applyWebSettings(existed)
+		return
+	}
+	try {
+		const act = UTSAndroid.getUniActivity()
+		if (act == null) {
+			console.warn('[call] no activity for webview')
+			return
+		}
+		const wv = new WebView(act)
+		applyWebSettings(wv)
+		const lp = new FrameLayout.LayoutParams(-1, -1)
+		act.addContentView(wv, lp)
+		injectedWv = wv
+		wv.bringToFront()
+		loadEngineHtml(wv)
+		console.log('[call] injected native webview')
+	} catch (e) {
+		console.warn('[call] inject webview fail', e)
+	}
+}
+
+export function destroyCallEngine(): void {
+	const wv = injectedWv
+	injectedWv = null
+	if (wv == null) return
+	try {
+		const parent = wv.getParent()
+		if (parent != null && parent instanceof ViewGroup) {
+			const g = parent as ViewGroup
+			g.removeView(wv)
+		}
+	} catch (e) {}
+	try {
+		wv.destroy()
+	} catch (e2) {}
+}
+
+export function pullCallHtmlMsg(handler: (kind: string, payload: string, cand: UTSJSONObject) => void): void {
+	const wv = getCallWebView()
+	if (wv == null) return
+	try {
+		wv.evaluateJavascript('(function(){try{return window.__lastAnswerPacked||window.__lastOfferPacked||""; }catch(e){return "";}})()', (value: string) => {
+			if (value == null) return
+			let raw = value
+			if (raw.length >= 2 && raw.charAt(0) == '"') {
+				try {
+					raw = JSON.parse(raw) as string
+				} catch (e0) {}
+			}
+			if (raw.length < 8 || raw == 'null' || raw == '{}') return
+			try {
+				const o = JSON.parse(raw) as UTSJSONObject
+				const t = o.getString('type')
+				const kind = (t != null) ? t : ''
+				if (kind.length == 0) return
+				let payload = ''
+				const cand: UTSJSONObject = {}
+				if (kind == 'offer' || kind == 'answer') {
+					const s = o.getString('sdp')
+					payload = (s != null) ? s : ''
+				} else if (kind == 'error') {
+					const s = o.getString('message')
+					payload = (s != null) ? s : ''
+				} else if (kind == 'ice') {
+					const s = o.getString('candidate')
+					payload = (s != null) ? s : ''
+					const mid = o.getString('sdpMid')
+					cand['sdpMid'] = (mid != null) ? mid : ''
+					cand['sdpMLineIndex'] = o.getNumber('sdpMLineIndex')
+				}
+				if (kind == 'ready' || kind == 'ice') return
+				console.log('[call] pull html', kind, payload.length)
+				handler(kind, payload, cand)
+			} catch (e1) {
+				console.warn('[call] pull parse', e1)
+			}
+		})
+	} catch (e) {
+		console.warn('[call] pull html', e)
+	}
+}
+// #endif
+
+// #ifndef APP-ANDROID
+export function tuneCallWebView(): void {}
+export function makeNativeEval(): ((js: string) => void) | null {
+	return null
+}
+export function pingCallEngine(cb: (ready: boolean) => void): void {
+	cb(false)
+}
+export function ensureCallEngine(): void {
+	console.log('[call] ensure skip, not android')
+}
+export function destroyCallEngine(): void {}
+export function pullCallHtmlMsg(_handler: (kind: string, payload: string, cand: UTSJSONObject) => void): void {}
+export function getCallWebView(): any | null {
+	return null
+}
+// #endif

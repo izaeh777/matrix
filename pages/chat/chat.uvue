@@ -1572,9 +1572,7 @@
 	function acceptIncomingCall() {
 		const mgr = getCallManager()
 		mgr.openPage()
-		setTimeout(() => {
-			mgr.accept()
-		}, 400)
+		uni.showToast({ title: '请点通话页的接听', icon: 'none' })
 	}
 	function rejectIncomingCall() {
 		getCallManager().reject()
@@ -2404,6 +2402,9 @@
 
 	async function pullLatestLive(): Promise<void> {
 		if (livePulling) return
+		const mx = getMatrix()
+		if (mx != null && mx.callActiveId.length > 0) return
+		if (getCallManager().phase != 'idle') return
 		const matrix = matrixRef
 		if (matrix == null) return
 		if (roomId.value.length == 0) return

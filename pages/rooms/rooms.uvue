@@ -820,9 +820,7 @@
 	function acceptIncomingCall() {
 		const mgr = getCallManager()
 		mgr.openPage()
-		setTimeout(() => {
-			mgr.accept()
-		}, 400)
+		uni.showToast({ title: '请点通话页的接听', icon: 'none' })
 	}
 	function rejectIncomingCall() {
 		getCallManager().reject()

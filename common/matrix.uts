@@ -535,6 +535,10 @@ export class MatrixClient {
 	pendingVoipEvents: Array<MatrixEvent> = []
 	pendingVoipRooms: Array<string> = []
 	onVoipEvent: ((event: MatrixEvent, roomId: string) => void) | null = null
+	voipHold: any | null = null
+	callSnap: UTSJSONObject | null = null
+	callActiveId: string = ''
+	callPollOn: boolean = false
 	inviteHandlers: Array<(roomId: string) => void> = []
 	syncStateHandlers: Array<(state: string, error: string) => void> = []
 	typingHandlers: Array<(userIds: Array<string>, roomId: string) => void> = []
@@ -1172,6 +1176,11 @@ export class MatrixClient {
 	}
 
 	fireVoip(event: MatrixEvent, roomId: string): void {
+		const sink = _voipSink
+		if (sink != null) {
+			try { sink(event, roomId) } catch (e) { console.error('voip sink error', e) }
+			return
+		}
 		const direct = this.onVoipEvent
 		if (direct != null) {
 			try { direct(event, roomId) } catch (e) { console.error('voip direct error', e) }
@@ -1652,6 +1661,35 @@ export class MatrixClient {
 			messages: msgs,
 			end: jsonStr(data, 'end')
 		}
+	}
+
+	async getCallEvents(roomId: string): Promise<Array<MatrixEvent>> {
+		const out: Array<MatrixEvent> = []
+		if (roomId.length == 0) return out
+		const filter = JSON.stringify({
+			types: ['m.call.invite', 'm.call.answer', 'm.call.hangup', 'm.call.reject', 'm.call.candidates', 'm.call.negotiate']
+		})
+		const query: UTSJSONObject = {
+			dir: 'b',
+			limit: '12',
+			filter: filter
+		}
+		try {
+			const data = (await this.request(
+				'GET',
+				`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages`,
+				null,
+				query
+			)) as UTSJSONObject
+			const chunk = jsonArr(data, 'chunk')
+			for (let i = 0; i < chunk.length; i++) {
+				const ev = chunk[i]
+				const evType = jsonStr(ev, 'type')
+				if (evType.indexOf('m.call.') != 0) continue
+				out.push(this.parseEvent(ev))
+			}
+		} catch (e) {}
+		return out
 	}
 
 	getCachedRoomName(roomId: string): string {

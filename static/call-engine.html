@@ -6,22 +6,96 @@
 <title>call</title>
 <style>
 html,body{margin:0;padding:0;width:100%;height:100%;background:#111;overflow:hidden;font-family:sans-serif}
-#remote,#local{display:none}
+#remote,#local,#remoteAudio{position:absolute;width:0;height:0;opacity:0;pointer-events:none}
+#ui{position:absolute;left:0;top:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2;padding:24px}
+#name{color:#fff;font-size:28px;font-weight:700;margin-bottom:8px}
+#sub{color:rgba(255,255,255,.75);font-size:16px;margin-bottom:36px}
+#btns{display:flex;flex-direction:row;flex-wrap:wrap;justify-content:center}
+#btns button{border:0;border-radius:28px;color:#fff;font-size:16px;font-weight:600;padding:14px 28px;margin:0 8px 12px;min-width:88px}
+#btnAccept{background:#07c160;display:inline-block}
+#btnReject,#btnHang{background:#fa5151;min-width:140px}
+#btnHang{display:none}
+#btnReject{display:inline-block}
 </style>
 </head>
 <body>
-<video id="remote" autoplay playsinline></video>
+<video id="remote" autoplay playsinline muted></video>
 <video id="local" autoplay playsinline muted></video>
+<audio id="remoteAudio" autoplay playsinline></audio>
+<div id="ui">
+  <div id="name">通话</div>
+  <div id="sub">连接中…</div>
+  <div id="btns">
+    <button id="btnAccept" type="button">接听</button>
+    <button id="btnReject" type="button">拒绝</button>
+    <button id="btnHang" type="button">挂断</button>
+  </div>
+</div>
 <script>
 var pc = null
 var localStream = null
 var muted = false
+var started = false
+var remoteSet = false
+var iceBuf = []
 var HS = ''
 var TOKEN = ''
 var ROOM = ''
 var CALL = ''
 var PARTY = ''
 var INVITEE = ''
+var pendingSdp = ''
+var pendingIce = '[]'
+var pendingVideo = false
+function setUi(msg) {
+  var name = document.getElementById('name')
+  var sub = document.getElementById('sub')
+  if (name && msg.name) name.textContent = msg.name
+  if (sub && msg.sub) sub.textContent = msg.sub
+  var phase = msg.phase || ''
+  var incoming = msg.incoming === '1'
+  var acc = document.getElementById('btnAccept')
+  var rej = document.getElementById('btnReject')
+  var hang = document.getElementById('btnHang')
+  if (acc) acc.style.display = (phase === 'ringing' && incoming) ? 'inline-block' : 'none'
+  if (rej) rej.style.display = (phase === 'ringing' && incoming) ? 'inline-block' : 'none'
+  if (hang) hang.style.display = (phase === 'idle' || (phase === 'ringing' && incoming)) ? 'none' : 'inline-block'
+}
+function runAnswer() {
+  post({ type: 'ui', action: 'accept' })
+  if (started) return
+  var sdp = pendingSdp
+  if (!sdp) {
+    media(pendingVideo).then(function (stream) {
+      localStream = stream
+      console.log('[engine] media unlocked, wait sdp')
+    }).catch(function (e) { failMedia(e) })
+    return
+  }
+  started = true
+  var ice2 = parseIce(pendingIce || '[]')
+  console.log('[engine] click startAnswer', sdp.length)
+  media(pendingVideo).then(function (stream) {
+    ensurePc(ice2)
+    addLocal(stream)
+    return pc.setRemoteDescription({ type: 'offer', sdp: sdp }).then(function () {
+      remoteSet = true
+      flushIceBuf()
+      return pc.createAnswer().then(function (answer) {
+        return pc.setLocalDescription(answer).then(function () {
+          console.log('[engine] local answer', (answer.sdp || '').length)
+          post({ type: 'answer', sdp: answer.sdp })
+          var body = callBase()
+          body.answer = { type: 'answer', sdp: answer.sdp }
+          mxSend('m.call.answer', body)
+        })
+      })
+    })
+  }).catch(function (e) {
+    started = false
+    failMedia(e)
+  })
+}
 function saveAuth(msg) {
   if (msg.hs) HS = msg.hs
   if (msg.token) TOKEN = msg.token
@@ -30,11 +104,40 @@ function saveAuth(msg) {
   if (msg.party) PARTY = msg.party
   if (msg.invitee) INVITEE = msg.invitee
 }
-function mxSend(type, content, done) {
-  if (!HS || !TOKEN || !ROOM) {
-    if (done) done(false)
-    return
+function emit(obj) {
+  var packed = ''
+  try { packed = JSON.stringify(obj) } catch (e0) {}
+  window.__lastCallMsg = obj
+  window.__lastCallPacked = packed
+  if (obj && obj.type === 'offer') {
+    window.__lastOfferMsg = obj
+    window.__lastOfferPacked = packed
   }
+  if (obj && obj.type === 'answer') {
+    window.__lastAnswerMsg = obj
+    window.__lastAnswerPacked = packed
+  }
+  try {
+    console.log('[engine] emit', obj.type, packed ? packed.length : 0)
+  } catch (e1) {}
+  try {
+    if (window.uni && uni.webView && uni.webView.postMessage) {
+      if (packed) uni.webView.postMessage({ data: packed })
+      uni.webView.postMessage({ data: obj })
+    }
+  } catch (e2) {}
+  try {
+    if (window.__dcloud_weex_postMessage) {
+      window.__dcloud_weex_postMessage({ data: packed ? [packed, obj] : [obj] })
+    }
+  } catch (e3) {}
+  try {
+    if (window.uni && uni.postMessage) uni.postMessage({ data: packed || obj })
+  } catch (e4) {}
+}
+function post(obj) { emit(obj) }
+function mxSend(type, content) {
+  if (!HS || !TOKEN || !ROOM) return
   var txn = 't' + Date.now() + '_' + Math.floor(Math.random() * 10000)
   var url = HS + '/_matrix/client/v3/rooms/' + encodeURIComponent(ROOM) + '/send/' + encodeURIComponent(type) + '/' + txn
   fetch(url, {
@@ -45,59 +148,94 @@ function mxSend(type, content, done) {
     },
     body: JSON.stringify(content)
   }).then(function (r) {
-    if (done) done(r.ok)
-  }).catch(function () {
-    if (done) done(false)
+    console.log('[engine] mxSend', type, r.status)
+  }).catch(function (e) {
+    console.log('[engine] mxSend fail', type, e && e.message)
   })
 }
-function emit(obj) {
-  window.__lastCallMsg = obj
-  try {
-    if (window.uni && uni.webView && uni.webView.postMessage) {
-      uni.webView.postMessage({ data: obj })
-    }
-  } catch (e) {}
-  try {
-    if (window.__dcloud_weex_postMessage) {
-      window.__dcloud_weex_postMessage({ data: [obj] })
-    }
-  } catch (e2) {}
+function callBase() {
+  return { call_id: CALL, version: '1', party_id: PARTY, room_id: ROOM }
 }
-function post(obj) { emit(obj) }
 function parseIce(text) {
-  try { return JSON.parse(text) } catch (e) { return [{ urls: 'stun:stun.l.google.com:19302' }] }
+  try {
+    var v = JSON.parse(text)
+    if (v && v.length) return v
+  } catch (e) {}
+  return [{ urls: 'stun:stun.l.google.com:19302' }]
+}
+function queueIce(c) {
+  iceBuf.push(c)
+  flushIceBuf()
+}
+function flushIceBuf() {
+  if (!pc || !remoteSet) return
+  while (iceBuf.length) {
+    var one = iceBuf.shift()
+    try { pc.addIceCandidate(one) } catch (e) {}
+  }
+}
+function safePlay(el) {
+  if (!el || !el.play) return
+  try {
+    var p = el.play()
+    if (p && p.catch) p.catch(function () {})
+  } catch (e) {}
+}
+function attachRemote(stream) {
+  var v = document.getElementById('remote')
+  var a = document.getElementById('remoteAudio')
+  if (v) {
+    v.muted = true
+    v.srcObject = stream
+    safePlay(v)
+  }
+  if (a) {
+    a.srcObject = stream
+    safePlay(a)
+  }
+}
+function failMedia(e) {
+  var m = (e && e.message) ? e.message : ''
+  var name = (e && e.name) ? e.name : ''
+  console.log('[engine] media fail', name, m)
+  if (m.indexOf('play()') >= 0 || m.indexOf('user gesture') >= 0) return
+  if (name === 'NotAllowedError' || m.indexOf('Permission') >= 0) {
+    post({ type: 'error', message: '请允许麦克风/摄像头权限' })
+    return
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    post({ type: 'error', message: '当前页面无法使用通话' })
+    return
+  }
+  post({ type: 'error', message: m || '无法打开麦克风/摄像头' })
 }
 function ensurePc(ice) {
   if (pc) return pc
   pc = new RTCPeerConnection({ iceServers: ice })
   pc.onicecandidate = function (ev) {
     if (!ev || !ev.candidate) return
-    mxSend('m.call.candidates', {
-      call_id: CALL,
-      version: '1',
-      party_id: PARTY,
-      candidates: [{
-        candidate: ev.candidate.candidate,
-        sdpMid: ev.candidate.sdpMid,
-        sdpMLineIndex: ev.candidate.sdpMLineIndex
-      }]
-    })
-    post({
-      type: 'ice',
+    var cand = {
       candidate: ev.candidate.candidate,
       sdpMid: ev.candidate.sdpMid,
       sdpMLineIndex: ev.candidate.sdpMLineIndex
+    }
+    post({
+      type: 'ice',
+      candidate: cand.candidate,
+      sdpMid: cand.sdpMid,
+      sdpMLineIndex: cand.sdpMLineIndex
     })
+    var body = callBase()
+    body.candidates = [cand]
+    mxSend('m.call.candidates', body)
   }
   pc.ontrack = function (ev) {
-    var el = document.getElementById('remote')
-    if (!el) return
-    if (ev.streams && ev.streams[0]) el.srcObject = ev.streams[0]
-    else el.srcObject = new MediaStream([ev.track])
-    el.play && el.play()
+    var stream = (ev.streams && ev.streams[0]) ? ev.streams[0] : new MediaStream([ev.track])
+    attachRemote(stream)
   }
   pc.onconnectionstatechange = function () {
     if (!pc) return
+    console.log('[engine] pc', pc.connectionState)
     if (pc.connectionState === 'connected') post({ type: 'connected' })
     else if (pc.connectionState === 'failed') post({ type: 'failed' })
   }
@@ -108,14 +246,21 @@ function addLocal(stream) {
   var el = document.getElementById('local')
   if (el) {
     el.srcObject = stream
-    el.play && el.play()
+    safePlay(el)
   }
   if (!pc) return
   var tracks = stream.getTracks()
   for (var i = 0; i < tracks.length; i++) pc.addTrack(tracks[i], stream)
 }
 function media(video) {
-  return navigator.mediaDevices.getUserMedia({ audio: true, video: !!video })
+  if (localStream) return Promise.resolve(localStream)
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return Promise.reject(new Error('当前页面无法使用通话'))
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: true, video: !!video }).then(function (stream) {
+    localStream = stream
+    return stream
+  })
 }
 function hangLocal() {
   try {
@@ -127,64 +272,130 @@ function hangLocal() {
   try { if (pc) pc.close() } catch (e2) {}
   pc = null
   localStream = null
+  started = false
+  remoteSet = false
+  iceBuf = []
+}
+window.__flushCall = function () {
+  var msg = window.__lastAnswerMsg || window.__lastOfferMsg
+  if (msg) emit(msg)
 }
 window.__callJson = function (msg) {
   if (!msg) return
+  if (typeof msg === 'string') {
+    try { msg = JSON.parse(msg) } catch (e0) { return }
+  }
   var cmd = msg.cmd
   saveAuth(msg)
-  if (cmd === 'ui') return
+  if (cmd === 'ui') {
+    setUi(msg)
+    return
+  }
+  if (cmd === 'armAnswer') {
+    pendingSdp = msg.sdp || ''
+    pendingIce = msg.ice || '[]'
+    pendingVideo = msg.video === '1'
+    if (!msg.phase) {
+      msg.phase = 'ringing'
+      msg.incoming = '1'
+    }
+    setUi(msg)
+    console.log('[engine] armed answer', pendingSdp.length)
+    return
+  }
+  if (cmd === 'flush') {
+    window.__flushCall()
+    return
+  }
+  if (cmd === 'unlock') {
+    safePlay(document.getElementById('remote'))
+    safePlay(document.getElementById('remoteAudio'))
+    safePlay(document.getElementById('local'))
+    return
+  }
   if (cmd === 'startOffer') {
+    if (started) return
+    started = true
     var ice = parseIce(msg.ice || '[]')
     var video = msg.video === '1'
+    console.log('[engine] startOffer video', video)
     media(video).then(function (stream) {
       ensurePc(ice)
       addLocal(stream)
       return pc.createOffer().then(function (offer) {
         return pc.setLocalDescription(offer).then(function () {
+          console.log('[engine] local offer', (offer.sdp || '').length)
           post({ type: 'offer', sdp: offer.sdp })
+          var inv = callBase()
+          inv.lifetime = 90000
+          inv.offer = { type: 'offer', sdp: offer.sdp }
+          if (INVITEE) inv.invitee = INVITEE
+          mxSend('m.call.invite', inv)
         })
       })
-    }).catch(function (e) {
-      post({ type: 'error', message: '无法打开麦克风/摄像头' })
-    })
+    }).catch(failMedia)
     return
   }
   if (cmd === 'startAnswer') {
+    if (started) return
+    started = true
     var ice2 = parseIce(msg.ice || '[]')
     var video2 = msg.video === '1'
     var sdp = msg.sdp || ''
+    console.log('[engine] startAnswer sdp', sdp.length)
+    if (!sdp || sdp.indexOf('ice-ufrag:stub') >= 0) {
+      started = false
+      post({ type: 'error', message: '对方信令无效，请重拨' })
+      return
+    }
     media(video2).then(function (stream) {
+      console.log('[engine] got local media')
       ensurePc(ice2)
       addLocal(stream)
       return pc.setRemoteDescription({ type: 'offer', sdp: sdp }).then(function () {
+        remoteSet = true
+        flushIceBuf()
         return pc.createAnswer().then(function (answer) {
           return pc.setLocalDescription(answer).then(function () {
+            console.log('[engine] local answer', (answer.sdp || '').length)
             post({ type: 'answer', sdp: answer.sdp })
+            var body = callBase()
+            body.answer = { type: 'answer', sdp: answer.sdp }
+            mxSend('m.call.answer', body)
           })
         })
       })
     }).catch(function (e) {
-      post({ type: 'error', message: '无法打开麦克风/摄像头' })
+      started = false
+      failMedia(e)
     })
     return
   }
   if (cmd === 'remoteAnswer') {
     if (!pc) return
-    pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp || '' }).catch(function () {})
+    pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp || '' }).then(function () {
+      remoteSet = true
+      flushIceBuf()
+      console.log('[engine] remote answer set')
+    }).catch(function (e) {
+      post({ type: 'error', message: (e && e.message) ? e.message : '接通失败' })
+    })
     return
   }
   if (cmd === 'remoteOffer') {
     if (!pc) return
-    pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp || '' }).catch(function () {})
+    pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp || '' }).then(function () {
+      remoteSet = true
+      flushIceBuf()
+    }).catch(function () {})
     return
   }
   if (cmd === 'ice') {
-    if (!pc) return
-    pc.addIceCandidate({
+    queueIce({
       candidate: msg.candidate || '',
       sdpMid: msg.sdpMid || '',
       sdpMLineIndex: msg.sdpMLineIndex
-    }).catch(function () {})
+    })
     return
   }
   if (cmd === 'mute') {
@@ -202,16 +413,45 @@ window.__callJson = function (msg) {
   }
 }
 emit({ type: 'ready' })
+function bootFromQuery() {
+  var q = location.search || ''
+  var hash = location.hash || ''
+  var incoming = q.indexOf('p=in') >= 0 || hash.indexOf('p=in') >= 0
+  var outgoing = q.indexOf('p=out') >= 0 || hash.indexOf('p=out') >= 0
+  if (incoming) {
+    setUi({ name: '通话', sub: '邀请你语音通话', phase: 'ringing', incoming: '1' })
+    console.log('[engine] boot query in')
+    return true
+  }
+  if (outgoing) {
+    setUi({ name: '通话', sub: '正在呼叫…', phase: 'outgoing', incoming: '0' })
+    console.log('[engine] boot query out')
+    return true
+  }
+  return false
+}
 function bootFromHash() {
   try {
     var h = location.hash ? location.hash.replace(/^#/, '') : ''
-    if (!h) return
+    if (!h || h.indexOf('{') < 0) return
     var msg = JSON.parse(decodeURIComponent(h))
     window.__callJson(msg)
-  } catch (e) {}
+    console.log('[engine] boot hash', msg && msg.cmd, msg && msg.phase)
+  } catch (e) {
+    console.log('[engine] boot hash fail', e && e.message)
+  }
 }
-if (document.readyState === 'complete') bootFromHash()
-else window.addEventListener('load', bootFromHash)
+bootFromQuery()
+bootFromHash()
+if (document.readyState !== 'complete') {
+  window.addEventListener('load', function () {
+    bootFromQuery()
+    bootFromHash()
+  })
+}
+document.getElementById('btnAccept').onclick = function () { runAnswer() }
+document.getElementById('btnReject').onclick = function () { post({ type: 'ui', action: 'reject' }) }
+document.getElementById('btnHang').onclick = function () { post({ type: 'ui', action: 'hang' }) }
 </script>
 </body>
 </html>

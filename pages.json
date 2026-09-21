@@ -39,9 +39,9 @@
 			"path": "pages/call/call",
 			"style": {
 				"navigationBarTitleText": "通话",
-				"navigationStyle": "default",
-				"navigationBarBackgroundColor": "#111111",
-				"navigationBarTextStyle": "white"
+				"navigationStyle": "custom",
+				"backgroundColor": "#111111",
+				"disableScroll": true
 			}
 		},
 		{
