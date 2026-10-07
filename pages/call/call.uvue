@@ -1,5 +1,8 @@
 <template>
 	<view class="call-page">
+		<!-- #ifdef H5 -->
+		<view class="call-stage"></view>
+		<!-- #endif -->
 		<!-- #ifndef H5 -->
 		<web-view
 			id="callWeb"
@@ -13,8 +16,11 @@
 		></web-view>
 		<!-- #endif -->
 		<view class="call-bar">
+			<image class="call-avatar" :src="avatarSrc()"></image>
 			<text class="call-name">{{ ui.peerName }}</text>
-			<text class="call-sub">{{ ui.sub }}</text>
+			<text v-if="ui.isGroupCall && ui.groupPeerCount > 0" class="call-sub">群成员 {{ ui.groupPeerCount }} 人</text>
+			<text v-if="durText != ''" class="call-dur">{{ durText }}</text>
+			<text v-else class="call-sub">{{ ui.sub }}</text>
 			<view class="call-actions">
 				<view v-if="ui.phase == 'ringing' && ui.isIncoming" class="call-btn call-btn-accept" @click="onAccept">
 					<text class="call-btn-text">接听</text>
@@ -41,8 +47,8 @@
 
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted, nextTick, getCurrentInstance } from 'vue'
-	import { getCallManager, CallManager, CallSnapshot } from '@/common/call.uts'
-	import { tuneCallWebView, makeNativeEval, pingCallEngine, destroyCallEngine, reloadEngineAsHttps } from '@/common/call-webview.uts'
+	import { getCallManager, CallManager, CallSnapshot, h5TapRunAnswer, formatCallDur } from '@/common/call.uts'
+	import { tuneCallWebView, makeNativeEval, pingCallEngine, destroyCallEngine, reloadEngineAsHttps, loadEngineHtmlInto } from '@/common/call-webview.uts'
 	// #ifdef APP-ANDROID
 	import WebView from 'android.webkit.WebView'
 	import FrameLayout from 'android.widget.FrameLayout'
@@ -50,16 +56,19 @@
 	// #endif
 
 	const ui = ref<CallSnapshot>({
-		phase: 'idle', roomId: '', callId: '', peerName: '', isVideo: false,
-		isIncoming: false, sub: '', muted: false, cameraOff: false
+		phase: 'idle', roomId: '', callId: '', peerName: '', peerAvatar: '', isVideo: false,
+		isIncoming: false, sub: '', muted: false, cameraOff: false, isGroupCall: false, groupPeerCount: 0
 	})
+	const durText = ref<string>('')
+	let durTimer: number | null = null
 	let off: (() => void) | null = null
 	let closing: boolean = false
 	let httpsTried: boolean = false
+	let httpsReady: boolean = false
 	let engineH = 520
 	try {
 		const info = uni.getSystemInfoSync()
-		if (info.windowHeight > 360) engineH = info.windowHeight - 220
+		if (info.windowHeight > 360) engineH = info.windowHeight - 300
 	} catch (e) {}
 
 	function makeEngineSrc(): string {
@@ -69,6 +78,193 @@
 		return '/static/call-engine.html?p=' + mode + '&v=' + v
 	}
 	const engineSrc = ref<string>(makeEngineSrc())
+
+	let h5MsgFn: ((ev: any) => void) | null = null
+	let h5EngineFetch = false
+	function noteH5Ready(): boolean {
+		// #ifdef H5
+		try {
+			const win = window as any
+			if (win == null || win.__callJson == null) return false
+			const mgr = getCallManager()
+			if (mgr.htmlLoaded == false) {
+				console.log('[call] h5 engine ready', mgr.phase)
+			}
+			mgr.htmlLoaded = true
+			mgr.htmlReady = true
+			return true
+		} catch (eNote) {}
+		// #endif
+		return false
+	}
+	function fetchH5Engine(): void {
+		// #ifdef H5
+		if (h5EngineFetch) return
+		if (noteH5Ready()) return
+		h5EngineFetch = true
+		uni.request({
+			url: '/static/call-engine.js',
+			method: 'GET',
+			dataType: 'text',
+			success: (res) => {
+				try {
+					const win = window as any
+					if (win.__callJson != null) {
+						noteH5Ready()
+						kickEngine()
+						return
+					}
+					const code = '' + res.data
+					win.eval(code)
+					console.log('[call] h5 engine eval', code.length)
+					noteH5Ready()
+					kickEngine()
+				} catch (eEval) {
+					h5EngineFetch = false
+					console.warn('[call] engine eval fail', eEval)
+				}
+			},
+			fail: () => {
+				h5EngineFetch = false
+				console.warn('[call] engine fetch fail')
+				try {
+					const doc2 = (window as any).document
+					if (doc2.getElementById('callEngineScript') == null) {
+						const s = doc2.createElement('script')
+						s.id = 'callEngineScript'
+						s.src = '/static/call-engine.js'
+						s.onload = (): void => {
+							noteH5Ready()
+							kickEngine()
+						}
+						doc2.head.appendChild(s)
+					}
+				} catch (eScript) {}
+			}
+		})
+		// #endif
+	}
+	function bindH5IFrame(): boolean {
+		// #ifdef H5
+		try {
+			const doc = (window as any).document
+			const win = window as any
+			if (doc == null) return false
+			let root = doc.getElementById('callEngineRoot')
+			if (root == null) {
+				root = doc.createElement('div')
+				root.id = 'callEngineRoot'
+				const remote = doc.createElement('video')
+				remote.id = 'remote'
+				remote.setAttribute('autoplay', 'true')
+				remote.setAttribute('playsinline', 'true')
+				remote.setAttribute('webkit-playsinline', 'true')
+				remote.muted = true
+				remote.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;background:#111;pointer-events:none;'
+				const local = doc.createElement('video')
+				local.id = 'local'
+				local.setAttribute('autoplay', 'true')
+				local.setAttribute('playsinline', 'true')
+				local.setAttribute('webkit-playsinline', 'true')
+				local.muted = true
+				local.style.cssText = 'position:absolute;right:12px;top:12px;width:112px;height:152px;object-fit:cover;background:#000;border-radius:12px;pointer-events:none;'
+				const audio = doc.createElement('audio')
+				audio.id = 'remoteAudio'
+				audio.setAttribute('autoplay', 'true')
+				audio.setAttribute('playsinline', 'true')
+				root.appendChild(remote)
+				root.appendChild(local)
+				root.appendChild(audio)
+				doc.body.appendChild(root)
+			}
+			root.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:160px;z-index:9998;background:#111;overflow:hidden;pointer-events:none;'
+			const mgr = getCallManager()
+			mgr.htmlPost = (json: string): void => {
+				try {
+					const fn = win.__callJson
+					if (fn != null) fn(json)
+				} catch (ePost) {
+					console.warn('[call] engine post fail', ePost)
+				}
+			}
+			mgr.htmlEval = (js: string): void => {
+				try {
+					if (js.indexOf('runAnswer') >= 0 && win.runAnswer != null) {
+						win.runAnswer()
+						return
+					}
+					const fn = win.__callJson
+					if (fn != null) fn(js)
+				} catch (e0) {
+					console.warn('[call] engine eval fail', e0)
+				}
+			}
+			if (h5MsgFn == null) {
+				h5MsgFn = (ev: any): void => {
+					try {
+						const d = ev.data
+						if (d == null) return
+						if (d['__callEngine'] != true) return
+						const kind = (d.type != null) ? ('' + d.type) : ''
+						let payload = ''
+						if (d.sdp != null) payload = '' + d.sdp
+						else if (d.message != null) payload = '' + d.message
+						else if (d.action != null) payload = '' + d.action
+						else if (d.candidate != null) payload = '' + d.candidate
+						const cand: UTSJSONObject = {}
+						if (d.candidate != null) cand['candidate'] = d.candidate
+						if (d.sdpMid != null) cand['sdpMid'] = d.sdpMid
+						if (d.sdpMLineIndex != null) cand['sdpMLineIndex'] = d.sdpMLineIndex
+						if (d.peer != null) cand['peer'] = d.peer
+						getCallManager().onHtmlMessage(kind, payload, cand)
+					} catch (e1) {}
+				}
+				window.addEventListener('message', h5MsgFn)
+			}
+			httpsTried = true
+			if (noteH5Ready()) return true
+			fetchH5Engine()
+			return true
+		} catch (e) {
+			console.warn('[call] bind h5 engine', e)
+			return false
+		}
+		// #endif
+		return false
+	}
+
+	function avatarSrc(): string {
+		const a = ui.value.peerAvatar
+		if (a.length > 0) return a
+		return '/static/logo.png'
+	}
+
+	function tickDur(): void {
+		const mgr = getCallManager()
+		if (mgr.connectedAt > 0 && (mgr.phase == 'connected' || mgr.phase == 'connecting')) {
+			const sec = Math.floor((Date.now() - mgr.connectedAt) / 1000)
+			durText.value = formatCallDur(sec)
+		} else if (mgr.phase == 'connected') {
+			durText.value = '00:00'
+		} else {
+			durText.value = ''
+		}
+	}
+
+	function startDurTimer(): void {
+		tickDur()
+		if (durTimer != null) return
+		durTimer = setInterval((): void => {
+			tickDur()
+		}, 1000) as number | null
+	}
+
+	function stopDurTimer(): void {
+		const t = durTimer
+		durTimer = null
+		if (t != null) clearInterval(t)
+		durText.value = ''
+	}
 
 	function refreshEngineSrc(): void {
 		if (httpsTried) return
@@ -209,22 +405,9 @@
 			wv.bringToFront()
 			bindPageWv(wv)
 			console.log('[call] page injected webview')
-			const fs = uni.getFileSystemManager()
-			fs.readFile({
-				filePath: '/static/call-engine.html',
-				encoding: 'utf-8',
-				success: (res) => {
-					const html = '' + res.data
-					console.log('[call] page load html', html.length)
-					wv.loadDataWithBaseURL('https://call.local/', html, 'text/html', 'UTF-8', '')
-					setTimeout(() => { pingPageWv(wv) }, 400)
-					setTimeout(() => { pingPageWv(wv) }, 1200)
-				},
-				fail: (err) => {
-					console.warn('[call] page read html fail', err.errMsg)
-					wv.loadUrl('file:///android_asset/static/call-engine.html')
-					setTimeout(() => { pingPageWv(wv) }, 800)
-				}
+			loadEngineHtmlInto(wv, (_ok: boolean) => {
+				setTimeout(() => { pingPageWv(wv) }, 400)
+				setTimeout(() => { pingPageWv(wv) }, 1200)
 			})
 		} catch (e) {
 			console.warn('[call] page inject fail', e)
@@ -272,10 +455,18 @@
 	function kickEngine(): void {
 		const mgr = getCallManager()
 		if (mgr.phase == 'idle') return
+		// #ifdef H5
+		bindH5IFrame()
+		if (mgr.htmlLoaded && mgr.htmlEval != null) {
+			runEngineCmd()
+			return
+		}
+		// #endif
 		const ok = bindWeb()
 		console.log('[call] kickEngine', mgr.phase, 'bind', ok, 'loaded', mgr.htmlLoaded, 'https', httpsTried)
 		try { tuneCallWebView() } catch (e1) {}
 		if (!httpsTried) return
+		if (!httpsReady) return
 		if (!ok) return
 		const key = mgr.callId + '|' + mgr.phase + (mgr.htmlLoaded ? '|1' : '|0')
 		if (mgr.htmlLoaded && lastKickKey == key) return
@@ -305,23 +496,58 @@
 		try { tuneCallWebView() } catch (e0) {}
 		if (!httpsTried) {
 			httpsTried = true
-			mgr.htmlLoaded = false
+			httpsReady = false
 			try {
-				reloadEngineAsHttps((ok: boolean): void => {
-					console.log('[call] https engine', ok)
-					setTimeout(() => {
+				pingCallEngine((already: boolean): void => {
+					if (already) {
+						console.log('[call] engine already live, skip https reload')
 						mgr.htmlLoaded = true
+						httpsReady = true
+						lastKickKey = ''
 						kickEngine()
-					}, ok ? 500 : 0)
+						return
+					}
+					mgr.htmlLoaded = false
+					lastKickKey = ''
+					try {
+						reloadEngineAsHttps((ok: boolean): void => {
+							console.log('[call] https engine', ok)
+							const after = (delay: number, last: boolean): void => {
+								setTimeout(() => {
+									const m2 = getCallManager()
+									if (m2.htmlLoaded && httpsReady) return
+									pingCallEngine((ready: boolean): void => {
+										console.log('[call] after https ping', ready, 'last', last)
+										if (ready) m2.htmlLoaded = true
+										if (ready || last) {
+											httpsReady = true
+											lastKickKey = ''
+											kickEngine()
+										}
+									})
+								}, delay)
+							}
+							after(ok ? 350 : 80, false)
+							after(ok ? 1200 : 400, true)
+						})
+					} catch (e1) {
+						httpsReady = true
+						kickEngine()
+					}
 				})
-			} catch (e1) {
-				mgr.htmlLoaded = true
+			} catch (ePing) {
+				httpsReady = true
 				kickEngine()
 			}
 			return
 		}
-		mgr.htmlLoaded = true
-		kickEngine()
+		if (!httpsReady) return
+		pingCallEngine((ready: boolean): void => {
+			console.log('[call] web load ping', ready)
+			if (ready) mgr.htmlLoaded = true
+			lastKickKey = ''
+			kickEngine()
+		})
 	}
 
 	function onWebError(e: UniWebViewErrorEvent): void {
@@ -333,15 +559,17 @@
 	}
 
 	function takeWebStr(o: UTSJSONObject, key: string): string {
-		const s = o.getString(key)
-		if (s != null && s.length > 0) return s
 		try {
 			const v = o[key]
 			if (v != null) {
 				const t = '' + v
-				if (t.length > 0 && t != 'null' && t != 'undefined') return t
+				if (t.length > 0 && t != 'null' && t != 'undefined' && t != '[object Object]') return t
 			}
-		} catch (e) {}
+		} catch (e0) {}
+		try {
+			const s = o.getString(key)
+			if (s != null && s.length > 0) return s
+		} catch (e1) {}
 		return ''
 	}
 
@@ -393,6 +621,8 @@
 			} else if (kind == 'ui') {
 				payload = takeWebStr(o, 'action')
 			}
+			const peer = takeWebStr(o, 'peer')
+			if (peer.length > 0) cand['peer'] = peer
 			console.log('[call] webmsg', kind, payload.length)
 			mgr.onHtmlMessage(kind, payload, cand)
 		} catch (e2) {}
@@ -429,11 +659,16 @@
 			mgr.adoptIfIdle()
 		}
 		ui.value = mgr.getSnapshot()
+		startDurTimer()
 		let watchPhase = mgr.phase
 		off = mgr.onChange((s: CallSnapshot) => {
 			ui.value = s
 			refreshEngineSrc()
+			if (s.phase == 'connected' || (s.phase == 'connecting' && getCallManager().connectedAt > 0)) {
+				startDurTimer()
+			}
 			if (s.phase == 'idle') {
+				stopDurTimer()
 				setTimeout(() => {
 					if (getCallManager().phase == 'idle') goBack()
 				}, 400)
@@ -463,7 +698,10 @@
 	}
 
 	function onAccept() {
-		getCallManager().accept()
+		const mgr = getCallManager()
+		h5TapRunAnswer()
+		bindH5IFrame()
+		mgr.accept()
 		kickEngine()
 	}
 	function onReject() {
@@ -487,6 +725,11 @@
 	onMounted(() => {
 		const mgr = getCallManager()
 		console.log('[call] 进入页面', mgr.phase, mgr.callId)
+		// #ifdef H5
+		httpsTried = true
+		httpsReady = true
+		nextTick(() => { bindH5IFrame() })
+		// #endif
 		setupCall()
 	})
 	onReady(() => {
@@ -501,16 +744,34 @@
 	})
 
 	onUnmounted(() => {
+		stopDurTimer()
 		stopOff(off)
 		off = null
 		const mgr = getCallManager()
 		if (mgr.phase == 'idle') {
 			mgr.htmlEval = null
+			mgr.htmlPost = null
 			mgr.htmlReady = false
 			mgr.htmlLoaded = false
 		}
 		httpsTried = false
+		httpsReady = false
 		if (getCallManager().phase == 'idle') pageDestroyEngine()
+		// #ifdef H5
+		try {
+			if (h5MsgFn != null) {
+				window.removeEventListener('message', h5MsgFn)
+				h5MsgFn = null
+			}
+			const doc = (window as any).document
+			const win = window as any
+			try {
+				if (win.__callJson != null) win.__callJson('{"cmd":"hangup"}')
+			} catch (e0) {}
+			const root = doc.getElementById('callEngineRoot')
+			if (root != null && root.parentNode != null) root.parentNode.removeChild(root)
+		} catch (eH5) {}
+		// #endif
 	})
 </script>
 
@@ -525,6 +786,14 @@
 	.call-engine {
 		width: 750rpx;
 	}
+	.call-stage {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 220rpx;
+		z-index: 1;
+	}
 	.call-bar {
 		width: 750rpx;
 		padding-top: 24rpx;
@@ -533,7 +802,18 @@
 		padding-right: 24rpx;
 		align-items: center;
 		background-color: #111111;
+		z-index: 20;
+		position: relative;
 	}
+	/* #ifdef H5 */
+	.call-bar {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 10000;
+	}
+	/* #endif */
 	.call-web {
 		width: 8px;
 		height: 8px;
@@ -546,13 +826,6 @@
 		width: 8px;
 		height: 8px;
 	}
-	.call-stage {
-		position: absolute;
-		left: 0;
-		right: 0;
-		top: 0;
-		bottom: 0;
-	}
 	.call-mask {
 		position: absolute;
 		left: 0;
@@ -563,11 +836,24 @@
 		z-index: 3;
 		background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.55) 100%);
 	}
+	.call-avatar {
+		width: 160rpx;
+		height: 160rpx;
+		border-radius: 80rpx;
+		margin-bottom: 20rpx;
+		background-color: #333333;
+	}
 	.call-name {
 		font-size: 44rpx;
 		color: #ffffff;
 		font-weight: 700;
 		margin-bottom: 12rpx;
+	}
+	.call-dur {
+		font-size: 32rpx;
+		color: #07c160;
+		margin-bottom: 40rpx;
+		font-weight: 600;
 	}
 	.call-sub {
 		font-size: 28rpx;

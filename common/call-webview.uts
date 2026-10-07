@@ -8,6 +8,16 @@ import FrameLayout from 'android.widget.FrameLayout'
 import AudioManager from 'android.media.AudioManager'
 
 let injectedWv: WebView | null = null
+let pinnedWv: WebView | null = null
+
+function webViewAlive(wv: WebView | null): boolean {
+	if (wv == null) return false
+	try {
+		const parent = wv.getParent()
+		if (parent != null) return true
+	} catch (e) {}
+	return false
+}
 
 function findWebView(v: View | null): WebView | null {
 	if (v == null) return null
@@ -27,13 +37,20 @@ function findWebView(v: View | null): WebView | null {
 }
 
 export function getCallWebView(): WebView | null {
+	if (webViewAlive(pinnedWv)) return pinnedWv
+	if (webViewAlive(injectedWv)) {
+		pinnedWv = injectedWv
+		return injectedWv
+	}
 	try {
 		const act = UTSAndroid.getUniActivity()
 		if (act == null) return null
 		const win = act.getWindow()
 		if (win == null) return null
 		const decor = win.getDecorView()
-		return findWebView(decor)
+		const found = findWebView(decor)
+		if (found != null) pinnedWv = found
+		return found
 	} catch (e) {
 		console.warn('[call] find webview', e)
 		return null
@@ -66,6 +83,11 @@ function applyWebSettings(wv: WebView): void {
 	try {
 		wv.setWebChromeClient(new CallChrome())
 	} catch (e2) {}
+}
+
+export function pinCallWebView(wv: WebView): void {
+	pinnedWv = wv
+	applyWebSettings(wv)
 }
 
 function setVoipAudioMode(): void {
@@ -114,6 +136,7 @@ export function tuneCallWebView(): void {
 export function makeNativeEval(): ((js: string) => void) | null {
 	const wv = getCallWebView()
 	if (wv == null) return null
+	pinCallWebView(wv)
 	applyWebSettings(wv)
 	const bound = wv
 	return (js: string): void => {
@@ -142,28 +165,67 @@ export function pingCallEngine(cb: (ready: boolean) => void): void {
 	}
 }
 
-function loadEngineHtml(wv: WebView): void {
+function inlineEngineJs(html: string, js: string): string {
+	const tag = '<script src="./call-engine.js"></script>'
+	const i = html.indexOf(tag)
+	if (i >= 0) {
+		return html.substring(0, i) + '<script>' + js + '</script>' + html.substring(i + tag.length)
+	}
+	return html + '<script>' + js + '</script>'
+}
+
+export function loadEngineHtmlInto(wv: WebView, done: (ok: boolean) => void): void {
+	pinCallWebView(wv)
+	applyWebSettings(wv)
+	try { wv.setLayerType(2, null) } catch (e0) {}
 	try {
 		const fs = uni.getFileSystemManager()
 		fs.readFile({
 			filePath: '/static/call-engine.html',
 			encoding: 'utf-8',
-			success: (res) => {
-				const html = '' + res.data
-				console.log('[call] load engine html', html.length)
-				wv.loadDataWithBaseURL('https://call.local/', html, 'text/html', 'UTF-8', '')
+			success: (htmlRes) => {
+				fs.readFile({
+					filePath: '/static/call-engine.js',
+					encoding: 'utf-8',
+					success: (jsRes) => {
+						try {
+							const html = inlineEngineJs('' + htmlRes.data, '' + jsRes.data)
+							wv.loadDataWithBaseURL('https://localhost/', html, 'text/html', 'UTF-8', 'https://localhost/')
+							console.log('[call] engine html+js', html.length)
+							done(true)
+						} catch (e1) {
+							console.warn('[call] engine load fail', e1)
+							done(false)
+						}
+					},
+					fail: (err) => {
+						console.warn('[call] read engine js fail', err.errMsg)
+						try {
+							wv.loadUrl('file:///android_asset/static/call-engine.html')
+						} catch (e2) {}
+						done(false)
+					}
+				})
 			},
 			fail: (err) => {
 				console.warn('[call] read engine html fail', err.errMsg)
-				wv.loadUrl('file:///android_asset/static/call-engine.html')
+				try {
+					wv.loadUrl('file:///android_asset/static/call-engine.html')
+				} catch (e3) {}
+				done(false)
 			}
 		})
 	} catch (e) {
 		console.warn('[call] load engine html', e)
 		try {
 			wv.loadUrl('file:///android_asset/static/call-engine.html')
-		} catch (e2) {}
+		} catch (e4) {}
+		done(false)
 	}
+}
+
+function loadEngineHtml(wv: WebView): void {
+	loadEngineHtmlInto(wv, (_ok: boolean) => {})
 }
 
 export function ensureCallEngine(): void {
@@ -199,6 +261,7 @@ export function ensureCallEngine(): void {
 
 export function destroyCallEngine(): void {
 	restoreVoipAudioMode()
+	if (pinnedWv == injectedWv) pinnedWv = null
 	const wv = injectedWv
 	injectedWv = null
 	if (wv == null) return
@@ -221,40 +284,14 @@ export function reloadEngineAsHttps(done: (ok: boolean) => void): void {
 		done(false)
 		return
 	}
-	applyWebSettings(wv)
-	try { wv.setLayerType(2, null) } catch (e0) {}
-	try {
-		const fs = uni.getFileSystemManager()
-		fs.readFile({
-			filePath: '/static/call-engine.html',
-			encoding: 'utf-8',
-			success: (res) => {
-				try {
-					const html = '' + res.data
-					wv.loadDataWithBaseURL('https://localhost/', html, 'text/html', 'UTF-8', 'https://localhost/')
-					console.log('[call] https engine loaded', html.length)
-					done(true)
-				} catch (e1) {
-					console.warn('[call] https load fail', e1)
-					done(false)
-				}
-			},
-			fail: (err) => {
-				console.warn('[call] read engine fail', err.errMsg)
-				done(false)
-			}
-		})
-	} catch (e) {
-		console.warn('[call] https reload', e)
-		done(false)
-	}
+	loadEngineHtmlInto(wv, done)
 }
 
 export function pullCallHtmlMsg(handler: (kind: string, payload: string, cand: UTSJSONObject) => void): void {
 	const wv = getCallWebView()
 	if (wv == null) return
 	try {
-		wv.evaluateJavascript('(function(){try{return window.__lastAnswerPacked||window.__lastOfferPacked||""; }catch(e){return "";}})()', (value: string) => {
+		wv.evaluateJavascript('(function(){try{if(window.__callConnected&&!window.__groupCallDrain)return JSON.stringify({type:"connected"});var aq=window.__answerPackedList;if(aq&&aq.length)return aq.shift();var oq=window.__offerPackedList;if(oq&&oq.length)return oq.shift();var q=window.__icePackedList;if(q&&q.length)return q.shift();var a=window.__lastAnswerPacked;if(a){window.__lastAnswerPacked="";return a;}var o=window.__lastOfferPacked;if(o){window.__lastOfferPacked="";return o;}return "";}catch(e){return "";}})()', (value: string) => {
 			if (value == null) return
 			let raw = value
 			if (raw.length >= 2 && raw.charAt(0) == '"') {
@@ -283,7 +320,9 @@ export function pullCallHtmlMsg(handler: (kind: string, payload: string, cand: U
 					cand['sdpMid'] = (mid != null) ? mid : ''
 					cand['sdpMLineIndex'] = o.getNumber('sdpMLineIndex')
 				}
-				if (kind == 'ready' || kind == 'ice') return
+				const peer = o.getString('peer')
+				if (peer != null && peer.length > 0) cand['peer'] = peer
+				if (kind == 'ready') return
 				console.log('[call] pull html', kind, payload.length)
 				handler(kind, payload, cand)
 			} catch (e1) {
@@ -309,7 +348,11 @@ export function ensureCallEngine(): void {
 }
 export function destroyCallEngine(): void {}
 export function pullCallHtmlMsg(_handler: (kind: string, payload: string, cand: UTSJSONObject) => void): void {}
+export function pinCallWebView(_wv: any): void {}
 export function reloadEngineAsHttps(done: (ok: boolean) => void): void {
+	done(false)
+}
+export function loadEngineHtmlInto(_wv: any, done: (ok: boolean) => void): void {
 	done(false)
 }
 export function getCallWebView(): any | null {

@@ -8,12 +8,8 @@
 			<view class="topbar-center">
 				<text class="topbar-title">{{ roomTitleBar }}</text>
 			</view>
-			<view class="topbar-right" @click="showRoomInfo">
-				<view class="more-icon">
-					<view class="more-dot"></view>
-					<view class="more-dot"></view>
-					<view class="more-dot"></view>
-				</view>
+			<view class="topbar-right" @click="openInfo">
+				<text class="more-people">{{ isGroup ? '⊙' : '···' }}</text>
 			</view>
 		</view>
 
@@ -64,14 +60,15 @@
 					@longpress="onLongPress(msg)"
 				>
 				<view v-if="msg.sender != currentUserId" class="msg-avatar">
-					<text class="avatar-letter">{{ senderInitial(msg.sender) }}</text>
+					<image v-if="senderAvatar(msg.sender).length > 0" class="msg-avatar-img" :src="senderAvatar(msg.sender)" mode="aspectFill"></image>
+					<text v-else class="avatar-letter">{{ senderInitial(msg.sender) }}</text>
 				</view>
 				<view v-if="msg.sender == currentUserId && msg._failed" class="msg-fail">
 					<text class="msg-fail-bang">!</text>
 				</view>
 				<view class="msg-main">
 				<view class="msg-bubble" :class="{ 'msg-bubble-img': msg.msgtype == 'm.image' }">
-					<text v-if="msg.sender != currentUserId && msg.msgtype != 'm.image'" class="msg-sender">{{ senderName(msg.sender) }}</text>
+					<text v-if="isGroup && msg.sender != currentUserId && msg.msgtype != 'm.image'" class="msg-sender">{{ senderName(msg.sender) }}</text>
 
 					<view v-if="msg.msgtype == 'm.encrypted'" class="msg-content">
 						<text class="msg-text msg-encrypted">{{ msg.body }}</text>
@@ -197,14 +194,27 @@
 					<view class="more-icon-bg">
 						<text class="more-icon-text">☎</text>
 					</view>
-					<text class="more-label">语音通话</text>
+					<text class="more-label">{{ isGroup ? '群语音' : '语音通话' }}</text>
 				</view>
-				<view class="more-item" @click.stop="startCallVideo">
+				<view v-if="!isGroup" class="more-item" @click.stop="startCallVideo">
 					<view class="more-icon-bg">
 						<text class="more-icon-text">📹</text>
 					</view>
 					<text class="more-label">视频通话</text>
 				</view>
+			</view>
+		</view>
+
+		<view v-if="showAtPicker" class="at-mask" @click="closeAtPicker">
+			<view class="at-panel" @click.stop="">
+				<view class="at-item" @click="pickAtAll">
+					<text class="at-item-text">所有人</text>
+				</view>
+				<scroll-view class="at-list" scroll-y>
+					<view v-for="m in atMembers" :key="m.user_id" class="at-item" @click="pickAtMember(m)">
+						<text class="at-item-text">{{ atName(m) }}</text>
+					</view>
+				</scroll-view>
 			</view>
 		</view>
 
@@ -314,8 +324,9 @@
 
 <script setup lang="uts">
 	import { ref, onUnmounted, onMounted, computed, nextTick } from 'vue'
-	import { getMatrix, MatrixClient, MatrixMessage, MatrixEvent, errText } from '@/common/matrix.uts'
-	import { getCallManager, CallSnapshot } from '@/common/call.uts'
+	import { getMatrix, MatrixClient, MatrixMessage, MatrixEvent, errText, RoomMember, roomIsGroup, memberDisplayName } from '@/common/matrix.uts'
+	import { bootstrapMatrix, openGroupInfo } from '@/common/app.uts'
+	import { getCallManager, CallSnapshot, h5TapRunAnswer, unlockH5CallMedia } from '@/common/call.uts'
 	import { loadRoomChat, saveRoomChat } from '@/common/storage.uts'
 
 	type ChatMsg = {
@@ -398,11 +409,16 @@
 
 	const roomId = ref<string>('')
 	const highlightEventId = ref<string>('')
-	const roomName = ref<string>('房间')
+	const roomName = ref<string>('聊天')
+	const isGroup = ref<boolean>(false)
+	const memberCount = ref<number>(0)
+	const groupMembers = ref<Array<RoomMember>>([])
+	const showAtPicker = ref<boolean>(false)
 	const roomTitleBar = computed((): string => {
 		const n = roomName.value
-		if (n.length > 0) return n
-		return '聊天'
+		const title = n.length > 0 ? n : '聊天'
+		if (isGroup.value && memberCount.value > 0) return title + '(' + memberCount.value + ')'
+		return title
 	})
 	const roomTopic = ref<string>('')
 	const roomEncrypted = ref<boolean>(false)
@@ -416,6 +432,17 @@
 	const scrollTop = ref<number>(999999)
 	const scrollInto = ref<string>('')
 	const currentUserId = ref<string>('')
+	const atMembers = computed((): Array<RoomMember> => {
+		const out: Array<RoomMember> = []
+		const me = currentUserId.value
+		const list = groupMembers.value
+		for (let i = 0; i < list.length; i++) {
+			if (list[i].user_id == me) continue
+			if (list[i].membership != 'join') continue
+			out.push(list[i])
+		}
+		return out
+	})
 	const myInitial = ref<string>('我')
 	const myAvatarSrc = ref<string>('')
 	const senderMap = ref<UTSJSONObject>({})
@@ -451,6 +478,11 @@
 	async function getMatrix2(): Promise<MatrixClient | null> {
 		if (matrixRef != null) return matrixRef
 		matrixRef = getMatrix()
+		if (matrixRef == null) {
+			const boot = bootstrapMatrix()
+			matrixRef = boot
+			if (boot != null) boot.startSync()
+		}
 		return matrixRef
 	}
 
@@ -565,6 +597,13 @@
 		if (bytes < 1024) return bytes + ' B'
 		if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
 		return (bytes / 1024 / 1024).toFixed(1) + ' MB'
+	}
+	function senderAvatar(sender: string): string {
+		const matrix = getMatrix()
+		if (matrix == null) return ''
+		const mxc = matrix.userAvatars.get(sender) ?? ''
+		if (mxc.length == 0) return ''
+		return getMxcUrl(mxc, 96, 96)
 	}
 	function senderInitial(sender: string): string {
 		const local = sender.split(':')[0].replace('@', '')
@@ -689,13 +728,57 @@
 		})
 	}
 	function pickStr(obj: UTSJSONObject, key: string): string {
-		const s = obj.getString(key)
-		if (s != null && s.length > 0) return s
-		const v = obj[key]
-		if (v == null) return ''
-		const t = '' + v
-		if (t == 'null' || t == 'undefined' || t == '[object Object]') return ''
-		return t
+		try {
+			const v = obj[key]
+			if (v != null) {
+				const t = '' + v
+				if (t.length > 0 && t != 'null' && t != 'undefined' && t != '[object Object]') return t
+			}
+		} catch (e0) {}
+		try {
+			const s = obj.getString(key)
+			if (s != null && s.length > 0) return s
+		} catch (e1) {}
+		return ''
+	}
+	function pickNum(obj: UTSJSONObject, key: string): number {
+		try {
+			const raw = obj[key]
+			if (raw != null) {
+				const n = parseFloat('' + raw)
+				if (n == n) return n
+			}
+		} catch (e0) {}
+		try {
+			const v = obj.getNumber(key)
+			if (v != null) return v
+		} catch (e1) {}
+		return 0
+	}
+	function pickBool(obj: UTSJSONObject, key: string): boolean {
+		try {
+			const raw = obj[key]
+			if (raw == true) return true
+			if (raw == false) return false
+			const t = ('' + raw).toLowerCase()
+			return t == 'true' || t == '1'
+		} catch (e0) {}
+		try {
+			const v = obj.getBoolean(key)
+			if (v != null) return v
+		} catch (e1) {}
+		return false
+	}
+	function pickObj(obj: UTSJSONObject, key: string): UTSJSONObject {
+		try {
+			const v = obj[key]
+			if (v != null) return v as UTSJSONObject
+		} catch (e0) {}
+		try {
+			const nested = obj.getJSON(key)
+			if (nested != null) return nested
+		} catch (e1) {}
+		return {}
 	}
 
 	function chatToRow(m: ChatMsg): UTSJSONObject {
@@ -724,23 +807,15 @@
 		msg.body = pickStr(o, 'body')
 		msg.msgtype = pickStr(o, 'msgtype')
 		if (msg.msgtype.length == 0) msg.msgtype = 'm.text'
-		const tsRaw = o.getNumber('ts')
-		msg.ts = tsRaw != null ? tsRaw : 0
+		const tsRaw = pickNum(o, 'ts')
+		msg.ts = tsRaw
 		msg.url = pickStr(o, 'url')
 		msg.mxc = pickStr(o, 'mxc')
 		if (msg.mxc.length == 0) msg.mxc = msg.url
-		const edited = o.getBoolean('edited')
-		msg.edited = edited != null ? edited : false
-		const redacted = o.getBoolean('redacted')
-		msg.redacted = redacted != null ? redacted : false
-		try {
-			const info = o.getJSON('info')
-			if (info != null) msg.info = info
-		} catch (e0) {}
-		try {
-			const reactions = o.getJSON('reactions')
-			if (reactions != null) msg.reactions = reactions
-		} catch (e1) {}
+		msg.edited = pickBool(o, 'edited')
+		msg.redacted = pickBool(o, 'redacted')
+		msg.info = pickObj(o, 'info')
+		msg.reactions = pickObj(o, 'reactions')
 		return msg
 	}
 
@@ -797,15 +872,11 @@
 		let msgtype = pickStr(content, 'msgtype')
 		if (msgtype.length == 0) msgtype = 'm.text'
 		let body = pickStr(content, 'body')
-		let info: UTSJSONObject = {} as UTSJSONObject
-		try {
-			const infoRaw = content.getJSON('info')
-			if (infoRaw != null) info = infoRaw
-		} catch (eInfo) {}
+		let info: UTSJSONObject = pickObj(content, 'info')
 		if (mxc.length == 0) mxc = pickStr(info, 'url')
 		try {
-			const file1767 = content.getJSON('org.matrix.msc1767.file')
-			if (mxc.length == 0 && file1767 != null) mxc = pickStr(file1767, 'url')
+			const file1767 = pickObj(content, 'org.matrix.msc1767.file')
+			if (mxc.length == 0) mxc = pickStr(file1767, 'url')
 		} catch (e0) {}
 		const mime = pickStr(info, 'mimetype')
 		if (msgtype != 'm.audio' && mime.indexOf('audio/') == 0) msgtype = 'm.audio'
@@ -830,8 +901,8 @@
 		if (callStatus.length > 0) info['call_status'] = callStatus
 		const callInit = pickStr(content, 'call_initiator')
 		if (callInit.length > 0) info['call_initiator'] = callInit
-		const callDur = content.getNumber('call_duration')
-		if (callDur != null) info['call_duration'] = callDur
+		const callDur = pickNum(content, 'call_duration')
+		if (callDur > 0) info['call_duration'] = callDur
 		const callId = pickStr(content, 'call_id')
 		if (callId.length > 0) info['call_id'] = callId
 		if (msgtype == 'm.call' && body.length == 0) body = '语音通话'
@@ -888,8 +959,7 @@
 		const me = currentUserId.value
 		const iAmInitiator = initiator.length > 0 ? initiator == me : msg.sender == me
 		if (status == 'answered') {
-			const durRaw = msg.info.getNumber('call_duration')
-			const dur = (durRaw != null) ? durRaw : 0
+			const dur = pickNum(msg.info, 'call_duration')
 			if (dur > 0) return kind + ' ' + formatCallClock(dur)
 			return kind
 		}
@@ -1517,14 +1587,10 @@
 	}
 
 	function audioSeconds(msg: ChatMsg): number {
-		const n = msg.info.getNumber('duration')
-		let d = (n != null) ? n : 0
+		let d = pickNum(msg.info, 'duration')
 		if (d == 0) {
-			const audio1767 = msg.info.getJSON('org.matrix.msc1767.audio')
-			if (audio1767 != null) {
-				const n2 = audio1767.getNumber('duration')
-				if (n2 != null) d = n2
-			}
+			const audio1767 = pickObj(msg.info, 'org.matrix.msc1767.audio')
+			d = pickNum(audio1767, 'duration')
 		}
 		if (d > 1000) return Math.max(1, Math.round(d / 1000))
 		return d > 0 ? d : 1
@@ -1558,24 +1624,28 @@
 	}
 	function onCallRecordTap(msg: ChatMsg): void {
 		const t = pickStr(msg.info, 'call_type')
-		startCall(t == 'video' || msg.type == 'm.room.calling')
+		const isVideo = t == 'video' || msg.type == 'm.room.calling'
+		unlockH5CallMedia(isVideo)
+		startCall(isVideo)
 	}
 	function startCallVoice() {
+		unlockH5CallMedia(false)
 		startCall(false)
 	}
 	function startCallVideo() {
+		unlockH5CallMedia(true)
 		startCall(true)
+	}
+	function acceptIncomingCall() {
+		h5TapRunAnswer()
+		getCallManager().accept()
+		incomingCall.value = false
 	}
 	function syncIncomingCall(s: CallSnapshot): void {
 		const show = s.phase == 'ringing' && s.isIncoming && (s.roomId.length == 0 || s.roomId == roomId.value)
 		incomingCall.value = show
-		incomingCallTitle.value = s.peerName
-		incomingCallSub.value = s.sub
-	}
-	function acceptIncomingCall() {
-		const mgr = getCallManager()
-		mgr.openPage()
-		uni.showToast({ title: '请点通话页的接听', icon: 'none' })
+		incomingCallTitle.value = s.isVideo ? '视频来电' : s.peerName
+		incomingCallSub.value = s.isVideo ? (s.peerName + ' 邀请你视频通话') : s.sub
 	}
 	function rejectIncomingCall() {
 		getCallManager().reject()
@@ -1664,22 +1734,44 @@
 		return parts.join('、')
 	})
 
-	async function checkRoomEncrypted(matrix: MatrixClient): Promise<void> {
+	async function loadRoomMeta(matrix: MatrixClient): Promise<void> {
 		try {
 			const summary = await matrix.getRoomSummary(roomId.value)
 			roomEncrypted.value = summary.encrypted == true
+			isGroup.value = roomIsGroup(summary)
+			const n = summary.name
+			if (n != null && n.length > 0) roomName.value = n
+			const t = summary.topic
+			if (t != null) roomTopic.value = t
+			const mc = summary.member_count
+			if (mc != null) memberCount.value = mc
 		} catch (e) {
 			roomEncrypted.value = false
 		}
+		if (isGroup.value) {
+			try {
+				const list = await matrix.getRoomMembers(roomId.value)
+				groupMembers.value = list
+				let n = 0
+				for (let i = 0; i < list.length; i++) {
+					const m = list[i].membership
+					if (m == 'join' || m == 'invite') n++
+				}
+				if (n > memberCount.value) memberCount.value = n
+			} catch (e2) {}
+			try {
+				const ids = await matrix.getJoinedMembers(roomId.value)
+				if (ids.length > memberCount.value) memberCount.value = ids.length
+			} catch (e3) {}
+		}
+	}
+
+	async function checkRoomEncrypted(matrix: MatrixClient): Promise<void> {
+		await loadRoomMeta(matrix)
 	}
 
 	async function loadRoomTitle(matrix: MatrixClient) {
-		try {
-			const n = await matrix.getRoomTitle(roomId.value)
-			if (n.length > 0) roomName.value = n
-		} catch (e) {
-			console.warn('拉取房间标题失败', e)
-		}
+		await loadRoomMeta(matrix)
 	}
 
 	function attachImageSrc(msg: ChatMsg): void {
@@ -1864,7 +1956,7 @@
 				const rid = sent.event_id
 				if (rid != null) newId = rid
 			} else {
-				const sent = await matrix.sendText(roomId.value, text)
+				const sent = await matrix.sendTextMentions(roomId.value, text, collectMentionIds(text))
 				const eid = sent.event_id
 				if (eid != null) newId = eid
 			}
@@ -1888,6 +1980,18 @@
 				}
 			}
 		}
+	}
+
+	function collectMentionIds(text: string): Array<string> {
+		const ids: Array<string> = []
+		if (isGroup.value == false) return ids
+		const list = groupMembers.value
+		for (let i = 0; i < list.length; i++) {
+			const name = memberDisplayName(list[i])
+			if (name.length == 0) continue
+			if (text.indexOf('@' + name) >= 0) ids.push(list[i].user_id)
+		}
+		return ids
 	}
 
 	function onSend() {
@@ -1937,6 +2041,7 @@
 
 	function onInputChange() {
 		try {
+			maybeOpenAtPicker()
 			if (sending.value) return
 			const matrix = matrixRef
 			if (matrix == null) return
@@ -2185,7 +2290,7 @@
 		}
 	}
 	function senderName(sender: string): string {
-		const cached = senderMap.value.getString(sender)
+		const cached = pickStr(senderMap.value, sender)
 		if (cached != null && cached.length > 0) return cached
 		const local = sender.split(':')[0].replace('@', '')
 		if (nameFetching.indexOf(sender) >= 0) return local
@@ -2199,11 +2304,64 @@
 	}
 
 	function showRoomInfo() {
-		uni.showModal({
-			title: roomName.value,
-			content: `房间ID: ${roomId.value}\n${roomTopic.value.length > 0 ? '简介: ' + roomTopic.value : ''}`,
-			showCancel: false
-		})
+		openInfo()
+	}
+
+	function openInfo(): void {
+		openGroupInfo(roomId.value)
+	}
+
+	function atName(m: RoomMember): string {
+		return memberDisplayName(m)
+	}
+
+	function closeAtPicker(): void {
+		showAtPicker.value = false
+	}
+
+	function insertAtToken(label: string): void {
+		let text = inputText.value
+		if (text.length > 0 && text.charAt(text.length - 1) == '@') {
+			text = text.substring(0, text.length - 1)
+		}
+		if (text.length > 0 && text.charAt(text.length - 1) != ' ') {
+			text = text + ' '
+		}
+		inputText.value = text + '@' + label + ' '
+		showAtPicker.value = false
+	}
+
+	function pickAtAll(): void {
+		insertAtToken('所有人')
+	}
+
+	function pickAtMember(m: RoomMember): void {
+		insertAtToken(memberDisplayName(m))
+	}
+
+	function maybeOpenAtPicker(): void {
+		if (isGroup.value == false) return
+		const text = inputText.value
+		if (text.length == 0) {
+			showAtPicker.value = false
+			return
+		}
+		const last = text.charAt(text.length - 1)
+		if (last == '@') {
+			if (groupMembers.value.length == 0) loadGroupMembers()
+			showAtPicker.value = true
+		} else {
+			showAtPicker.value = false
+		}
+	}
+
+	async function loadGroupMembers(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const list = await matrix.getRoomMembers(roomId.value)
+			groupMembers.value = list
+		} catch (e) {}
 	}
 
 	async function sendChatInvite(userId: string): Promise<void> {
@@ -2213,7 +2371,7 @@
 		try {
 			await matrix.inviteUser(roomId.value, userId)
 			uni.hideLoading()
-			uni.showToast({ title: '邀请已发送', icon: 'success' })
+			uni.showToast({ title: '已添加到群聊', icon: 'success' })
 		} catch (e) {
 			uni.hideLoading()
 			const msg = errText(e, '')
@@ -2285,12 +2443,12 @@
 
 	// lifecycle: after helpers so Android UTS can resolve names
 	onLoad((options: UTSJSONObject) => {
-		const rid = options.getString('roomId')
-		if (rid != null && rid.length > 0) {
+		const rid = pickStr(options, 'roomId')
+		if (rid.length > 0) {
 			roomId.value = safeDecode(rid)
 		}
-		const hiOpt = options.getString('highlight')
-		if (hiOpt != null && hiOpt.length > 0) {
+		const hiOpt = pickStr(options, 'highlight')
+		if (hiOpt.length > 0) {
 			highlightEventId.value = safeDecode(hiOpt)
 		}
 		if (roomId.value.length == 0) {
@@ -2316,7 +2474,10 @@
 	function ingestTimelineEvent(event: MatrixEvent, rid: string): void {
 		if (rid != roomId.value && safeDecode(rid) != safeDecode(roomId.value)) return
 		const evType = event.type
-		if (evType.indexOf('m.call.') == 0) return
+		if (evType.indexOf('m.call.') == 0) {
+			getCallManager().handleEvent(event, rid)
+			return
+		}
 		if (evType != 'm.room.message' && evType != 'm.room.encrypted') return
 		const eid = event.event_id != null ? event.event_id : ''
 		const list = messages.value
@@ -2324,10 +2485,8 @@
 		const c = event.content != null ? event.content : emptyC
 		let callKey = pickStr(c, 'call_id')
 		if (callKey.length == 0) {
-			try {
-				const infoC = c.getJSON('info')
-				if (infoC != null) callKey = pickStr(infoC, 'call_id')
-			} catch (e0) {}
+			const infoC = pickObj(c, 'info')
+			callKey = pickStr(infoC, 'call_id')
 		}
 		if (callKey.length > 0 && pickStr(c, 'msgtype') == 'm.call') {
 			for (let ci = 0; ci < list.length; ci++) {
@@ -2430,6 +2589,19 @@
 					}
 				}
 				if (exists) continue
+				const rowInfo = row.info != null ? row.info : ({} as UTSJSONObject)
+				const rowCall = pickStr(rowInfo, 'call_id')
+				if (rowCall.length > 0) {
+					let sameCall = false
+					for (let ci = 0; ci < list.length; ci++) {
+						if (pickStr(list[ci].info, 'call_id') == rowCall) {
+							if (rid.length > 0) list[ci].event_id = rid
+							sameCall = true
+							break
+						}
+					}
+					if (sameCall) continue
+				}
 				let mergedPending = false
 				const mt = row.msgtype != null ? row.msgtype : ''
 				if (row.sender == currentUserId.value && mt == 'm.audio') {
@@ -2542,6 +2714,7 @@
 		let liveTick = 0
 		bufPollTimer = bindInterval(() => {
 			mergeRoomBuffer()
+			syncIncomingCall(getCallManager().getSnapshot())
 			liveTick = liveTick + 1
 			if (liveTick % 2 == 0) {
 				pullLatestLive()
@@ -2688,6 +2861,14 @@
 		setupChat()
 	})
 
+	onShow(() => {
+		if (_mounted == false) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (roomId.value.length == 0) return
+		loadRoomMeta(matrix)
+	})
+
 
 	onUnmounted(() => {
 		stopOff(unloadHandler)
@@ -2735,6 +2916,7 @@
 		background-color: #ededed;
 		display: flex;
 		flex-direction: column;
+		position: relative;
 	}
 
 	.topbar {
@@ -2814,6 +2996,40 @@
 		font-size: 36rpx;
 		color: #888;
 		margin-left: 10rpx;
+	}
+
+	.more-people {
+		font-size: 40rpx;
+		color: #181818;
+	}
+
+	.at-mask {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba(0, 0, 0, 0.25);
+		justify-content: flex-end;
+		z-index: 30;
+	}
+	.at-panel {
+		background-color: #ffffff;
+		border-radius: 24rpx 24rpx 0 0;
+		max-height: 60%;
+		padding-bottom: 24rpx;
+	}
+	.at-list {
+		max-height: 480rpx;
+	}
+	.at-item {
+		padding: 28rpx 32rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f2f2f5;
+	}
+	.at-item-text {
+		font-size: 30rpx;
+		color: #1a1a1a;
 	}
 
 	.encrypt-banner {
@@ -3010,7 +3226,9 @@
 	}
 
 	.msg-sender {
-		display: none;
+		font-size: 22rpx;
+		color: #888888;
+		margin-bottom: 6rpx;
 	}
 
 	.msg-content {

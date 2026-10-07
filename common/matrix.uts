@@ -60,6 +60,10 @@ export type MatrixRoom = {
 	other_displayname?: string
 	other_avatar?: string
 	encrypted?: boolean
+	is_direct?: boolean
+	member_count?: number
+	favourite?: boolean
+	muted?: boolean
 }
 
 export type MatrixMessage = {
@@ -171,6 +175,31 @@ function clampHttpTimeout(timeoutMs: number): number {
 	return timeoutMs
 }
 
+function isH5DevHost(host: string): boolean {
+	if (host == 'localhost' || host == '127.0.0.1' || host == '[::1]' || host == '::1') return true
+	if (host.endsWith('.localhost')) return true
+	if (host.startsWith('192.168.') || host.startsWith('10.')) return true
+	if (host.startsWith('172.')) {
+		const parts = host.split('.')
+		if (parts.length > 1) {
+			const n = parseInt(parts[1])
+			if (n >= 16 && n <= 31) return true
+		}
+	}
+	return false
+}
+
+function matrixHttpBase(homeserver: string): string {
+	const hs = homeserver.replace(/\/$/, '')
+	// #ifdef H5
+	try {
+		const loc = (window as any).location
+		if (loc != null && isH5DevHost('' + loc.hostname)) return ''
+	} catch (e0) {}
+	// #endif
+	return hs
+}
+
 function isRequestTimeout(msg: string): boolean {
 	return msg.indexOf('timeout') >= 0 || msg.indexOf('TIMEOUT') >= 0
 }
@@ -231,8 +260,80 @@ function httpRawUpload(url: string, token: string, filePath: string): Promise<st
 	})
 }
 
+function headerMap(header: UTSJSONObject): UTSJSONObject {
+	const out: UTSJSONObject = {}
+	const keys = jsonKeys(header)
+	for (let i = 0; i < keys.length; i++) {
+		const k = keys[i]
+		const v = jsonStr(header, k)
+		if (k.length > 0 && v.length > 0) out[k] = v
+	}
+	if (jsonStr(out, 'Content-Type').length == 0 && jsonStr(header, 'Content-Type').length > 0) {
+		out['Content-Type'] = jsonStr(header, 'Content-Type')
+	}
+	if (jsonStr(out, 'Authorization').length == 0 && jsonStr(header, 'Authorization').length > 0) {
+		out['Authorization'] = jsonStr(header, 'Authorization')
+	}
+	return out
+}
+
 function httpJson(url: string, method: string, header: UTSJSONObject, body: UTSJSONObject, timeoutMs: number): Promise<HttpResult> {
 	const waitMs = clampHttpTimeout(timeoutMs)
+	// #ifdef H5
+	return new Promise((resolve, reject) => {
+		const hdrs: any = {}
+		const ct = jsonStr(header, 'Content-Type')
+		const auth = jsonStr(header, 'Authorization')
+		if (ct.length > 0) hdrs['Content-Type'] = ct
+		if (auth.length > 0) hdrs['Authorization'] = auth
+		const init: any = {
+			method: method,
+			headers: hdrs,
+			mode: 'cors',
+			credentials: 'omit'
+		}
+		if (method != 'GET' && method != 'HEAD') {
+			try {
+				init.body = JSON.stringify(body)
+			} catch (e0) {
+				init.body = '{}'
+			}
+		}
+		let timer: number | null = null
+		let ctrl: any | null = null
+		try {
+			ctrl = new AbortController()
+			init.signal = ctrl.signal
+		} catch (e1) {}
+		timer = setTimeout(() => {
+			try {
+				if (ctrl != null) ctrl.abort()
+			} catch (e2) {}
+		}, waitMs) as number | null
+		fetch(url, init).then((resp: any) => {
+			const code = resp.status as number
+			return resp.text().then((text: string) => {
+				if (timer != null) clearTimeout(timer)
+				const emptyObj: UTSJSONObject = {}
+				const emptyList: Array<UTSJSONObject> = []
+				const row: HttpResult = {
+					statusCode: code,
+					json: (text.length > 0 && text.charAt(0) == '{') ? toJsonObj(text) : emptyObj,
+					list: (text.length > 0 && text.charAt(0) == '[') ? toJsonList(text) : emptyList
+				}
+				resolve(row)
+			})
+		}).catch((err: any) => {
+			if (timer != null) clearTimeout(timer)
+			const msg = errText(err, 'request:fail')
+			if (msg.indexOf('abort') >= 0 || msg.indexOf('Abort') >= 0) {
+				reject(new Error('request:fail timeout'))
+				return
+			}
+			reject(new Error(msg))
+		})
+	})
+	// #endif
 	return new Promise((resolve, reject) => {
 		const onOk = (res: RequestSuccess<any>) => {
 			try {
@@ -313,58 +414,139 @@ function httpJson(url: string, method: string, header: UTSJSONObject, body: UTSJ
 
 function jsonKeys(obj: UTSJSONObject): Array<string> {
 	const out: Array<string> = []
-	const m = obj.toMap()
-	m.forEach((_v: any | null, k: string) => {
-		out.push(k)
-	})
+	// #ifdef H5
+	try {
+		const text = JSON.stringify(obj)
+		if (text != null && text.charAt(0) == '{') {
+			const parsed = JSON.parse(text)
+			const ks = Object.keys(parsed)
+			for (let i = 0; i < ks.length; i++) out.push(ks[i])
+			if (out.length > 0 || text == '{}') return out
+		}
+	} catch (eH5) {}
+	// #endif
+	try {
+		const m = obj.toMap()
+		if (m != null) {
+			m.forEach((_v: any | null, k: string) => {
+				out.push(k)
+			})
+		}
+	} catch (e0) {}
 	return out
 }
 
 function jsonStr(obj: UTSJSONObject, key: string): string {
-	const v = obj.getString(key)
-	if (v == null) return ''
-	return v
+	try {
+		const v = obj[key]
+		if (v != null) {
+			const t = '' + v
+			if (t.length > 0 && t != 'null' && t != 'undefined' && t != '[object Object]') return t
+		}
+	} catch (e0) {}
+	try {
+		const v2 = obj.getString(key)
+		if (v2 != null) return v2
+	} catch (e1) {}
+	return ''
 }
 
 function jsonNum(obj: UTSJSONObject, key: string): number {
-	const v = obj.getNumber(key)
-	if (v == null) return 0
-	return v
+	try {
+		const v = obj.getNumber(key)
+		if (v != null) return v
+	} catch (e0) {}
+	try {
+		const raw = obj[key]
+		if (raw == null) return 0
+		const n = parseFloat('' + raw)
+		if (n != n) return 0
+		return n
+	} catch (e1) {}
+	return 0
 }
 
 function jsonBool(obj: UTSJSONObject, key: string): boolean {
-	const v = obj.getBoolean(key)
-	if (v == null) return false
-	return v
+	try {
+		const v = obj.getBoolean(key)
+		if (v != null) return v
+	} catch (e0) {}
+	try {
+		const raw = obj[key]
+		if (raw == true) return true
+		const t = ('' + raw).toLowerCase()
+		return t == 'true' || t == '1'
+	} catch (e1) {}
+	return false
 }
 
-function jsonArr(obj: UTSJSONObject, key: string): Array<UTSJSONObject> {
-	const raw = obj.getArray(key)
+export function jsonArr(obj: UTSJSONObject, key: string): Array<UTSJSONObject> {
 	const out: Array<UTSJSONObject> = []
-	if (raw == null) return out
-	for (let i = 0; i < raw.length; i++) {
-		out.push(toJsonObj(raw[i]))
+	let raw: any | null = null
+	try {
+		raw = obj[key]
+	} catch (e0) {
+		raw = null
 	}
-	return out
+	if (raw == null) {
+		try {
+			raw = obj.getArray(key)
+		} catch (e1) {
+			raw = null
+		}
+	}
+	if (raw == null) return out
+	try {
+		const arr = raw as Array<any>
+		if (arr != null && arr.length != null) {
+			for (let i = 0; i < arr.length; i++) {
+				out.push(toJsonObj(arr[i]))
+			}
+			if (out.length > 0 || arr.length == 0) return out
+		}
+	} catch (e2) {}
+	return toJsonList(raw)
 }
 
 function jsonStrArr(obj: UTSJSONObject, key: string): Array<string> {
-	const raw = obj.getArray(key)
 	const out: Array<string> = []
-	if (raw == null) return out
-	for (let i = 0; i < raw.length; i++) {
-		const one = raw[i]
-		if (one == null) continue
-		const s = '' + one
-		if (s.length > 0 && s != 'null') out.push(s)
+	let raw: any | null = null
+	try {
+		raw = obj[key]
+	} catch (e0) {
+		raw = null
 	}
+	if (raw == null) {
+		try {
+			raw = obj.getArray(key)
+		} catch (e1) {
+			raw = null
+		}
+	}
+	if (raw == null) return out
+	try {
+		const arr = raw as Array<any>
+		if (arr == null || arr.length == null) return out
+		for (let i = 0; i < arr.length; i++) {
+			const one = arr[i]
+			if (one == null) continue
+			const s = '' + one
+			if (s.length > 0 && s != 'null') out.push(s)
+		}
+	} catch (e2) {}
 	return out
 }
 
-function jsonObj(obj: UTSJSONObject, key: string): UTSJSONObject {
-	const nested = obj.getJSON(key)
-	if (nested == null) return {}
-	return nested
+export function jsonObj(obj: UTSJSONObject, key: string): UTSJSONObject {
+	try {
+		const v = obj[key]
+		if (v != null) return toJsonObj(v)
+	} catch (e0) {}
+	try {
+		const nested = obj.getJSON(key)
+		if (nested != null) return nested
+	} catch (e1) {}
+	return {}
 }
 
 function queryString(query: UTSJSONObject): string {
@@ -507,6 +689,8 @@ export class MatrixClient {
 	// 用户显示名缓存：userId → displayname
 	userDisplayNames: Map<string, string> = new Map()
 	userAvatars: Map<string, string> = new Map()
+	favouriteRooms: Map<string, string> = new Map()
+	mutedRooms: Map<string, string> = new Map()
 	// 每房间最后一条消息预览（sync 时实时更新，避免 getMessages(1) 取不到）
 	roomLastMessage: Map<string, LastMessagePreview> = new Map()
 	// getRoomSummary 内存缓存：用并行数组存 (keys, entries)，避开 Map 和动态索引的兼容问题
@@ -552,9 +736,10 @@ export class MatrixClient {
 	// 房间事件缓冲（任何房间的事件都会暂存）
 	roomTimelines: Map<string, Array<UTSJSONObject>> = new Map()
 	// 已知房间 ID 集合（来自 sync 推送）；listRooms 用它补全 /joined_rooms 可能漏掉的房间
-	knownRoomIds: Set<string> = new Set<string>()
+	knownRoomIds: Set<string> = new Set()
 	// 邀请状态房间（用户还未 join 的房间，含邀请者）
 	invitedRoomCache: Map<string, InvitedRoomInfo> = new Map()
+	autoJoinPending: Array<string> = []
 	stateEventHandlers: Array<(ev: UTSJSONObject, rid: string) => void> = []
 	// 心跳 timer
 	pollTimer: number | null = null
@@ -625,7 +810,7 @@ export class MatrixClient {
 	// ============================================================
 
 	async login(homeserver: string, username: string, password: string): Promise<SessionInfo> {
-		const url = `${homeserver.replace(/\/$/, '')}/_matrix/client/v3/login`
+		const url = `${matrixHttpBase(homeserver)}/_matrix/client/v3/login`
 
 		// 支持 username 是完整 @user:server，也支持纯 local part
 		let loginUser = username.trim()
@@ -646,7 +831,9 @@ export class MatrixClient {
 		const body: UTSJSONObject = {
 			type: 'm.login.password',
 			identifier: ident,
-			password: password
+			user: loginUser,
+			password: password,
+			initial_device_display_name: 'i-tiklink Web'
 		}
 		const header: UTSJSONObject = {
 			'Content-Type': 'application/json'
@@ -709,7 +896,7 @@ export class MatrixClient {
 		query: UTSJSONObject | null = null,
 		timeoutMs: number = 30000
 	): Promise<any> {
-		let url = `${this.homeserver}${path}`
+		let url = `${matrixHttpBase(this.homeserver)}${path}`
 		if (query != null) {
 			const qs = queryString(query)
 			if (qs.length > 0) {
@@ -744,7 +931,7 @@ export class MatrixClient {
 		query: UTSJSONObject | null = null,
 		timeoutMs: number = 30000
 	): Promise<Array<UTSJSONObject>> {
-		let url = `${this.homeserver}${path}`
+		let url = `${matrixHttpBase(this.homeserver)}${path}`
 		if (query != null) {
 			const qs = queryString(query)
 			if (qs.length > 0) {
@@ -783,14 +970,14 @@ export class MatrixClient {
 			search_term: searchTerm,
 			limit: 20
 		}) as UTSJSONObject
-		const results = (res['results'] as Array<UTSJSONObject>) ?? []
+		const results = jsonArr(res, 'results')
 		const out: Array<DirectoryUser> = []
 		for (let i = 0; i < results.length; i++) {
 			const u = results[i]
 			const item: DirectoryUser = {
-				user_id: (u['user_id'] as string) ?? '',
-				display_name: (u['display_name'] as string) ?? '',
-				avatar_url: (u['avatar_url'] as string) ?? ''
+				user_id: jsonStr(u, 'user_id'),
+				display_name: jsonStr(u, 'display_name'),
+				avatar_url: jsonStr(u, 'avatar_url')
 			}
 			out.push(item)
 		}
@@ -883,8 +1070,8 @@ export class MatrixClient {
 
 				if (!this.isSyncing || this.syncEpoch != epoch) break
 
-				const nextVal = data.getString('next_batch')
-				if (nextVal != null && nextVal.length > 0) {
+				const nextVal = jsonStr(data, 'next_batch')
+				if (nextVal.length > 0) {
 					this.since = nextVal
 					saveSyncSince(nextVal)
 				}
@@ -1070,6 +1257,25 @@ export class MatrixClient {
 				for (let hi = 0; hi < this.unreadHandlers.length; hi++) {
 					try { this.unreadHandlers[hi](roomId, count) } catch (e) { console.error(e) }
 				}
+
+				const roomAcc = jsonObj(room, 'account_data')
+				const roomAccEvs = jsonArr(roomAcc, 'events')
+				for (let tai = 0; tai < roomAccEvs.length; tai++) {
+					const tev = roomAccEvs[tai]
+					if (jsonStr(tev, 'type') != 'm.tag') continue
+					const tags = jsonObj(jsonObj(tev, 'content'), 'tags')
+					if (jsonKeys(tags).indexOf('m.favourite') >= 0) this.favouriteRooms.set(roomId, '1')
+					else this.favouriteRooms.set(roomId, '0')
+				}
+			}
+		}
+
+		const accRoot = jsonObj(data, 'account_data')
+		const accEvs = jsonArr(accRoot, 'events')
+		for (let ae = 0; ae < accEvs.length; ae++) {
+			const aev = accEvs[ae]
+			if (jsonStr(aev, 'type') == 'm.push_rules') {
+				this.applyPushRules(jsonObj(aev, 'content'))
 			}
 		}
 
@@ -1097,13 +1303,8 @@ export class MatrixClient {
 			const joinedNow = jsonObj(rooms, 'join')
 			if (jsonKeys(joinedNow).indexOf(roomId) >= 0) {
 				this.invitedRoomCache.delete(roomId)
-			}
-
-			for (let hi = 0; hi < this.inviteHandlers.length; hi++) {
-				try { this.inviteHandlers[hi](roomId) } catch (e) { console.error('invite handler error', e) }
-			}
-			if (this.onRoomInvite != null) {
-				try { this.onRoomInvite(roomId) } catch (e) { console.error('legacy onRoomInvite error', e) }
+			} else {
+				this.autoJoinInvite(roomId)
 			}
 		}
 
@@ -1224,10 +1425,29 @@ export class MatrixClient {
 			}
 		}
 		const url = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`
-		const res = (await this.request('GET', url)) as UTSJSONObject
+		const res = (await this.request('GET', url, null)) as UTSJSONObject
 		const joined = jsonObj(res, 'joined')
-		const members = jsonKeys(joined)
-		this.memberCache.set(cacheKey, { members: members, loaded_at: Date.now() })
+		let members = jsonKeys(joined)
+		if (members.length == 0) {
+			// #ifdef H5
+			try {
+				const text = JSON.stringify(res)
+				if (text != null && text.indexOf('joined') >= 0) {
+					const parsed = JSON.parse(text)
+					const rawJoined = parsed['joined']
+					if (rawJoined != null) {
+						const ks = Object.keys(rawJoined)
+						for (let hi = 0; hi < ks.length; hi++) {
+							if (ks[hi].length > 0) members.push(ks[hi])
+						}
+					}
+				}
+			} catch (eH5) {}
+			// #endif
+		}
+		if (members.length > 1) {
+			this.memberCache.set(cacheKey, { members: members, loaded_at: Date.now() })
+		}
 		return members
 	}
 
@@ -1261,6 +1481,29 @@ export class MatrixClient {
 		}
 	}
 
+	notifyInviteHandlers(roomId: string): void {
+		for (let hi = 0; hi < this.inviteHandlers.length; hi++) {
+			try { this.inviteHandlers[hi](roomId) } catch (e) { console.error('invite handler error', e) }
+		}
+		if (this.onRoomInvite != null) {
+			try { this.onRoomInvite(roomId) } catch (e) { console.error('legacy onRoomInvite error', e) }
+		}
+	}
+
+	async autoJoinInvite(roomId: string): Promise<void> {
+		if (roomId.length == 0) return
+		if (this.autoJoinPending.indexOf(roomId) >= 0) return
+		this.autoJoinPending.push(roomId)
+		try {
+			await this.joinRoom(roomId)
+		} catch (e) {
+			console.warn(TAG, 'auto-join invite failed', roomId, e)
+		}
+		const idx = this.autoJoinPending.indexOf(roomId)
+		if (idx >= 0) this.autoJoinPending.splice(idx, 1)
+		this.notifyInviteHandlers(roomId)
+	}
+
 	parseEvent(ev: UTSJSONObject): MatrixEvent {
 		const content = jsonObj(ev, 'content')
 		const sender = jsonStr(ev, 'sender')
@@ -1289,7 +1532,9 @@ export class MatrixClient {
 	}
 
 	getCachedUserName(userId: string): string {
-		return this.userDisplayNames.get(userId) ?? ''
+		const n = this.userDisplayNames.get(userId)
+		if (n != null && n.length > 0) return n
+		return ''
 	}
 
 	// ============================================================
@@ -1312,12 +1557,15 @@ export class MatrixClient {
 			const cachedRooms = this.listRoomsCache.rooms
 			for (let ci = 0; ci < cachedRooms.length; ci++) {
 				const last = this.roomLastMessage.get(cachedRooms[ci].room_id)
-				if (last == null) continue
-				cachedRooms[ci].last_message_preview = last.body
-				cachedRooms[ci].last_message_ts = last.ts
-				cachedRooms[ci].last_message_sender = last.sender
+				if (last != null) {
+					cachedRooms[ci].last_message_preview = last.body
+					cachedRooms[ci].last_message_ts = last.ts
+					cachedRooms[ci].last_message_sender = last.sender
+				}
+				cachedRooms[ci].favourite = this.favouriteRooms.get(cachedRooms[ci].room_id) == '1'
+				cachedRooms[ci].muted = this.mutedRooms.get(cachedRooms[ci].room_id) == '1'
 			}
-			cachedRooms.sort((a, b) => (b.last_message_ts ?? 0) - (a.last_message_ts ?? 0))
+			sortRoomList(cachedRooms)
 			return cachedRooms
 		}
 		console.log('[listRooms] called')
@@ -1353,13 +1601,15 @@ export class MatrixClient {
 			}
 			for (let li = 0; li < rooms.length; li++) {
 				const last = this.roomLastMessage.get(rooms[li].room_id)
-				if (last == null) continue
-				rooms[li].last_message_preview = last.body
-				rooms[li].last_message_ts = last.ts
-				rooms[li].last_message_sender = last.sender
+				if (last != null) {
+					rooms[li].last_message_preview = last.body
+					rooms[li].last_message_ts = last.ts
+					rooms[li].last_message_sender = last.sender
+				}
+				rooms[li].favourite = this.favouriteRooms.get(rooms[li].room_id) == '1'
+				rooms[li].muted = this.mutedRooms.get(rooms[li].room_id) == '1'
 			}
-			// 按最后消息时间倒序
-			rooms.sort((a, b) => (b.last_message_ts ?? 0) - (a.last_message_ts ?? 0))
+			sortRoomList(rooms)
 			this.listRoomsCache = { rooms, loaded_at: Date.now() }
 			return rooms
 		})()
@@ -1428,21 +1678,30 @@ export class MatrixClient {
 			}
 		}
 
-		// 私聊识别：state 中只看到 2 个不同 user（包含自己）的 event 就当作 DM
-		let otherUserIds = new Set<string>()
+		const memberIds: Array<string> = []
 		for (let sj = 0; sj < state.length; sj++) {
 			const ev2 = state[sj]
-			if (jsonStr(ev2, 'type') == 'm.room.member') {
-				const sk = jsonStr(ev2, 'state_key')
-				if (sk.length > 0 && sk != this.userId) otherUserIds.add(sk)
-			}
+			if (jsonStr(ev2, 'type') != 'm.room.member') continue
+			const sk = jsonStr(ev2, 'state_key')
+			if (sk.length == 0) continue
+			const mem = jsonStr(jsonObj(ev2, 'content'), 'membership')
+			if (mem != 'join' && mem != 'invite') continue
+			if (memberIds.indexOf(sk) < 0) memberIds.push(sk)
 		}
-		const isDM = otherUserIds.size == 1
+		if (this.userId.length > 0 && memberIds.indexOf(this.userId) < 0) {
+			memberIds.push(this.userId)
+		}
+		room.member_count = memberIds.length
+		const isDM = memberIds.length == 2
+		room.is_direct = isDM
+		room.favourite = this.favouriteRooms.get(roomId) == '1'
+		room.muted = this.mutedRooms.get(roomId) == '1'
 
 		// DM 情况下，强制用对方 displayname 覆盖
 		if (isDM && room.other_user_id != null) {
 			// 优先用缓存的 displayname
-			const cached = this.userDisplayNames.get(room.other_user_id) ?? ''
+			const cachedName = this.userDisplayNames.get(room.other_user_id)
+			const cached = (cachedName != null) ? cachedName : ''
 			if (cached.length > 0) {
 				room.other_displayname = cached
 				room.name = cached
@@ -1453,7 +1712,8 @@ export class MatrixClient {
 				const local = room.other_user_id.split(':')[0].replace('@', '')
 				room.name = local
 			}
-			const cachedAv = this.userAvatars.get(room.other_user_id) ?? ''
+			const cachedAvRaw = this.userAvatars.get(room.other_user_id)
+			const cachedAv = (cachedAvRaw != null) ? cachedAvRaw : ''
 			if (cachedAv.length > 0) {
 				room.other_avatar = cachedAv
 				room.avatar_url = cachedAv
@@ -1486,7 +1746,9 @@ export class MatrixClient {
 			}
 		} else {
 			if (room.name == null || room.name.length == 0) {
-				room.name = room.canonical_alias ?? roomId
+				const alias = room.canonical_alias
+				if (alias != null && alias.length > 0) room.name = alias
+				else room.name = roomId
 			}
 		}
 
@@ -1521,9 +1783,14 @@ export class MatrixClient {
 			`/_matrix/client/v3/join/${encodeURIComponent(roomIdOrAlias)}`,
 			{}
 		)) as UTSJSONObject
-		// 加入成功后从邀请缓存移除
+		const rid = jsonStr(data, 'room_id')
+		const roomId = rid.length > 0 ? rid : roomIdOrAlias
 		this.invitedRoomCache.delete(roomIdOrAlias)
-		return { room_id: (data['room_id'] as string) ?? roomIdOrAlias }
+		this.invitedRoomCache.delete(roomId)
+		this.knownRoomIds.add(roomId)
+		this.listRoomsCache = null
+		this.invalidateRoomSummary(roomId)
+		return { room_id: roomId }
 	}
 
 	async createRoom(opts: CreateRoomOpts): Promise<string> {
@@ -1545,13 +1812,16 @@ export class MatrixClient {
 			'/_matrix/client/v3/createRoom',
 			body
 		)) as UTSJSONObject
-		return (data['room_id'] as string) ?? ''
+		const rid = jsonStr(data, 'room_id')
+		this.listRoomsCache = null
+		return rid
 	}
 
 	async inviteUser(roomId: string, userId: string): Promise<void> {
 		await this.request('POST', '/_matrix/client/v3/rooms/' + encodeURIComponent(roomId) + '/invite', {
 			user_id: userId
 		})
+		this.invalidateRoomSummary(roomId)
 	}
 
 	async leaveRoom(roomId: string): Promise<void> {
@@ -1560,6 +1830,7 @@ export class MatrixClient {
 			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`,
 			{}
 		)
+		this.invalidateRoomSummary(roomId)
 	}
 
 	async startDM(targetUserId: string): Promise<string> {
@@ -1568,11 +1839,11 @@ export class MatrixClient {
 		for (const r of existing) {
 			try {
 				const members = await this.request('GET', `/_matrix/client/v3/rooms/${encodeURIComponent(r.room_id)}/members`, null) as UTSJSONObject
-				const chunk = (members['chunk'] as Array<UTSJSONObject>) ?? []
+				const chunk = jsonArr(members, 'chunk')
 				const userIds: Array<string> = []
 				for (let i = 0; i < chunk.length; i++) {
-					const sk = chunk[i]['state_key'] as string
-					if (sk != null && sk.length > 0) userIds.push(sk)
+					const sk = jsonStr(chunk[i], 'state_key')
+					if (sk.length > 0) userIds.push(sk)
 				}
 				if (userIds.length == 2 && userIds.includes(this.userId) && userIds.includes(targetUserId)) {
 					return r.room_id
@@ -1629,6 +1900,14 @@ export class MatrixClient {
 				const c = jsonObj(ev, 'content')
 				const rawBody = jsonStr(c, 'body')
 				const info = jsonObj(c, 'info')
+				const callId = jsonStr(c, 'call_id')
+				if (callId.length > 0) info['call_id'] = callId
+				const callType = jsonStr(c, 'call_type')
+				if (callType.length > 0) info['call_type'] = callType
+				const callStatus = jsonStr(c, 'call_status')
+				if (callStatus.length > 0) info['call_status'] = callStatus
+				const callInit = jsonStr(c, 'call_initiator')
+				if (callInit.length > 0) info['call_initiator'] = callInit
 				msgs.push({
 					event_id: jsonStr(ev, 'event_id'),
 					sender: jsonStr(ev, 'sender'),
@@ -1715,14 +1994,29 @@ export class MatrixClient {
 				`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.name/`,
 				null
 			)) as UTSJSONObject
-			const n = (ev['name'] as string) ?? ''
+			const n = jsonStr(ev, 'name')
 			if (n.length > 0) return n
 		} catch (e) {}
 		return roomId
 	}
 
 	async sendText(roomId: string, text: string): Promise<MatrixEvent> {
-		return await this.sendMessage(roomId, { msgtype: 'm.text', body: text })
+		const none: Array<string> = []
+		return await this.sendTextMentions(roomId, text, none)
+	}
+
+	async sendTextMentions(roomId: string, text: string, mentionIds: Array<string>): Promise<MatrixEvent> {
+		const content: UTSJSONObject = {
+			msgtype: 'm.text',
+			body: text
+		}
+		if (mentionIds.length > 0 || text.indexOf('@所有人') >= 0) {
+			const mentions: UTSJSONObject = {}
+			if (mentionIds.length > 0) mentions['user_ids'] = mentionIds
+			if (text.indexOf('@所有人') >= 0) mentions['room'] = true
+			content['m.mentions'] = mentions
+		}
+		return await this.sendMessage(roomId, content)
 	}
 
 	async sendMessage(roomId: string, content: UTSJSONObject): Promise<MatrixEvent> {
@@ -1791,7 +2085,11 @@ export class MatrixClient {
 		const server = parts[0]
 		const mediaId = parts.slice(1).join('/')
 		// itiklink 的媒体存储在 /_matrix/client/v1/media/download（thumbnail 端点报 400）
-		return `${this.homeserver}/_matrix/client/v1/media/download/${server}/${mediaId}`
+		let url = `${matrixHttpBase(this.homeserver)}/_matrix/client/v1/media/download/${encodeURIComponent(server)}/${encodeURIComponent(mediaId)}`
+		if (this.accessToken.length > 0) {
+			url += '?access_token=' + encodeURIComponent(this.accessToken)
+		}
+		return url
 	}
 
 	// ============================================================
@@ -1800,7 +2098,7 @@ export class MatrixClient {
 
 	async uploadMedia(localPath: string, mimeType: string, fileName: string): Promise<string> {
 		const fileName2 = (fileName.length > 0) ? fileName : 'file'
-		const uploadUrl = this.homeserver.replace(/\/$/, '') + '/_matrix/media/v3/upload?filename=' + encodeURIComponent(fileName2)
+		const uploadUrl = matrixHttpBase(this.homeserver) + '/_matrix/media/v3/upload?filename=' + encodeURIComponent(fileName2)
 
 		// #ifdef H5
 		// H5：blob URL → fetch 直接上传二进制（不要用 FormData，itiklink 需直传）
@@ -1820,7 +2118,7 @@ export class MatrixClient {
 			throw new Error('上传失败 ' + h5Res.status + ' ' + h5Res.statusText + ' | ' + text)
 		}
 		const h5Json = await h5Res.json() as UTSJSONObject
-		return (h5Json['content_uri'] as string) ?? ''
+		return jsonStr(h5Json, 'content_uri')
 		// #endif
 
 		// #ifndef H5
@@ -1980,21 +2278,43 @@ export class MatrixClient {
 	async getRoomMembers(roomId: string): Promise<RoomMember[]> {
 		const data = (await this.request(
 			'GET',
-			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members?not_membership=leave`,
-			null
+			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+			null,
+			{ not_membership: 'leave' }
 		)) as UTSJSONObject
-		const chunk = (data['chunk'] as Array<UTSJSONObject>) ?? []
+		const chunk = jsonArr(data, 'chunk')
 		const result: RoomMember[] = []
 		for (let i = 0; i < chunk.length; i++) {
 			const m = chunk[i]
-			const content = (m['content'] as UTSJSONObject) ?? {}
+			const content = jsonObj(m, 'content')
+			const membership = jsonStr(content, 'membership')
+			if (membership == 'leave' || membership == 'ban') continue
+			const uid = jsonStr(m, 'state_key')
+			if (uid.length == 0) continue
+			const dn = jsonStr(content, 'displayname')
+			const av = jsonStr(content, 'avatar_url')
+			if (dn.length > 0) this.userDisplayNames.set(uid, dn)
+			if (av.length > 0) this.userAvatars.set(uid, av)
 			const item: RoomMember = {
-				user_id: (m['state_key'] as string) ?? '',
-				membership: (content['membership'] as string) ?? 'join',
-				display_name: content['displayname'] as string,
-				avatar_url: content['avatar_url'] as string
+				user_id: uid,
+				membership: membership.length > 0 ? membership : 'join',
+				display_name: dn,
+				avatar_url: av
 			}
 			result.push(item)
+		}
+		if (result.length == 0) {
+			const ids = await this.getJoinedMembers(roomId)
+			for (let j = 0; j < ids.length; j++) {
+				const uid = ids[j]
+				if (uid.length == 0) continue
+				result.push({
+					user_id: uid,
+					membership: 'join',
+					display_name: '',
+					avatar_url: ''
+				})
+			}
 		}
 		return result
 	}
@@ -2013,6 +2333,7 @@ export class MatrixClient {
 			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.name`,
 			{ name: name }
 		)
+		this.invalidateRoomSummary(roomId)
 	}
 
 	async setRoomTopic(roomId: string, topic: string): Promise<void> {
@@ -2021,6 +2342,7 @@ export class MatrixClient {
 			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.topic`,
 			{ topic: topic }
 		)
+		this.invalidateRoomSummary(roomId)
 	}
 
 	async kickMember(roomId: string, userId: string, reason: string): Promise<void> {
@@ -2029,6 +2351,7 @@ export class MatrixClient {
 			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/kick`,
 			{ user_id: userId, reason: reason }
 		)
+		this.invalidateRoomSummary(roomId)
 	}
 
 	async banMember(roomId: string, userId: string, reason: string): Promise<void> {
@@ -2068,9 +2391,9 @@ export class MatrixClient {
 	 */
 	async searchMessages(
 		searchTerm: string,
-		roomIds: Array<string> = [],
-		limit: number = 20,
-		nextBatch: string = ''
+		roomIds: Array<string>,
+		limit: number,
+		nextBatch: string
 	): Promise<SearchResult> {
 		const filter: UTSJSONObject = { limit: limit }
 		if (roomIds.length > 0) {
@@ -2091,38 +2414,37 @@ export class MatrixClient {
 			}
 		}
 		const data = (await this.request('POST', '/_matrix/client/v3/search', body)) as UTSJSONObject
-		// 解析结果（只取第一组 group 简化结构）
-		const categories = data['search_categories'] as UTSJSONObject ?? {}
-		const events = categories['room_events'] as UTSJSONObject ?? {}
-		const rawResults = (events['results'] as Array<UTSJSONObject>) ?? []
-		const results: Array<SearchHit> = []
+		const categories = jsonObj(data, 'search_categories')
+		const events = jsonObj(categories, 'room_events')
+		const rawResults = jsonArr(events, 'results')
+		const results: SearchHit[] = []
 		for (let i = 0; i < rawResults.length; i++) {
 			const r = rawResults[i]
-			const result = (r['result'] as UTSJSONObject) ?? {}
-			const ev = (result['event'] as UTSJSONObject) ?? {}
-			const content = (ev['content'] as UTSJSONObject) ?? {}
-			const hl = r['highlights'] as Array<string> | null
-			const hit: SearchHit = {
-				event_id: (ev['event_id'] as string) ?? '',
-				room_id: (result['room_id'] as string) ?? '',
-				sender: (ev['sender'] as string) ?? '',
-				type: (ev['type'] as string) ?? '',
-				body: (content['body'] as string) ?? '',
-				ts: (ev['origin_server_ts'] as number) ?? 0,
-				highlight: (hl != null) ? hl : ([] as Array<string>),
-				context: (r['context'] as UTSJSONObject) ?? ({} as UTSJSONObject)
-			}
-			results.push(hit)
+			const result = jsonObj(r, 'result')
+			const ev = jsonObj(result, 'event')
+			const content = jsonObj(ev, 'content')
+			const item = {} as SearchHit
+			item.event_id = jsonStr(ev, 'event_id')
+			item.room_id = jsonStr(result, 'room_id')
+			item.sender = jsonStr(ev, 'sender')
+			item.type = jsonStr(ev, 'type')
+			item.body = jsonStr(content, 'body')
+			item.ts = jsonNum(ev, 'origin_server_ts')
+			item.highlight = jsonStrArr(r, 'highlights')
+			item.context = jsonObj(r, 'context')
+			results.push(item)
 		}
-		const groups = events['groups'] as UTSJSONObject ?? {}
-		const roomGroup = groups['room_id'] as UTSJSONObject ?? {}
-		const count = (roomGroup['count'] as number) ?? results.length
-		return {
-			results: results,
-			count: count,
-			highlights: (events['highlights'] as Array<string>) ?? ([] as Array<string>),
-			next_batch: (events['next_batch'] as string) ?? ''
-		}
+		const groups = jsonObj(events, 'groups')
+		const roomGroup = jsonObj(groups, 'room_id')
+		const rawCount = jsonNum(roomGroup, 'count')
+		const nres = results.length
+		const count = rawCount > 0 ? rawCount : nres
+		const out = {} as SearchResult
+		out.results = results
+		out.count = count
+		out.highlights = jsonStrArr(events, 'highlights')
+		out.next_batch = jsonStr(events, 'next_batch')
+		return out
 	}
 
 	// ============================================================
@@ -2215,18 +2537,21 @@ export class MatrixClient {
 	 */
 	async getDevices(): Promise<Array<DeviceInfo>> {
 		const data = (await this.request('GET', '/_matrix/client/v3/devices', null)) as UTSJSONObject
-		const devices = data['devices'] as Array<UTSJSONObject> ?? []
+		const devices = jsonArr(data, 'devices')
 		const result: Array<DeviceInfo> = []
-		for (const d of devices) {
-			result.push({
-				device_id: d['device_id'] as string ?? '',
-				user_id: d['user_id'] as string,
-				display_name: d['display_name'] as string,
-				last_seen_ip: (d['last_seen_ip'] as string),
-				last_seen_ts: (d['last_seen_ts'] as number),
-				app_id: (d['app'] as UTSJSONObject)?.['app_id'] as string,
-				version: (d['app'] as UTSJSONObject)?.['version'] as string
-			})
+		for (let i = 0; i < devices.length; i++) {
+			const d = devices[i]
+			const app = jsonObj(d, 'app')
+			const row: DeviceInfo = {
+				device_id: jsonStr(d, 'device_id'),
+				user_id: jsonStr(d, 'user_id'),
+				display_name: jsonStr(d, 'display_name'),
+				last_seen_ip: jsonStr(d, 'last_seen_ip'),
+				last_seen_ts: jsonNum(d, 'last_seen_ts'),
+				app_id: jsonStr(app, 'app_id'),
+				version: jsonStr(app, 'version')
+			}
+			result.push(row)
 		}
 		return result
 	}
@@ -2335,14 +2660,14 @@ export class MatrixClient {
 	 */
 	async get3PIDs(): Promise<Array<ThreepidInfo>> {
 		const data = (await this.request('GET', '/_matrix/client/v3/account/3pid', null)) as UTSJSONObject
-		const list = (data['threepids'] as Array<UTSJSONObject>) ?? []
+		const list = jsonArr(data, 'threepids')
 		const out: Array<ThreepidInfo> = []
 		for (let i = 0; i < list.length; i++) {
 			const t = list[i]
 			const item: ThreepidInfo = {
-				medium: (t['medium'] as string) ?? '',
-				address: (t['address'] as string) ?? '',
-				validated_at: (t['validated_at'] as number) ?? 0
+				medium: jsonStr(t, 'medium'),
+				address: jsonStr(t, 'address'),
+				validated_at: jsonNum(t, 'validated_at')
 			}
 			out.push(item)
 		}
@@ -2377,10 +2702,10 @@ export class MatrixClient {
 		if (searchTerm.length > 0) body['filter'] = { generic_search_term: searchTerm }
 		const data = (await this.request('POST', '/_matrix/client/v3/publicRooms', body)) as UTSJSONObject
 		const chunk: Array<PublicRoom> = []
-		const raw = data.getArray('chunk')
+		const raw = jsonArr(data, 'chunk')
 		if (raw != null) {
 			for (let i = 0; i < raw.length; i++) {
-				const item = toJsonObj(raw[i])
+				const item = raw[i]
 				const roomId = jsonStr(item, 'room_id')
 				if (roomId.length == 0) continue
 				const row: PublicRoom = {
@@ -2563,9 +2888,12 @@ export class MatrixClient {
 	async favouriteRoom(roomId: string, favourite: boolean): Promise<void> {
 		if (favourite) {
 			await this.addRoomTag(roomId, 'm.favourite', 0.0)
+			this.favouriteRooms.set(roomId, '1')
 		} else {
 			await this.removeRoomTag(roomId, 'm.favourite')
+			this.favouriteRooms.set(roomId, '0')
 		}
+		this.applyRoomFlagsToCache(roomId)
 	}
 
 	async setRoomLowPriority(roomId: string, low: boolean): Promise<void> {
@@ -2576,10 +2904,143 @@ export class MatrixClient {
 		}
 	}
 
+	applyPushRules(content: UTSJSONObject): void {
+		const global = jsonObj(content, 'global')
+		const override = jsonArr(global, 'override')
+		const muted = new Map<string, string>()
+		for (let i = 0; i < override.length; i++) {
+			const rule = override[i]
+			if (jsonStr(rule, 'enabled') == 'false') continue
+			const conds = jsonArr(rule, 'conditions')
+			let roomId = jsonStr(rule, 'rule_id')
+			for (let ci = 0; ci < conds.length; ci++) {
+				const cond = conds[ci]
+				if (jsonStr(cond, 'key') == 'room_id') {
+					const p = jsonStr(cond, 'pattern')
+					if (p.length > 0) roomId = p
+				}
+			}
+			const raw = JSON.stringify(rule)
+			if (roomId.indexOf('!') == 0 && raw.indexOf('dont_notify') >= 0) {
+				muted.set(roomId, '1')
+			}
+		}
+		this.mutedRooms = muted
+	}
+
+	async setRoomMuted(roomId: string, muted: boolean): Promise<void> {
+		const path = `/_matrix/client/v3/pushrules/global/override/${encodeURIComponent(roomId)}`
+		if (muted) {
+			const cond: UTSJSONObject = {
+				kind: 'event_match',
+				key: 'room_id',
+				pattern: roomId
+			}
+			const conds: Array<UTSJSONObject> = []
+			conds.push(cond)
+			const actions: Array<string> = []
+			actions.push('dont_notify')
+			const body: UTSJSONObject = {}
+			body['conditions'] = conds
+			body['actions'] = actions
+			await this.request('PUT', path, body)
+			this.mutedRooms.set(roomId, '1')
+		} else {
+			try {
+				await this.request('DELETE', path, null)
+			} catch (e) {}
+			this.mutedRooms.set(roomId, '0')
+		}
+		this.applyRoomFlagsToCache(roomId)
+	}
+
+	isRoomMuted(roomId: string): boolean {
+		return this.mutedRooms.get(roomId) == '1'
+	}
+
+	isRoomFavourite(roomId: string): boolean {
+		return this.favouriteRooms.get(roomId) == '1'
+	}
+
+	applyRoomFlagsToCache(roomId: string): void {
+		const cache = this.listRoomsCache
+		if (cache == null) return
+		const rooms = cache.rooms
+		for (let i = 0; i < rooms.length; i++) {
+			if (rooms[i].room_id != roomId) continue
+			rooms[i].favourite = this.favouriteRooms.get(roomId) == '1'
+			rooms[i].muted = this.mutedRooms.get(roomId) == '1'
+			break
+		}
+		sortRoomList(rooms)
+	}
+
+	invalidateRoomSummary(roomId: string): void {
+		try {
+			summaryCache[roomId] = null
+		} catch (e) {}
+		this.memberCache.delete('joined_members:' + roomId)
+		const cache = this.listRoomsCache
+		if (cache != null) cache.loaded_at = 0
+	}
+
+	async getMyPower(roomId: string): Promise<number> {
+		try {
+			const data = (await this.request(
+				'GET',
+				`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.power_levels`,
+				null
+			)) as UTSJSONObject
+			const users = jsonObj(data, 'users')
+			if (jsonKeys(users).indexOf(this.userId) >= 0) {
+				return jsonNum(users, this.userId)
+			}
+			return jsonNum(data, 'users_default')
+		} catch (e) {
+			return 0
+		}
+	}
+
+	async canManageRoom(roomId: string): Promise<boolean> {
+		const p = await this.getMyPower(roomId)
+		return p >= 50
+	}
+
 	genTxnId(): string {
 		this.txnCounter += 1
 		return `tx_${Date.now()}_${this.txnCounter}`
 	}
+}
+
+export function localPartOf(userId: string): string {
+	const p = userId.split(':')[0].replace('@', '')
+	if (p.length > 0) return p
+	return userId
+}
+
+export function memberDisplayName(m: RoomMember): string {
+	const dn = m.display_name
+	if (dn != null && dn.length > 0) return dn
+	return localPartOf(m.user_id)
+}
+
+export function roomIsGroup(room: MatrixRoom): boolean {
+	if (room.is_direct == true) return false
+	const n = room.member_count
+	if (n != null && n > 2) return true
+	if (room.is_direct == false) return true
+	return false
+}
+
+export function sortRoomList(rooms: Array<MatrixRoom>): void {
+	rooms.sort((a, b) => {
+		const fa = a.favourite == true ? 1 : 0
+		const fb = b.favourite == true ? 1 : 0
+		if (fb != fa) return fb - fa
+		const ta = a.last_message_ts != null ? a.last_message_ts : 0
+		const tb = b.last_message_ts != null ? b.last_message_ts : 0
+		return tb - ta
+	})
 }
 
 // ============================================================

@@ -1,0 +1,534 @@
+<template>
+	<view class="group-page">
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">{{ pageTitle }}</text>
+			<view class="topbar-right"></view>
+		</view>
+		<scroll-view class="group-scroll" scroll-y>
+			<view class="card">
+				<view class="member-grid">
+					<view
+						v-for="m in members"
+						:key="m.user_id"
+						class="member-cell"
+						@click="onMemberTap(m)"
+					>
+						<view class="member-avatar-box">
+							<image class="member-avatar" :src="memberAvatar(m)" mode="aspectFill"></image>
+							<view v-if="showKickMark(m)" class="kick-mark">
+								<text class="kick-mark-text">-</text>
+							</view>
+						</view>
+						<text class="member-name">{{ memberLabel(m) }}</text>
+					</view>
+					<view class="member-cell" @click="onInvite">
+						<view class="member-add">
+							<text class="member-add-text">+</text>
+						</view>
+						<text class="member-name">添加</text>
+					</view>
+					<view v-if="canKick" class="member-cell" @click="removing = !removing">
+						<view class="member-add">
+							<text class="member-add-text">-</text>
+						</view>
+						<text class="member-name">移出</text>
+					</view>
+				</view>
+				<view v-if="isGroup" class="more-members" @click="showAllMembers">
+					<text class="more-members-text">查看全部群成员</text>
+					<text class="cell-arrow">›</text>
+				</view>
+			</view>
+
+			<view v-if="isGroup" class="card">
+				<view class="cell" @click="editName">
+					<text class="cell-label">群聊名称</text>
+					<text class="cell-value">{{ roomName }}</text>
+					<text class="cell-arrow">›</text>
+				</view>
+				<view class="cell" @click="editTopic">
+					<text class="cell-label">群公告</text>
+					<text class="cell-value">{{ topicText }}</text>
+					<text class="cell-arrow">›</text>
+				</view>
+			</view>
+
+			<view class="card">
+				<view class="cell" @click="onSearchChat">
+					<text class="cell-label">查找聊天记录</text>
+					<text class="cell-arrow">›</text>
+				</view>
+			</view>
+
+			<view class="card">
+				<view class="cell" @click="toggleMute">
+					<text class="cell-label">消息免打扰</text>
+					<view class="wx-switch" :class="muted ? 'wx-switch-on' : ''">
+						<view class="wx-switch-dot"></view>
+					</view>
+				</view>
+				<view class="cell" @click="togglePin">
+					<text class="cell-label">置顶聊天</text>
+					<view class="wx-switch" :class="pinned ? 'wx-switch-on' : ''">
+						<view class="wx-switch-dot"></view>
+					</view>
+				</view>
+			</view>
+
+			<view class="leave-wrap">
+				<view class="leave-btn" @click="onLeave">
+					<text class="leave-text">{{ isGroup ? '删除并退出' : '删除聊天' }}</text>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, computed } from 'vue'
+	import { getMatrix, errText, RoomMember, roomIsGroup, memberDisplayName, MatrixRoom } from '@/common/matrix.uts'
+	import { openGroupPick } from '@/common/app.uts'
+
+	const roomId = ref<string>('')
+	const roomName = ref<string>('')
+	const topic = ref<string>('')
+	const isGroup = ref<boolean>(true)
+	const members = ref<Array<RoomMember>>([])
+	const muted = ref<boolean>(false)
+	const pinned = ref<boolean>(false)
+	const canKick = ref<boolean>(false)
+	const removing = ref<boolean>(false)
+
+	const pageTitle = computed((): string => {
+		if (isGroup.value) {
+			const n = members.value.length
+			if (n > 0) return '聊天信息(' + n + ')'
+			return '聊天信息'
+		}
+		return '聊天信息'
+	})
+
+	const topicText = computed((): string => {
+		if (topic.value.length > 0) return topic.value
+		return '未设置'
+	})
+
+	function goBack(): void {
+		uni.navigateBack()
+	}
+
+	function memberLabel(m: RoomMember): string {
+		return memberDisplayName(m)
+	}
+
+	function showKickMark(m: RoomMember): boolean {
+		if (removing.value == false) return false
+		const matrix = getMatrix()
+		if (matrix == null) return false
+		return m.user_id != matrix.userId
+	}
+
+	function memberAvatar(m: RoomMember): string {
+		const matrix = getMatrix()
+		if (matrix == null) return '/static/logo.png'
+		const av = m.avatar_url
+		if (av != null && av.length > 0) {
+			const http = matrix.mxcToHttp(av, 80, 80)
+			if (http.length > 0) return http
+		}
+		return '/static/logo.png'
+	}
+
+	async function loadInfo(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (roomId.value.length == 0) return
+		try {
+			const summary = await matrix.getRoomSummary(roomId.value)
+			applySummary(summary)
+		} catch (e) {}
+		try {
+			const list = await matrix.getRoomMembers(roomId.value)
+			const joined: Array<RoomMember> = []
+			for (let i = 0; i < list.length; i++) {
+				if (list[i].membership == 'join' || list[i].membership == 'invite') {
+					joined.push(list[i])
+				}
+			}
+			members.value = joined
+		} catch (e) {}
+		muted.value = matrix.isRoomMuted(roomId.value)
+		pinned.value = matrix.isRoomFavourite(roomId.value)
+		try {
+			canKick.value = await matrix.canManageRoom(roomId.value)
+		} catch (e2) {
+			canKick.value = false
+		}
+	}
+
+	function applySummary(summary: MatrixRoom): void {
+		isGroup.value = roomIsGroup(summary)
+		const n = summary.name
+		if (n != null && n.length > 0) roomName.value = n
+		const t = summary.topic
+		if (t != null) topic.value = t
+		if (summary.favourite == true) pinned.value = true
+		if (summary.muted == true) muted.value = true
+	}
+
+	function onInvite(): void {
+		openGroupPick('invite', roomId.value)
+	}
+
+	function showAllMembers(): void {
+		const names: Array<string> = []
+		const list = members.value
+		for (let i = 0; i < list.length; i++) {
+			names.push(memberDisplayName(list[i]))
+		}
+		uni.showModal({
+			title: '群成员(' + list.length + ')',
+			content: names.join('\n'),
+			showCancel: false
+		})
+	}
+
+	function onMemberTap(m: RoomMember): void {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (removing.value) {
+			if (m.user_id == matrix.userId) {
+				uni.showToast({ title: '不能移出自己', icon: 'none' })
+				return
+			}
+			uni.showModal({
+				title: '移出成员',
+				content: '确定将 ' + memberDisplayName(m) + ' 移出群聊？',
+				success: (res) => {
+					if (res.confirm) kickNow(m.user_id)
+				}
+			})
+			return
+		}
+	}
+
+	async function kickNow(userId: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		uni.showLoading({ title: '处理中…' })
+		try {
+			await matrix.kickMember(roomId.value, userId, '')
+			uni.hideLoading()
+			uni.showToast({ title: '已移出', icon: 'success' })
+			removing.value = false
+			loadInfo()
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: errText(e, '无权移出'), icon: 'none' })
+		}
+	}
+
+	function editName(): void {
+		uni.showModal({
+			title: '群聊名称',
+			editable: true,
+			content: roomName.value,
+			success: (res) => {
+				if (!res.confirm) return
+				const raw = res.content
+				const name = (raw != null) ? raw.trim() : ''
+				if (name.length == 0) return
+				saveName(name)
+			}
+		})
+	}
+
+	async function saveName(name: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			await matrix.setRoomName(roomId.value, name)
+			roomName.value = name
+			uni.showToast({ title: '已修改', icon: 'success' })
+		} catch (e) {
+			uni.showToast({ title: errText(e, '修改失败'), icon: 'none' })
+		}
+	}
+
+	function editTopic(): void {
+		uni.showModal({
+			title: '群公告',
+			editable: true,
+			content: topic.value,
+			success: (res) => {
+				if (!res.confirm) return
+				const raw = res.content
+				const text = (raw != null) ? raw.trim() : ''
+				saveTopic(text)
+			}
+		})
+	}
+
+	async function saveTopic(text: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			await matrix.setRoomTopic(roomId.value, text)
+			topic.value = text
+			uni.showToast({ title: '已修改', icon: 'success' })
+		} catch (e) {
+			uni.showToast({ title: errText(e, '修改失败'), icon: 'none' })
+		}
+	}
+
+	function onSearchChat(): void {
+		uni.navigateTo({ url: '/pages/search/search?roomId=' + encodeURIComponent(roomId.value) })
+	}
+
+	async function toggleMute(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		const next = !muted.value
+		try {
+			await matrix.setRoomMuted(roomId.value, next)
+			muted.value = next
+		} catch (e) {
+			uni.showToast({ title: errText(e, '设置失败'), icon: 'none' })
+		}
+	}
+
+	async function togglePin(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		const next = !pinned.value
+		try {
+			await matrix.favouriteRoom(roomId.value, next)
+			pinned.value = next
+		} catch (e) {
+			uni.showToast({ title: errText(e, '设置失败'), icon: 'none' })
+		}
+	}
+
+	function onLeave(): void {
+		const title = isGroup.value ? '删除并退出' : '删除聊天'
+		const content = isGroup.value ? '退出后不会通知群聊中其他成员，且不会再接收此群聊消息' : '将删除此聊天，可在通讯录再次发起'
+		uni.showModal({
+			title: title,
+			content: content,
+			success: (res) => {
+				if (res.confirm) leaveNow()
+			}
+		})
+	}
+
+	async function leaveNow(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		uni.showLoading({ title: '处理中…' })
+		try {
+			await matrix.leaveRoom(roomId.value)
+			uni.hideLoading()
+			uni.showToast({ title: '已退出', icon: 'success' })
+			setTimeout((): void => {
+				uni.reLaunch({ url: '/pages/rooms/rooms' })
+			}, 400)
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+		}
+	}
+
+	function optStr(obj: UTSJSONObject, key: string): string {
+		try {
+			const v = obj[key]
+			if (v != null) {
+				const s = '' + v
+				if (s.length > 0 && s != 'null' && s != 'undefined') return s
+			}
+		} catch (e) {}
+		return ''
+	}
+
+	onLoad((options: UTSJSONObject) => {
+		const rid = optStr(options, 'roomId')
+		if (rid.length > 0) {
+			try {
+				roomId.value = decodeURIComponent(rid)
+			} catch (e) {
+				roomId.value = rid
+			}
+		}
+		loadInfo()
+	})
+
+	onShow(() => {
+		if (roomId.value.length > 0) loadInfo()
+	})
+</script>
+
+<style>
+	.group-page {
+		flex: 1;
+		background-color: #ededed;
+		flex-direction: column;
+	}
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		padding: 48rpx 20rpx 16rpx 20rpx;
+		background-color: #ededed;
+	}
+	.back-btn {
+		width: 72rpx;
+	}
+	.back-text {
+		font-size: 56rpx;
+		color: #181818;
+	}
+	.topbar-title {
+		flex: 1;
+		text-align: center;
+		font-size: 34rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.topbar-right {
+		width: 72rpx;
+	}
+	.group-scroll {
+		flex: 1;
+	}
+	.card {
+		background-color: #ffffff;
+		margin-top: 16rpx;
+	}
+	.member-grid {
+		flex-direction: row;
+		flex-wrap: wrap;
+		padding: 24rpx 12rpx 8rpx 12rpx;
+	}
+	.member-cell {
+		width: 140rpx;
+		align-items: center;
+		margin-bottom: 24rpx;
+	}
+	.member-avatar-box {
+		width: 96rpx;
+		height: 96rpx;
+		position: relative;
+	}
+	.member-avatar {
+		width: 96rpx;
+		height: 96rpx;
+		border-radius: 12rpx;
+		background-color: #e0e0e6;
+	}
+	.kick-mark {
+		position: absolute;
+		right: -8rpx;
+		top: -8rpx;
+		width: 32rpx;
+		height: 32rpx;
+		border-radius: 16rpx;
+		background-color: #fa5151;
+		align-items: center;
+		justify-content: center;
+	}
+	.kick-mark-text {
+		color: #ffffff;
+		font-size: 28rpx;
+		font-weight: 700;
+	}
+	.member-add {
+		width: 96rpx;
+		height: 96rpx;
+		border-radius: 12rpx;
+		border-width: 2rpx;
+		border-color: #d8d8d8;
+		border-style: dashed;
+		align-items: center;
+		justify-content: center;
+	}
+	.member-add-text {
+		font-size: 56rpx;
+		color: #b2b2b2;
+	}
+	.member-name {
+		font-size: 22rpx;
+		color: #1a1a1a;
+		margin-top: 8rpx;
+		lines: 1;
+		text-overflow: ellipsis;
+		text-align: center;
+		width: 120rpx;
+	}
+	.more-members {
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		padding: 8rpx 24rpx 24rpx 24rpx;
+	}
+	.more-members-text {
+		font-size: 26rpx;
+		color: #888888;
+	}
+	.cell {
+		flex-direction: row;
+		align-items: center;
+		padding: 28rpx 32rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f2f2f5;
+	}
+	.cell-label {
+		font-size: 32rpx;
+		color: #1a1a1a;
+		flex: 1;
+	}
+	.cell-value {
+		font-size: 28rpx;
+		color: #888888;
+		max-width: 360rpx;
+		lines: 1;
+		text-overflow: ellipsis;
+		text-align: right;
+		margin-right: 8rpx;
+	}
+	.cell-arrow {
+		font-size: 36rpx;
+		color: #c8c8c8;
+	}
+	.wx-switch {
+		width: 102rpx;
+		height: 62rpx;
+		border-radius: 31rpx;
+		background-color: #e5e5e5;
+		padding: 4rpx;
+		flex-direction: row;
+		align-items: center;
+	}
+	.wx-switch-on {
+		background-color: #07c160;
+		justify-content: flex-end;
+	}
+	.wx-switch-dot {
+		width: 54rpx;
+		height: 54rpx;
+		border-radius: 27rpx;
+		background-color: #ffffff;
+	}
+	.leave-wrap {
+		padding: 24rpx 0 80rpx 0;
+	}
+	.leave-btn {
+		background-color: #ffffff;
+		align-items: center;
+		padding: 28rpx 0;
+	}
+	.leave-text {
+		font-size: 32rpx;
+		color: #fa5151;
+	}
+</style>

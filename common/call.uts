@@ -2,7 +2,7 @@
  * 全局 Matrix 通话
  * 任意页面都可响铃；H5 使用 WebRTC，信令走 m.call.*
  */
-import { getMatrix, MatrixEvent, setVoipSink } from './matrix.uts'
+import { getMatrix, MatrixEvent, setVoipSink, jsonObj, jsonArr } from './matrix.uts'
 import { tuneCallWebView, pullCallHtmlMsg, destroyCallEngine } from './call-webview.uts'
 
 export type CallSnapshot = {
@@ -10,11 +10,14 @@ export type CallSnapshot = {
 	roomId: string
 	callId: string
 	peerName: string
+	peerAvatar: string
 	isVideo: boolean
 	isIncoming: boolean
 	sub: string
 	muted: boolean
 	cameraOff: boolean
+	isGroupCall: boolean
+	groupPeerCount: number
 }
 
 type PageRef = {
@@ -28,30 +31,234 @@ function localPart(userId: string): string {
 	return userId.split(':')[0].replace('@', '')
 }
 
-function webrtcReady(): boolean {
+function h5Global(): any | null {
 	// #ifdef H5
 	try {
+		const g = globalThis as any
+		if (g != null) return g
+	} catch (e0) {}
+	try {
 		const w = window as any
-		if (w == null) return false
-		if (typeof w.RTCPeerConnection != 'function') return false
-		if (w.navigator == null) return false
-		if (w.navigator.mediaDevices == null) return false
-		return true
-	} catch (e) {
-		return false
-	}
+		if (w != null) return w
+	} catch (e1) {}
+	// #endif
+	return null
+}
+
+function h5RtcCtor(): any | null {
+	// #ifdef H5
+	const g = h5Global()
+	if (g == null) return null
+	const w = (g['window'] != null) ? g['window'] : g
+	try {
+		if (w['RTCPeerConnection'] != null) return w['RTCPeerConnection']
+	} catch (e0) {}
+	try {
+		if (w['webkitRTCPeerConnection'] != null) return w['webkitRTCPeerConnection']
+	} catch (e1) {}
+	try {
+		if (g['RTCPeerConnection'] != null) return g['RTCPeerConnection']
+	} catch (e2) {}
+	// #endif
+	return null
+}
+
+function h5SecureContext(): boolean {
+	// #ifdef H5
+	const g = h5Global()
+	if (g == null) return false
+	try {
+		if (g['isSecureContext'] == true) return true
+	} catch (e0) {}
+	try {
+		const loc = g['location']
+		if (loc == null) return false
+		const proto = '' + loc['protocol']
+		const host = '' + loc['hostname']
+		if (proto == 'https:') return true
+		if (host == 'localhost' || host == '127.0.0.1' || host == '[::1]' || host == '::1') return true
+		if (host.endsWith('.localhost')) return true
+	} catch (e1) {}
+	return false
 	// #endif
 	return true
 }
 
-function fieldStr(obj: UTSJSONObject, key: string): string {
-	const s = obj.getString(key)
-	if (s != null && s.length > 0) return s
-	const v = obj[key]
-	if (v != null) {
-		const t = '' + v
-		if (t.length > 0 && t != 'null' && t != 'undefined' && t != '[object Object]') return t
+function webrtcHint(): string {
+	// #ifdef H5
+	try {
+		const g = h5Global()
+		if (g != null) {
+			const nav = g['navigator']
+			const ua = (nav != null) ? ('' + nav['userAgent']) : ''
+			if (ua.indexOf('MicroMessenger') >= 0) {
+				return '微信内置浏览器限制通话，请点右上角用系统浏览器打开'
+			}
+			if (!h5SecureContext()) {
+				return '通话需要 https。请用 https 地址打开，首次进入点“高级-继续访问”'
+			}
+		}
+	} catch (e) {}
+	return '当前浏览器不支持 WebRTC 通话'
+	// #endif
+	return '当前环境不支持通话'
+}
+
+function webrtcReady(): boolean {
+	return true
+}
+
+export function unlockH5CallMedia(video: boolean): void {
+	// #ifdef H5
+	try {
+		const g = h5Global()
+		if (g == null) return
+		const fn = g['__unlockCallMedia']
+		if (fn != null) {
+			const p = fn(video)
+			if (p != null) {
+				try {
+					p.then((_s: any) => {}, (e: any | null) => {
+						let hint = ''
+						try {
+							if (e != null && e['__micHint'] != null) hint = '' + e['__micHint']
+						} catch (eH) {}
+						if (hint.length == 0) {
+							const name = (e != null && e['name'] != null) ? ('' + e['name']) : ''
+							if (name == 'NotFoundError' || name == 'DevicesNotFoundError') {
+								hint = '未检测到麦克风，请检查设备或系统权限'
+							} else if (name == 'NotAllowedError' || name == 'PermissionDeniedError') {
+								hint = '请允许浏览器使用麦克风'
+							} else {
+								hint = '无法打开麦克风'
+							}
+						}
+						console.warn('[call] mic unlock', e)
+						uni.showToast({ title: hint, icon: 'none', duration: 3500 })
+					})
+				} catch (eP) {}
+			}
+			return
+		}
+		const nav = g.navigator
+		if (nav == null || nav.mediaDevices == null || nav.mediaDevices.getUserMedia == null) return
+		if (g['__callMediaPromise'] != null) return
+		const cons = JSON.parse(video ? '{"audio":true,"video":true}' : '{"audio":true,"video":false}')
+		const p2 = nav.mediaDevices.getUserMedia(cons)
+		g['__callMediaPromise'] = p2
+		p2.then((stream: any) => {
+			g['__callLocalStream'] = stream
+			g['__callMediaPromise'] = null
+		}, (e2: any | null) => {
+			g['__callMediaPromise'] = null
+			console.warn('[call] mic fallback', e2)
+		})
+	} catch (e) {
+		console.warn('[call] unlock media', e)
 	}
+	// #endif
+}
+
+function h5HasLocalStream(): boolean {
+	// #ifdef H5
+	try {
+		const g = h5Global()
+		if (g == null) return false
+		const st = g['__callLocalStream']
+		if (st == null) return false
+		try {
+			const tracks = st.getTracks()
+			if (tracks != null) {
+				for (let i = 0; i < tracks.length; i++) {
+					if (tracks[i].readyState == 'live') return true
+				}
+			}
+		} catch (eT) {
+			return true
+		}
+	} catch (e) {}
+	// #endif
+	return false
+}
+
+function waitH5Mic(ms: number): Promise<boolean> {
+	return new Promise((resolve: (ok: boolean) => void) => {
+		// #ifdef H5
+		const t0 = Date.now()
+		const tick = (): void => {
+			if (h5HasLocalStream()) {
+				resolve(true)
+				return
+			}
+			if (Date.now() - t0 >= ms) {
+				resolve(false)
+				return
+			}
+			setTimeout(tick, 250)
+		}
+		tick()
+		return
+		// #endif
+		resolve(true)
+	})
+}
+
+export function h5TapRunAnswer(): void {
+	const mgr = getCallManager()
+	unlockH5CallMedia(mgr.isVideo)
+	// #ifdef H5
+	try {
+		const g = h5Global()
+		if (g != null && g['runAnswer'] != null) g['runAnswer']()
+	} catch (e) {}
+	// #endif
+}
+
+function preloadH5EngineJs(): void {
+	// #ifdef H5
+	try {
+		const g = h5Global()
+		if (g == null) return
+		if (g['__callJson'] != null) return
+		if (g['__callEngineFetching'] == true) return
+		g['__callEngineFetching'] = true
+		uni.request({
+			url: '/static/call-engine.js',
+			method: 'GET',
+			dataType: 'text',
+			success: (res) => {
+				try {
+					if (g['__callJson'] != null) return
+					const code = '' + res.data
+					const ev = g['eval']
+					if (ev != null) ev(code)
+					console.log('[call] preload engine', code.length)
+				} catch (eEval) {
+					g['__callEngineFetching'] = false
+					console.warn('[call] preload engine fail', eEval)
+				}
+			},
+			fail: () => {
+				g['__callEngineFetching'] = false
+				console.warn('[call] preload engine fetch fail')
+			}
+		})
+	} catch (e) {}
+	// #endif
+}
+
+function fieldStr(obj: UTSJSONObject, key: string): string {
+	try {
+		const v = obj[key]
+		if (v != null) {
+			const t = '' + v
+			if (t.length > 0 && t != 'null' && t != 'undefined' && t != '[object Object]') return t
+		}
+	} catch (e0) {}
+	try {
+		const s = obj.getString(key)
+		if (s != null && s.length > 0) return s
+	} catch (e1) {}
 	try {
 		const m = obj.toMap()
 		let found = ''
@@ -66,13 +273,132 @@ function fieldStr(obj: UTSJSONObject, key: string): string {
 	return ''
 }
 
+function looksLikeSdp(s: string): boolean {
+	if (s.length < 20) return false
+	if (s.indexOf('v=') >= 0) return true
+	if (s.indexOf('m=audio') >= 0) return true
+	if (s.indexOf('m=video') >= 0) return true
+	return false
+}
+
+function rtcSdp(desc: any | null): string {
+	if (desc == null) return ''
+	try {
+		const v = desc.sdp
+		const s = (v != null) ? ('' + v) : ''
+		if (looksLikeSdp(s)) return s
+	} catch (e0) {}
+	try {
+		const v2 = desc['sdp']
+		const s2 = (v2 != null) ? ('' + v2) : ''
+		if (looksLikeSdp(s2)) return s2
+	} catch (e1) {}
+	try {
+		const t = JSON.stringify(desc)
+		if (t != null && t.length > 20) {
+			const o = JSON.parse(t) as UTSJSONObject
+			const s3 = fieldStr(o, 'sdp')
+			if (looksLikeSdp(s3)) return s3
+		}
+	} catch (e2) {}
+	return ''
+}
+
+function pickCallSdp(content: UTSJSONObject): string {
+	const offer = jsonObj(content, 'offer')
+	let sdp = fieldStr(offer, 'sdp')
+	if (looksLikeSdp(sdp)) return sdp
+	const desc = jsonObj(content, 'description')
+	sdp = fieldStr(desc, 'sdp')
+	if (looksLikeSdp(sdp)) return sdp
+	const answer = jsonObj(content, 'answer')
+	sdp = fieldStr(answer, 'sdp')
+	if (looksLikeSdp(sdp)) return sdp
+	sdp = fieldStr(content, 'sdp')
+	if (looksLikeSdp(sdp)) return sdp
+	try {
+		const raw = JSON.stringify(content)
+		if (raw != null && raw.length > 20) {
+			const parsed = JSON.parse(raw) as UTSJSONObject
+			const o2 = jsonObj(parsed, 'offer')
+			sdp = fieldStr(o2, 'sdp')
+			if (looksLikeSdp(sdp)) return sdp
+			sdp = fieldStr(jsonObj(parsed, 'answer'), 'sdp')
+			if (looksLikeSdp(sdp)) return sdp
+			sdp = fieldStr(parsed, 'sdp')
+			if (looksLikeSdp(sdp)) return sdp
+		}
+	} catch (e) {}
+	return ''
+}
+
+function parseCallJson(text: string): UTSJSONObject {
+	const empty: UTSJSONObject = {}
+	try {
+		if (text.length > 2) return JSON.parse(text) as UTSJSONObject
+	} catch (e) {}
+	return empty
+}
+
+function rtcAwait(p: any | null): Promise<any | null> {
+	return new Promise((resolve: (v: any | null) => void, reject: (e: any) => void) => {
+		if (p == null) {
+			resolve(null)
+			return
+		}
+		try {
+			p.then((v: any | null) => {
+				resolve(v)
+			}, (err: any) => {
+				reject(err)
+			})
+		} catch (e) {
+			resolve(p)
+		}
+	})
+}
+
+function rtcDesc(kind: string, sdp: string): any {
+	const text = '{"type":' + JSON.stringify(kind) + ',"sdp":' + JSON.stringify(sdp) + '}'
+	return JSON.parse(text)
+}
+
+function rtcIceInit(candidate: string, sdpMid: string, sdpMLineIndex: number): any {
+	const mid = ('' + sdpMLineIndex)
+	const text = '{"candidate":' + JSON.stringify(candidate) + ',"sdpMid":' + JSON.stringify(sdpMid) + ',"sdpMLineIndex":' + mid + '}'
+	return JSON.parse(text)
+}
+
+function rtcMediaCons(isVideo: boolean, facing: string): any {
+	if (isVideo) {
+		const text = '{"audio":true,"video":{"facingMode":' + JSON.stringify(facing) + '}}'
+		return JSON.parse(text)
+	}
+	return JSON.parse('{"audio":true,"video":false}')
+}
+
 function makePartyId(): string {
 	const n = Date.now().toString()
 	const r = Math.floor(Math.random() * 1000000).toString()
 	return 'p' + n + r
 }
 
-function formatCallDur(sec: number): string {
+function shortUserKey(userId: string): string {
+	let s = userId
+	s = s.split('@').join('')
+	s = s.split(':').join('_')
+	s = s.split('/').join('_')
+	if (s.length > 48) s = s.substring(0, 48)
+	return s
+}
+
+function pairCallId(groupId: string, a: string, b: string): string {
+	const x = a < b ? a : b
+	const y = a < b ? b : a
+	return groupId + '_' + shortUserKey(x) + '_' + shortUserKey(y)
+}
+
+export function formatCallDur(sec: number): string {
 	let s = sec
 	if (s < 0) s = 0
 	const m = Math.floor(s / 60)
@@ -87,6 +413,7 @@ export class CallManager {
 	roomId: string = ''
 	callId: string = ''
 	peerName: string = ''
+	peerAvatar: string = ''
 	isVideo: boolean = false
 	isIncoming: boolean = false
 	sub: string = ''
@@ -105,12 +432,15 @@ export class CallManager {
 	localStream: any | null = null
 	pendingRemoteSdp: string = ''
 	pendingIce: Array<UTSJSONObject> = []
+	iceBufText: Array<string> = []
+	iceFlushBusy: boolean = false
 	remoteDescReady: boolean = false
 	timer: number | null = null
 	navigating: boolean = false
 	pageOpen: boolean = false
 	leaving: boolean = false
 	htmlEval: ((js: string) => void) | null = null
+	htmlPost: ((json: string) => void) | null = null
 	htmlReady: boolean = false
 	htmlLoaded: boolean = false
 	offerSent: boolean = false
@@ -130,11 +460,22 @@ export class CallManager {
 	initiatorId: string = ''
 	outgoingReady: boolean = false
 	incomingArmed: boolean = false
+	incomingPrompted: boolean = false
+	recordedCallIds: Array<string> = []
+	closedCallIds: Array<string> = []
 	lastInvite: UTSJSONObject | null = null
 	leaveGen: number = 0
 	signalTimer: number | null = null
 	signalBusy: boolean = false
 	seenVoip: Array<string> = []
+	micWaitN: number = 0
+	pendingAnswerSdp: string = ''
+	isGroupCall: boolean = false
+	groupCallId: string = ''
+	groupPeerIds: Array<string> = []
+	groupPeerCallIds: Array<string> = []
+	groupConnectedN: number = 0
+	groupMeshDone: boolean = false
 
 	getSnapshot(): CallSnapshot {
 		return {
@@ -142,12 +483,64 @@ export class CallManager {
 			roomId: this.roomId,
 			callId: this.callId,
 			peerName: this.peerName,
+			peerAvatar: this.peerAvatar,
 			isVideo: this.isVideo,
 			isIncoming: this.isIncoming,
 			sub: this.sub,
 			muted: this.muted,
-			cameraOff: this.cameraOff
+			cameraOff: this.cameraOff,
+			isGroupCall: this.isGroupCall,
+			groupPeerCount: this.groupPeerIds.length
 		}
+	}
+
+	groupPeerCallIdOf(peerId: string): string {
+		for (let i = 0; i < this.groupPeerIds.length; i++) {
+			if (this.groupPeerIds[i] == peerId) return this.groupPeerCallIds[i]
+		}
+		return ''
+	}
+
+	setGroupPeerCallId(peerId: string, callId: string): void {
+		for (let i = 0; i < this.groupPeerIds.length; i++) {
+			if (this.groupPeerIds[i] == peerId) {
+				this.groupPeerCallIds[i] = callId
+				return
+			}
+		}
+		this.groupPeerIds.push(peerId)
+		this.groupPeerCallIds.push(callId)
+	}
+
+	peerOfCallId(callId: string): string {
+		for (let i = 0; i < this.groupPeerCallIds.length; i++) {
+			if (this.groupPeerCallIds[i] == callId) return this.groupPeerIds[i]
+		}
+		return ''
+	}
+
+	parseGroupPeers(content: UTSJSONObject): Array<string> {
+		const out: Array<string> = []
+		try {
+			const arr = content.getArray('group_peers')
+			if (arr != null) {
+				for (let i = 0; i < arr.length; i++) {
+					const s = '' + arr[i]
+					if (s.length > 2 && s.indexOf('@') == 0 && out.indexOf(s) < 0) out.push(s)
+				}
+			}
+		} catch (e0) {}
+		if (out.length == 0) {
+			const raw = fieldStr(content, 'group_peers')
+			if (raw.length > 2) {
+				const parts = raw.split(',')
+				for (let j = 0; j < parts.length; j++) {
+					const p = parts[j].trim()
+					if (p.length > 2 && p.indexOf('@') == 0 && out.indexOf(p) < 0) out.push(p)
+				}
+			}
+		}
+		return out
 	}
 
 	onChange(fn: CallListener): () => void {
@@ -183,6 +576,7 @@ export class CallManager {
 		snap['roomId'] = this.roomId
 		snap['sdp'] = this.pendingRemoteSdp
 		snap['name'] = this.peerName
+		snap['avatar'] = this.peerAvatar
 		snap['sub'] = this.sub
 		snap['peer'] = this.peerUserId
 		snap['incoming'] = this.isIncoming ? '1' : '0'
@@ -228,6 +622,7 @@ export class CallManager {
 		this.roomId = fieldStr(snap, 'roomId')
 		this.pendingRemoteSdp = fieldStr(snap, 'sdp')
 		this.peerName = fieldStr(snap, 'name')
+		this.peerAvatar = fieldStr(snap, 'avatar')
 		this.sub = fieldStr(snap, 'sub')
 		this.peerUserId = fieldStr(snap, 'peer')
 		this.isIncoming = fieldStr(snap, 'incoming') == '1'
@@ -319,7 +714,6 @@ export class CallManager {
 
 	async tickSignalPoll(): Promise<void> {
 		if (this.signalBusy) return
-		if (this.phase == 'idle' || this.phase == 'ended') return
 		const matrix = getMatrix()
 		if (matrix == null) return
 		this.signalBusy = true
@@ -336,7 +730,11 @@ export class CallManager {
 				for (let j = 0; j < evs.length; j++) {
 					const t = evs[j].type
 					if (t == 'm.call.candidates') continue
-					if (t == 'm.call.invite') continue
+					if (this.phase == 'idle' || this.phase == 'ended') {
+						if (t != 'm.call.invite') continue
+					} else if (t == 'm.call.invite') {
+						continue
+					}
 					this.handleEvent(evs[j], rooms[i])
 				}
 			}
@@ -356,15 +754,20 @@ export class CallManager {
 		return n
 	}
 
-	openPage(): void {
+	.openPage(): void {
 		if (this.phase == 'idle') return
 		this.leaving = false
-		if (this.pageOpen || this.navigating) return
+		if (this.pageOpen) {
+			console.log('[call] call page already open')
+			return
+		}
 		if (this.countCallPages() > 0) {
 			this.pageOpen = true
+			this.navigating = false
 			console.log('[call] call page already in stack')
 			return
 		}
+		if (this.navigating) return
 		this.navigating = true
 		this.pageOpen = true
 		console.log('[call] navigate to call page')
@@ -419,11 +822,16 @@ export class CallManager {
 		const matrix = getMatrix()
 		const rid = this.roomId
 		if (matrix == null || rid.length == 0) return
-		content['room_id'] = rid
+		let payload = content
+		try {
+			const t = JSON.stringify(content)
+			if (t != null && t.length > 2) payload = JSON.parse(t) as UTSJSONObject
+		} catch (e0) {}
+		payload['room_id'] = rid
 		const peer = this.peerUserId.length > 0 ? this.peerUserId : this.inviteeId
 		if (peer.length > 0 && (type == 'm.call.hangup' || type == 'm.call.reject' || type == 'm.call.invite' || type == 'm.call.answer' || type == 'm.call.candidates' || type == 'm.call.negotiate')) {
 			try {
-				await matrix.sendToDeviceUser(peer, type, content)
+				await matrix.sendToDeviceUser(peer, type, payload)
 				console.log('[call] to-device', type, '->', peer)
 			} catch (e2) {
 				console.warn('[call] to-device fail', type, e2)
@@ -432,11 +840,11 @@ export class CallManager {
 			console.warn('[call] invite without peer, to-device skipped')
 		}
 		try {
-			await matrix.sendRawEvent(rid, type, content, matrix.genTxnId())
+			await matrix.sendRawEvent(rid, type, payload, matrix.genTxnId())
 			console.log('[call] sent', type)
 		} catch (e) {
 			console.error('[call] send fail', type, e)
-			throw e
+			if (type != 'm.call.candidates') throw e
 		}
 	}
 
@@ -517,6 +925,36 @@ export class CallManager {
 		return list
 	}
 
+	async iceServersText(): Promise<string> {
+		const parts: Array<string> = []
+		parts.push('{"urls":"stun:stun.l.google.com:19302"}')
+		try {
+			const matrix = getMatrix()
+			if (matrix != null) {
+				const turn = await matrix.getTurnServer()
+				const uris: Array<string> = []
+				try {
+					const raw = turn['uris']
+					const arr = raw as Array<any>
+					if (arr != null && arr.length != null) {
+						for (let i = 0; i < arr.length; i++) {
+							const s = '' + arr[i]
+							if (s.length > 0 && s != 'null' && s != 'undefined') uris.push(s)
+						}
+					}
+				} catch (e0) {}
+				const username = fieldStr(turn, 'username')
+				const credential = fieldStr(turn, 'password')
+				if (uris.length > 0) {
+					parts.push('{"urls":' + JSON.stringify(uris) + ',"username":' + JSON.stringify(username) + ',"credential":' + JSON.stringify(credential) + '}')
+				}
+			}
+		} catch (e) {
+			console.warn('[call] TURN 不可用，仅 STUN', e)
+		}
+		return '[' + parts.join(',') + ']'
+	}
+
 	attachDom(): void {
 		const stream = this.localStream
 		if (stream != null && this.isVideo) this.attachStream('.call-local', stream, true)
@@ -563,43 +1001,82 @@ export class CallManager {
 
 	async ensurePeer(): Promise<boolean> {
 		if (this.rtcPc != null) return true
-		if (!webrtcReady()) {
-			uni.showToast({ title: '当前环境不支持通话，请用系统浏览器打开', icon: 'none' })
+		// #ifdef H5
+		try {
+			const g = h5Global()
+			let RTC = h5RtcCtor()
+			if (RTC == null && g != null) {
+				try { RTC = g.RTCPeerConnection } catch (e0) {}
+			}
+			if (RTC == null) {
+				try {
+					const w = window as any
+					RTC = w.RTCPeerConnection
+				} catch (e1) {}
+			}
+			if (RTC == null) {
+				uni.showToast({ title: webrtcHint(), icon: 'none' })
+				return false
+			}
+			let iceJson = '[{"urls":"stun:stun.l.google.com:19302"}]'
+			try {
+				iceJson = await this.iceServersText()
+			} catch (eIce) {}
+			const rtcCfg = JSON.parse('{"iceServers":' + iceJson + '}')
+			this.rtcPc = new RTC(rtcCfg)
+			this.rtcPc.onicecandidate = (ev: any) => {
+				if (ev == null || ev.candidate == null) return
+				const cand = '' + ev.candidate.candidate
+				if (cand.length == 0) return
+				const mid = (ev.candidate.sdpMid != null) ? ('' + ev.candidate.sdpMid) : ''
+				let idx = 0
+				try {
+					const n = ev.candidate.sdpMLineIndex
+					if (n != null) idx = n as number
+				} catch (eIdx) {}
+				this.sendCandidates(cand, mid, idx)
+			}
+			this.rtcPc.ontrack = (ev: any) => {
+				const g = h5Global()
+				let stream = (ev.streams != null && ev.streams.length > 0) ? ev.streams[0] : null
+				if (stream == null && g != null && g.MediaStream != null) {
+					stream = new g.MediaStream([ev.track])
+				}
+				if (stream != null) this.attachStream('.call-remote', stream, false)
+			}
+			this.rtcPc.oniceconnectionstatechange = () => {
+				try {
+					const s = '' + this.rtcPc.iceConnectionState
+					console.log('[call] ice', s)
+					if (s == 'connected' || s == 'completed') {
+						this.noteConnected()
+						this.emit()
+					} else if (s == 'failed') {
+						this.sub = '连接失败'
+						this.emit()
+						this.hangup(true)
+					}
+				} catch (eIceSt) {}
+			}
+			this.rtcPc.onconnectionstatechange = () => {
+				try {
+					const s = this.rtcPc.connectionState as string
+					if (s == 'connected') {
+						this.noteConnected()
+						this.emit()
+					} else if (s == 'failed') {
+						this.sub = '连接失败'
+						this.emit()
+						this.hangup(true)
+					}
+				} catch (e) {}
+			}
+			return true
+		} catch (e) {
+			console.warn('[call] ensurePeer', e)
+			uni.showToast({ title: webrtcHint(), icon: 'none' })
 			return false
 		}
-		// #ifdef H5
-		const ice = await this.buildIce()
-		this.rtcPc = new (window as any).RTCPeerConnection({ iceServers: ice })
-		this.rtcPc.onicecandidate = (ev: any) => {
-			if (ev == null || ev.candidate == null) return
-			const c = this.baseCallContent()
-			const one: UTSJSONObject = {}
-			one['candidate'] = ev.candidate.candidate
-			one['sdpMid'] = ev.candidate.sdpMid
-			one['sdpMLineIndex'] = ev.candidate.sdpMLineIndex
-			const arr: Array<UTSJSONObject> = []
-			arr.push(one)
-			c['candidates'] = arr
-			this.send('m.call.candidates', c)
-		}
-		this.rtcPc.ontrack = (ev: any) => {
-			const stream = (ev.streams != null && ev.streams.length > 0) ? ev.streams[0] : new (window as any).MediaStream([ev.track])
-			this.attachStream('.call-remote', stream, false)
-		}
-		this.rtcPc.onconnectionstatechange = () => {
-			try {
-				const s = this.rtcPc.connectionState as string
-				if (s == 'connected') {
-					this.noteConnected()
-					this.emit()
-				} else if (s == 'failed') {
-					this.sub = '连接失败'
-					this.emit()
-					this.hangup(true)
-				}
-			} catch (e) {}
-		}
-		return true
 		// #endif
 		return true
 	}
@@ -607,15 +1084,16 @@ export class CallManager {
 	async addLocalMedia(): Promise<boolean> {
 		// #ifdef H5
 		try {
-			this.localStream = await (window as any).navigator.mediaDevices.getUserMedia({
-				audio: {
-					echoCancellation: true,
-					noiseSuppression: true,
-					autoGainControl: true,
-					channelCount: 1
-				},
-				video: this.isVideo ? { facingMode: this.camRear ? 'environment' : 'user' } : false
-			})
+			const g = h5Global()
+			const nav = (g != null && g.navigator != null) ? g.navigator : null
+			const devices = (nav != null) ? nav.mediaDevices : null
+			if (devices == null || devices.getUserMedia == null) {
+				uni.showToast({ title: webrtcHint(), icon: 'none' })
+				return false
+			}
+			const facing = this.camRear ? 'environment' : 'user'
+			const cons = rtcMediaCons(this.isVideo, facing)
+			this.localStream = await rtcAwait(devices.getUserMedia(cons))
 			const stream = this.localStream
 			const pc = this.rtcPc
 			if (pc != null && stream != null) {
@@ -643,7 +1121,19 @@ export class CallManager {
 		const pc = this.rtcPc
 		if (pc == null || !this.remoteDescReady) return
 		for (let i = 0; i < this.pendingIce.length; i++) {
-			try { await pc.addIceCandidate(this.pendingIce[i]) } catch (e) {}
+			try {
+				const ice = this.pendingIce[i]
+				const cand = fieldStr(ice, 'candidate')
+				if (cand.length == 0) continue
+				const mid = fieldStr(ice, 'sdpMid')
+				const midRaw = fieldStr(ice, 'sdpMLineIndex')
+				let idx = 0
+				if (midRaw.length > 0) {
+					const n = parseFloat(midRaw)
+					if (n == n) idx = n
+				}
+				await rtcAwait(pc.addIceCandidate(rtcIceInit(cand, mid, idx)))
+			} catch (e) {}
 		}
 		this.pendingIce = []
 		// #endif
@@ -675,7 +1165,7 @@ export class CallManager {
 			return false
 		}
 		if (!webrtcReady()) {
-			uni.showToast({ title: '当前环境不支持通话，请用系统浏览器打开', icon: 'none' })
+			uni.showToast({ title: webrtcHint(), icon: 'none' })
 			return false
 		}
 		this.phase = 'outgoing'
@@ -696,6 +1186,7 @@ export class CallManager {
 		this.inviteeId = ''
 		this.outgoingReady = false
 		this.incomingArmed = false
+		this.incomingPrompted = false
 		this.lastInvite = null
 		this.streamId = 'usermedia'
 		this.sub = isVideo ? '正在呼叫（视频）…' : '正在呼叫（语音）…'
@@ -704,6 +1195,9 @@ export class CallManager {
 		this.camRear = false
 		this.peerName = '对方'
 		this.emit()
+		this.kickTurn()
+		preloadH5EngineJs()
+		unlockH5CallMedia(isVideo)
 		// #ifdef APP-ANDROID
 		try {
 			await new Promise((resolve: (ok: boolean) => void) => {
@@ -727,27 +1221,56 @@ export class CallManager {
 			return false
 		}
 		this.initiatorId = matrix.userId
+		this.isGroupCall = false
+		this.groupCallId = ''
+		this.groupPeerIds = []
+		this.groupPeerCallIds = []
+		this.groupConnectedN = 0
+		this.groupMeshDone = false
 		try {
-			const members = await matrix.getJoinedMembers(roomId)
 			const others: Array<string> = []
+			const members = await matrix.getJoinedMembers(roomId)
 			for (let i = 0; i < members.length; i++) {
 				const u = members[i]
-				if (u != matrix.userId) others.push(u)
+				if (u.length > 0 && u != matrix.userId && others.indexOf(u) < 0) others.push(u)
 			}
-			if (others.length > 0) {
+			if (others.length == 0) {
+				const list = await matrix.getRoomMembers(roomId)
+				for (let j = 0; j < list.length; j++) {
+					const u2 = list[j].user_id
+					const mem = list[j].membership
+					if (u2.length == 0 || u2 == matrix.userId) continue
+					if (mem != 'join' && mem != 'invite') continue
+					if (others.indexOf(u2) < 0) others.push(u2)
+				}
+			}
+			if (others.length > 1) {
+				this.isGroupCall = true
+				this.isVideo = false
+				this.groupCallId = 'g' + Date.now().toString()
+				this.callId = this.groupCallId
+				for (let gi = 0; gi < others.length && gi < 8; gi++) {
+					const pid = others[gi]
+					this.groupPeerIds.push(pid)
+					this.groupPeerCallIds.push(pairCallId(this.groupCallId, matrix.userId, pid))
+				}
+				this.inviteeId = ''
+				this.peerUserId = ''
+				this.peerName = '群语音(' + this.groupPeerIds.length + '人)'
+				this.sub = '正在呼叫群成员…'
+				console.log('[call] group voice peers', this.groupPeerIds.length, this.groupPeerIds.join(','))
+			} else if (others.length > 0) {
 				this.inviteeId = others[0]
 				this.peerUserId = others[0]
-			}
-			console.log('[call] room members', members.length, 'peers', others.length, others.join(','))
-			if (others.length == 0) {
-				uni.showToast({ title: '对方不在房间内，无法呼叫', icon: 'none' })
-			}
-			if (others.length > 0) {
 				const u0 = others[0]
 				const cached = matrix.getCachedUserName(u0)
 				if (cached.length > 0) this.peerName = cached
 				else this.peerName = localPart(u0)
-				this.emit()
+				this.fillPeerProfile()
+				console.log('[call] room members', members.length, 'peers', others.length, others.join(','))
+			} else {
+				console.log('[call] room members', members.length, 'peers 0')
+				uni.showToast({ title: '对方不在房间内，无法呼叫', icon: 'none' })
 			}
 		} catch (e) {}
 		this.outgoingReady = true
@@ -760,42 +1283,86 @@ export class CallManager {
 	async placeOutgoing(): Promise<void> {
 		if (this.phase != 'outgoing') return
 		if (!this.outgoingReady) return
-		// #ifdef H5
-		if (this.offerStarted) return
-		this.offerStarted = true
-		if (!(await this.ensurePeer())) { this.hangup(false); return }
-		if (!(await this.addLocalMedia())) { this.hangup(false); return }
-		try {
-			const pc = this.rtcPc
-			if (pc == null) { this.hangup(false); return }
-			const offer = await pc.createOffer()
-			await pc.setLocalDescription(offer)
-			const sdp = `${offer.sdp}`
-			await this.sendInvite(sdp)
-		} catch (e) {
-			uni.showToast({ title: `${e}`, icon: 'none' })
-			this.hangup(false)
-			return
-		}
-		this.armTimeout()
-		// #endif
-		// #ifndef H5
 		await this.appOffer()
-		// #endif
+	}
+
+	fillPeerProfile(): void {
+		const uid = this.peerUserId
+		const rid = this.roomId
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (uid.length > 0) {
+			const cached = matrix.getCachedUserName(uid)
+			if (cached.length > 0) this.peerName = cached
+			const mxc = matrix.userAvatars.get(uid) ?? ''
+			if (mxc.length > 0) {
+				const http = matrix.mxcToHttp(mxc, 240, 240)
+				if (http.length > 0) this.peerAvatar = http
+			}
+		}
+		const cache = matrix.listRoomsCache
+		if (this.peerAvatar.length == 0 && rid.length > 0 && cache != null) {
+			const rooms = cache.rooms
+			let i = 0
+			while (i < rooms.length) {
+				const r = rooms[i]
+				if (r.room_id == rid) {
+					const av = r.avatar_url
+					if (av != null && av.length > 0) {
+						const http2 = matrix.mxcToHttp(av, 240, 240)
+						if (http2.length > 0) this.peerAvatar = http2
+					}
+					const n = r.name
+					if (n != null && n.length > 0 && (this.peerName.length == 0 || this.peerName == '对方')) {
+						this.peerName = n
+					}
+					break
+				}
+				i++
+			}
+		}
+		this.emit()
+		if (uid.length > 0) this.loadPeerProfile(uid)
+	}
+
+	async loadPeerProfile(uid: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const p = await matrix.getProfile(uid)
+			if (this.peerUserId != uid) return
+			const dn = p.display_name
+			if (dn.length > 0 && dn.indexOf('@') != 0) {
+				this.peerName = dn
+				matrix.cacheUserName(uid, dn)
+			}
+			const av2 = p.avatar_url
+			if (av2.length > 0) {
+				matrix.userAvatars.set(uid, av2)
+				const http3 = matrix.mxcToHttp(av2, 240, 240)
+				if (http3.length > 0) this.peerAvatar = http3
+			}
+			this.emit()
+		} catch (e) {}
 	}
 
 	htmlStr(msg: UTSJSONObject, key: string): string {
-		const gs = msg.getString(key)
-		if (gs != null && gs.length > 0 && gs != 'null') return gs
-		const v = msg[key]
-		if (v == null) return ''
-		const s = '' + v
-		if (s.length == 0 || s == 'null' || s == 'undefined') return ''
-		return s
+		try {
+			const v = msg[key]
+			if (v != null) {
+				const s = '' + v
+				if (s.length > 0 && s != 'null' && s != 'undefined' && s != '[object Object]') return s
+			}
+		} catch (e0) {}
+		try {
+			const gs = msg.getString(key)
+			if (gs != null && gs.length > 0 && gs != 'null') return gs
+		} catch (e1) {}
+		return ''
 	}
 
 	packHtmlMsg(msg: UTSJSONObject): string {
-		const keys: Array<string> = ['cmd', 'ice', 'video', 'sdp', 'hs', 'token', 'room', 'call', 'party', 'invitee', 'name', 'sub', 'phase', 'incoming', 'candidate', 'sdpMid', 'off']
+		const keys: Array<string> = ['cmd', 'ice', 'video', 'sdp', 'hs', 'token', 'room', 'call', 'party', 'invitee', 'name', 'sub', 'phase', 'incoming', 'candidate', 'sdpMid', 'off', 'peers', 'peer']
 		const parts: Array<string> = []
 		for (let i = 0; i < keys.length; i++) {
 			const k = keys[i]
@@ -811,19 +1378,26 @@ export class CallManager {
 	}
 
 	sendToHtml(msg: UTSJSONObject): void {
-		const fn = this.htmlEval
-		if (fn == null) {
-			if (this.htmlStr(msg, 'cmd') != 'hangup' && this.htmlStr(msg, 'cmd') != 'unlock') {
-				console.warn('[call] htmlEval null', this.htmlStr(msg, 'cmd'))
-			}
-			return
-		}
 		const text = this.packHtmlMsg(msg)
 		if (text == '{}') {
 			console.warn('[call] empty html payload')
 			return
 		}
-		console.log('[call] eval', this.htmlStr(msg, 'cmd'), text.length)
+		const cmd = this.htmlStr(msg, 'cmd')
+		const poster = this.htmlPost
+		if (poster != null) {
+			console.log('[call] post', cmd, text.length)
+			poster(text)
+			return
+		}
+		const fn = this.htmlEval
+		if (fn == null) {
+			if (cmd != 'hangup' && cmd != 'unlock') {
+				console.warn('[call] htmlEval null', cmd)
+			}
+			return
+		}
+		console.log('[call] eval', cmd, text.length)
 		fn('window.__callJson(' + text + ')')
 	}
 
@@ -834,7 +1408,18 @@ export class CallManager {
 		msg['sub'] = this.sub
 		msg['phase'] = this.phase
 		msg['incoming'] = this.isIncoming ? '1' : '0'
+		msg['video'] = this.isVideo ? '1' : '0'
 		this.sendToHtml(msg)
+	}
+
+	replayRemoteAnswer(): void {
+		if (this.pendingAnswerSdp.length == 0) return
+		if (!this.engineReady()) return
+		const msg: UTSJSONObject = {}
+		msg['cmd'] = 'remoteAnswer'
+		msg['sdp'] = this.pendingAnswerSdp
+		this.sendToHtml(msg)
+		this.flushAppIce()
 	}
 
 	waitHtmlLoop(n: number): Promise<boolean> {
@@ -868,7 +1453,12 @@ export class CallManager {
 		if (sdp.length > 0) msg['sdp'] = sdp
 		const matrix = getMatrix()
 		if (matrix != null) {
+			// #ifdef H5
+			msg['hs'] = ''
+			// #endif
+			// #ifndef H5
 			msg['hs'] = matrix.homeserver
+			// #endif
 			msg['token'] = matrix.accessToken
 		}
 		msg['room'] = this.roomId
@@ -888,7 +1478,12 @@ export class CallManager {
 		msg['video'] = this.isVideo ? '1' : '0'
 		const matrix = getMatrix()
 		if (matrix != null) {
+			// #ifdef H5
+			msg['hs'] = ''
+			// #endif
+			// #ifndef H5
 			msg['hs'] = matrix.homeserver
+			// #endif
 			msg['token'] = matrix.accessToken
 		}
 		msg['room'] = this.roomId
@@ -942,21 +1537,75 @@ export class CallManager {
 
 	fillHtmlIce(msg: UTSJSONObject): void {
 		if (this.turnIce.length < 8) {
-			this.turnIce = '[{"urls":"stun:stun.l.google.com:19302"}]'
+			this.turnIce = '[{"urls":"stun:stun.l.google.com:19302"},{"urls":"stun:stun1.l.google.com:19302"}]'
 		}
 		msg['ice'] = this.turnIce
 		this.kickTurn()
 	}
 
+	engineReady(): boolean {
+		if (this.htmlLoaded == false) return false
+		if (this.htmlPost != null) return true
+		if (this.htmlEval != null) return true
+		return false
+	}
+
+	waitTurn(): Promise<boolean> {
+		return new Promise((resolve: (ok: boolean) => void) => {
+			this.kickTurn()
+			if (this.turnIce.indexOf('turn:') >= 0 || this.turnIce.indexOf('turns:') >= 0) {
+				resolve(true)
+				return
+			}
+			setTimeout(() => {
+				resolve(true)
+			}, 2500)
+		})
+	}
+
 	async appOffer(): Promise<void> {
 		if (this.phase != 'outgoing') return
 		if (this.offerSent || this.invitePosted) return
-		if (this.htmlEval == null || this.htmlLoaded == false) {
+		if (!this.engineReady()) {
 			console.log('[call] startOffer wait engine')
+			setTimeout(() => {
+				if (this.phase == 'outgoing' && this.offerStarted == false) this.appOffer()
+			}, 400)
 			return
 		}
+		// #ifdef H5
+		if (!h5HasLocalStream()) {
+			unlockH5CallMedia(this.isVideo)
+			console.log('[call] startOffer wait mic')
+			const got = await waitH5Mic(8000)
+			if (this.phase != 'outgoing') return
+			if (!got && !h5HasLocalStream()) {
+				console.warn('[call] startOffer mic timeout')
+				uni.showToast({ title: '无法打开麦克风', icon: 'none' })
+				this.hangup(false)
+				return
+			}
+		}
+		// #endif
 		if (this.offerStarted) return
 		this.offerStarted = true
+		await this.waitTurn()
+		if (this.phase != 'outgoing') return
+		if (this.isGroupCall && this.groupPeerIds.length > 0) {
+			const msg = this.buildHtmlStart('startGroupOffer', '')
+			this.fillHtmlIce(msg)
+			msg['peers'] = this.groupPeerIds.join(',')
+			msg['video'] = '0'
+			this.sendToHtml(msg)
+			this.armTimeout()
+			this.sub = '正在呼叫群成员…'
+			this.emit()
+			this.pushUi()
+			this.htmlPollN = 0
+			this.scheduleHtmlPoll()
+			console.log('[call] startGroupOffer sent', this.groupPeerIds.length)
+			return
+		}
 		const msg = this.buildHtmlStart('startOffer', '')
 		this.fillHtmlIce(msg)
 		this.sendToHtml(msg)
@@ -975,18 +1624,49 @@ export class CallManager {
 			console.warn('[call] appAnswer without remote sdp')
 			return
 		}
-		if (this.htmlEval == null || this.htmlLoaded == false) {
+		if (!this.engineReady()) {
 			console.log('[call] startAnswer wait engine')
+			setTimeout(() => {
+				if ((this.phase == 'connecting' || this.phase == 'ringing') && this.answerStarted == false) this.appAnswer()
+			}, 400)
 			return
 		}
+		// #ifdef H5
+		if (!h5HasLocalStream()) {
+			unlockH5CallMedia(this.isVideo)
+			console.log('[call] startAnswer wait mic')
+			const got = await waitH5Mic(8000)
+			if (this.phase != 'connecting' && this.phase != 'ringing') return
+			if (!got && !h5HasLocalStream()) {
+				console.warn('[call] startAnswer mic timeout')
+				uni.showToast({ title: '无法打开麦克风', icon: 'none' })
+				this.hangup(false)
+				return
+			}
+		}
+		// #endif
 		this.answerStarted = true
 		const sdp = this.pendingRemoteSdp
 		if (sdp.length == 0) {
 			this.answerStarted = false
 			return
 		}
-		const msg = this.buildHtmlStart('startAnswer', sdp)
+		if (this.phase != 'connecting' && this.phase != 'ringing') {
+			this.answerStarted = false
+			return
+		}
+		await this.waitTurn()
+		if (this.phase != 'connecting' && this.phase != 'ringing') {
+			this.answerStarted = false
+			return
+		}
+		const msg = this.buildHtmlStart(this.isGroupCall ? 'startAnswerPeer' : 'startAnswer', sdp)
 		this.fillHtmlIce(msg)
+		if (this.isGroupCall) {
+			const peer = this.peerUserId.length > 0 ? this.peerUserId : this.initiatorId
+			msg['peer'] = peer
+			msg['video'] = '0'
+		}
 		this.sendToHtml(msg)
 		this.flushAppIce()
 		this.htmlPollN = 0
@@ -997,8 +1677,11 @@ export class CallManager {
 	async armIncoming(): Promise<void> {
 		if (this.phase != 'ringing') return
 		if (this.pendingRemoteSdp.length == 0) return
-		if (this.htmlEval == null || this.htmlLoaded == false) {
+		if (!this.engineReady()) {
 			console.log('[call] armIncoming wait engine')
+			setTimeout(() => {
+				if (this.phase == 'ringing' && this.incomingArmed == false) this.armIncoming()
+			}, 400)
 			return
 		}
 		if (this.incomingArmed) {
@@ -1020,15 +1703,16 @@ export class CallManager {
 	scheduleHtmlPoll(): void {
 		const n = this.htmlPollN
 		if (n == 0) tuneCallWebView()
-		if (n > 20) return
+		if (n > 80) return
 		setTimeout(() => {
-			if (this.phase != 'outgoing' && this.phase != 'connecting') return
+			if (this.phase == 'idle' || this.phase == 'ended') return
 			if (this.connectedAt > 0) return
-			if (this.answerSent) return
-			if (this.phase == 'outgoing' && this.invitePosted) return
-			const flush: UTSJSONObject = {}
-			flush['cmd'] = 'flush'
-			this.sendToHtml(flush)
+			if (this.phase != 'outgoing' && this.phase != 'connecting' && this.phase != 'connected') return
+			if (this.invitePosted == false && this.answerSent == false) {
+				const flush: UTSJSONObject = {}
+				flush['cmd'] = 'flush'
+				this.sendToHtml(flush)
+			}
 			pullCallHtmlMsg((kind: string, payload: string, cand: UTSJSONObject): void => {
 				this.onHtmlMessage(kind, payload, cand)
 			})
@@ -1038,16 +1722,22 @@ export class CallManager {
 	}
 
 	flushAppIce(): void {
+		const keep: Array<UTSJSONObject> = []
 		for (let i = 0; i < this.pendingIce.length; i++) {
 			const ice = this.pendingIce[i]
+			const fromCall = this.htmlStr(ice, 'call')
+			const icePeer = this.htmlStr(ice, 'peer')
+			if (!this.isGroupCall && fromCall.length > 0 && this.callId.length > 0 && fromCall != this.callId) continue
 			const msg: UTSJSONObject = {}
 			msg['cmd'] = 'ice'
 			msg['candidate'] = (ice['candidate'] as string) ?? ''
 			msg['sdpMid'] = '' + ice['sdpMid']
 			msg['sdpMLineIndex'] = ice['sdpMLineIndex']
+			if (icePeer.length > 0) msg['peer'] = icePeer
 			this.sendToHtml(msg)
+			keep.push(ice)
 		}
-		this.pendingIce = []
+		this.pendingIce = keep
 	}
 
 	async trySendInvite(sdp: string): Promise<void> {
@@ -1058,26 +1748,79 @@ export class CallManager {
 		}
 	}
 
+	async trySendInvitePeer(peerId: string, sdp: string): Promise<void> {
+		try {
+			await this.sendInviteToPeer(peerId, sdp)
+		} catch (e) {
+			console.warn('[call] invite peer fail', peerId, e)
+		}
+	}
+
+	async sendInviteToPeer(peerId: string, sdp: string): Promise<void> {
+		if (peerId.length == 0 || sdp.length == 0) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		const gid = this.groupCallId.length > 0 ? this.groupCallId : this.callId
+		let cid = this.groupPeerCallIdOf(peerId)
+		if (cid.length == 0) {
+			cid = pairCallId(gid, matrix.userId, peerId)
+			this.setGroupPeerCallId(peerId, cid)
+		}
+		const peers: Array<string> = []
+		peers.push(matrix.userId)
+		for (let i = 0; i < this.groupPeerIds.length; i++) {
+			if (peers.indexOf(this.groupPeerIds[i]) < 0) peers.push(this.groupPeerIds[i])
+		}
+		let text = '{"call_id":' + JSON.stringify(cid)
+		text += ',"version":1'
+		text += ',"party_id":' + JSON.stringify(this.partyId)
+		text += ',"lifetime":90000'
+		text += ',"offer":{"type":"offer","sdp":' + JSON.stringify(sdp) + '}'
+		text += ',"sdp":' + JSON.stringify(sdp)
+		text += ',"room_id":' + JSON.stringify(this.roomId)
+		text += ',"invitee":' + JSON.stringify(peerId)
+		text += ',"group_id":' + JSON.stringify(gid)
+		text += ',"group_call":"1"'
+		text += ',"group_peers":' + JSON.stringify(peers.join(','))
+		text += '}'
+		const payload = parseCallJson(text)
+		this.offerSent = true
+		this.invitePosted = true
+		this.lastInvite = payload
+		console.log('[call] group invite ->', peerId, cid)
+		await this.notifyCall('m.call.invite', payload, this.roomId, peerId)
+		this.sub = '等待群成员接听…'
+		this.emit()
+	}
+
 	async sendInvite(sdp: string): Promise<void> {
 		if (sdp.length == 0) return
+		if (this.isGroupCall) {
+			const peer = this.inviteeId.length > 0 ? this.inviteeId : this.peerUserId
+			if (peer.length > 0) {
+				await this.sendInviteToPeer(peer, sdp)
+				return
+			}
+		}
 		if (this.invitePosted) {
 			await this.sendNegotiate(sdp)
 			return
 		}
 		this.offerSent = true
 		this.invitePosted = true
-		const payload = this.baseCallContent()
-		payload['lifetime'] = 90000
-		const offerObj: UTSJSONObject = {}
-		offerObj['type'] = 'offer'
-		offerObj['sdp'] = sdp
-		payload['offer'] = offerObj
-		const meta = this.streamMeta()
-		payload['sdp_stream_metadata'] = meta
-		payload['org.matrix.msc2746.sdp_stream_metadata'] = meta
-		if (this.inviteeId.length > 0) payload['invitee'] = this.inviteeId
-		payload['room_id'] = this.roomId
+		let text = '{"call_id":' + JSON.stringify(this.callId)
+		text += ',"version":1'
+		text += ',"party_id":' + JSON.stringify(this.partyId)
+		text += ',"lifetime":90000'
+		text += ',"offer":{"type":"offer","sdp":' + JSON.stringify(sdp) + '}'
+		text += ',"sdp":' + JSON.stringify(sdp)
+		text += ',"room_id":' + JSON.stringify(this.roomId)
+		if (this.inviteeId.length > 0) text += ',"invitee":' + JSON.stringify(this.inviteeId)
+		if (this.isVideo) text += ',"offer_video":"1"'
+		text += '}'
+		const payload = parseCallJson(text)
 		this.lastInvite = payload
+		console.log('[call] send invite', this.callId, 'sdp', sdp.length, 'json', text.length)
 		await this.send('m.call.invite', payload)
 		this.sub = '等待对方接听…'
 		this.emit()
@@ -1095,29 +1838,153 @@ export class CallManager {
 		await this.send('m.call.negotiate', payload)
 	}
 
+	async sendAnswerToPeer(peerId: string, sdp: string): Promise<void> {
+		if (!looksLikeSdp(sdp)) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		let cid = this.groupPeerCallIdOf(peerId)
+		if (cid.length == 0) cid = this.callId
+		let text = '{"call_id":' + JSON.stringify(cid)
+		text += ',"version":1'
+		text += ',"party_id":' + JSON.stringify(this.partyId)
+		text += ',"answer":{"type":"answer","sdp":' + JSON.stringify(sdp) + '}'
+		text += ',"sdp":' + JSON.stringify(sdp)
+		if (this.groupCallId.length > 0) text += ',"group_id":' + JSON.stringify(this.groupCallId)
+		text += '}'
+		const payload = parseCallJson(text)
+		this.answerSent = true
+		await this.notifyCall('m.call.answer', payload, this.roomId, peerId)
+		this.maybeMeshPeers()
+	}
+
+	sendCandidatesToPeer(peerId: string, candidate: string, sdpMid: string, sdpMLineIndex: number): void {
+		if (candidate.length == 0 || peerId.length == 0) return
+		let cid = this.groupPeerCallIdOf(peerId)
+		if (cid.length == 0) cid = this.callId
+		const one = '{"candidate":' + JSON.stringify(candidate) + ',"sdpMid":' + JSON.stringify(sdpMid) + ',"sdpMLineIndex":' + ('' + sdpMLineIndex) + '}'
+		let text = '{"call_id":' + JSON.stringify(cid)
+		text += ',"version":1'
+		text += ',"party_id":' + JSON.stringify(this.partyId)
+		text += ',"candidates":[' + one + ']}'
+		const payload = parseCallJson(text)
+		this.notifyCall('m.call.candidates', payload, this.roomId, peerId)
+	}
+
+	maybeMeshPeers(): void {
+		if (!this.isGroupCall) return
+		if (this.groupMeshDone) return
+		if (this.phase != 'connected' && this.connectedAt == 0) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		const me = matrix.userId
+		const peers: Array<string> = []
+		for (let i = 0; i < this.groupPeerIds.length; i++) {
+			const p = this.groupPeerIds[i]
+			if (p.length == 0 || p == me) continue
+			if (p == this.initiatorId) continue
+			if (me < p) peers.push(p)
+		}
+		if (peers.length == 0) {
+			this.groupMeshDone = true
+			return
+		}
+		this.groupMeshDone = true
+		const msg: UTSJSONObject = {}
+		msg['cmd'] = 'startGroupOffer'
+		msg['peers'] = peers.join(',')
+		msg['video'] = '0'
+		this.fillHtmlIce(msg)
+		const hs = matrix.homeserver
+		msg['hs'] = hs
+		msg['token'] = matrix.accessToken
+		msg['room'] = this.roomId
+		msg['call'] = this.groupCallId
+		msg['party'] = this.partyId
+		this.sendToHtml(msg)
+		console.log('[call] mesh offer to', peers.join(','))
+	}
+
 	async sendAnswer(sdp: string): Promise<void> {
-		if (this.answerSent) return
-		if (sdp.length < 80) {
+		if (this.answerSent && !this.isGroupCall) return
+		if (!looksLikeSdp(sdp)) {
 			console.warn('[call] skip short answer', sdp.length)
 			return
 		}
 		this.answerSent = true
-		const payload = this.baseCallContent()
-		const answerObj: UTSJSONObject = {}
-		answerObj['type'] = 'answer'
-		answerObj['sdp'] = sdp
-		payload['answer'] = answerObj
-		const meta = this.streamMeta()
-		payload['sdp_stream_metadata'] = meta
-		payload['org.matrix.msc2746.sdp_stream_metadata'] = meta
-		await this.send('m.call.answer', payload)
-		this.noteConnected()
+		let text = '{"call_id":' + JSON.stringify(this.callId)
+		text += ',"version":1'
+		text += ',"party_id":' + JSON.stringify(this.partyId)
+		text += ',"answer":{"type":"answer","sdp":' + JSON.stringify(sdp) + '}'
+		text += ',"sdp":' + JSON.stringify(sdp)
+		if (this.isGroupCall && this.groupCallId.length > 0) {
+			text += ',"group_id":' + JSON.stringify(this.groupCallId)
+			text += ',"group_call":"1"'
+		}
+		text += '}'
+		const payload = parseCallJson(text)
+		const peer = this.peerUserId.length > 0 ? this.peerUserId : this.inviteeId
+		if (this.isGroupCall && peer.length > 0) {
+			await this.notifyCall('m.call.answer', payload, this.roomId, peer)
+		} else {
+			await this.send('m.call.answer', payload)
+		}
+		if (this.isGroupCall) this.maybeMeshPeers()
+		if (this.connectedAt > 0 || this.phase == 'connected') {
+			this.emit()
+			this.pushUi()
+			return
+		}
+		this.sub = '正在连接…'
 		this.emit()
 		this.pushUi()
 	}
 
+	sendCandidates(candidate: string, sdpMid: string, sdpMLineIndex: number): void {
+		if (candidate.length == 0) return
+		const one = '{"candidate":' + JSON.stringify(candidate) + ',"sdpMid":' + JSON.stringify(sdpMid) + ',"sdpMLineIndex":' + ('' + sdpMLineIndex) + '}'
+		this.iceBufText.push(one)
+		if (this.iceFlushBusy) return
+		this.iceFlushBusy = true
+		setTimeout(() => {
+			this.flushIceSend()
+		}, 220)
+	}
+
+	flushIceSend(): void {
+		const items: Array<string> = []
+		for (let i = 0; i < this.iceBufText.length; i++) {
+			items.push(this.iceBufText[i])
+		}
+		this.iceBufText = []
+		if (items.length == 0) {
+			this.iceFlushBusy = false
+			return
+		}
+		if (this.callId.length == 0 || this.phase == 'idle' || this.phase == 'ended') {
+			this.iceFlushBusy = false
+			return
+		}
+		let text = '{"call_id":' + JSON.stringify(this.callId)
+		text += ',"version":1'
+		text += ',"party_id":' + JSON.stringify(this.partyId)
+		text += ',"candidates":[' + items.join(',') + ']}'
+		const payload = parseCallJson(text)
+		this.send('m.call.candidates', payload).then(() => {
+			if (this.iceBufText.length > 0) this.flushIceSend()
+			else this.iceFlushBusy = false
+		}).catch((_e) => {
+			this.iceFlushBusy = false
+		})
+	}
+
+	failAccept(msg: string): void {
+		uni.showToast({ title: msg, icon: 'none' })
+		this.hangup(false)
+	}
+
 	onHtmlMessage(kind: string, payload: string, cand: UTSJSONObject): void {
 		console.log('[call] html msg', kind, payload.length)
+		const peerFromHtml = this.htmlStr(cand, 'peer')
 		if (kind == 'ready') {
 			this.htmlReady = true
 			this.htmlLoaded = true
@@ -1126,47 +1993,82 @@ export class CallManager {
 			else if (this.phase == 'ringing') this.armIncoming()
 			else if (this.phase == 'connecting') this.appAnswer()
 			else this.pushUi()
+			this.replayRemoteAnswer()
 			return
 		}
 		if (kind == 'offer') {
-			this.trySendInvite(payload)
+			if (this.isGroupCall && peerFromHtml.length > 0) {
+				this.trySendInvitePeer(peerFromHtml, payload)
+			} else {
+				this.trySendInvite(payload)
+			}
+			this.replayRemoteAnswer()
 			return
 		}
 		if (kind == 'invited') {
-			this.sub = '等待对方接听…'
+			this.sub = this.isGroupCall ? '等待群成员接听…' : '等待对方接听…'
 			this.emit()
-			uni.showToast({ title: '已向对方发起通话', icon: 'none' })
+			if (!this.isGroupCall) uni.showToast({ title: '已向对方发起通话', icon: 'none' })
+			else uni.showToast({ title: '已发起群语音', icon: 'none' })
 			return
 		}
 		if (kind == 'answer') {
-			this.sendAnswer(payload)
+			if (this.isGroupCall && peerFromHtml.length > 0) {
+				this.sendAnswerToPeer(peerFromHtml, payload)
+			} else {
+				this.sendAnswer(payload)
+			}
 			return
 		}
 		if (kind == 'ice') {
-			const c = this.baseCallContent()
-			const one: UTSJSONObject = {}
-			one['candidate'] = payload
-			one['sdpMid'] = '' + cand['sdpMid']
-			one['sdpMLineIndex'] = cand['sdpMLineIndex']
-			const arr: Array<UTSJSONObject> = []
-			arr.push(one)
-			c['candidates'] = arr
-			this.send('m.call.candidates', c)
+			let iceCand = payload
+			if (iceCand.length == 0) iceCand = this.htmlStr(cand, 'candidate')
+			let idx = 0
+			try {
+				const n = parseFloat('' + cand['sdpMLineIndex'])
+				if (n == n) idx = n
+			} catch (eIdx) {}
+			if (this.isGroupCall && peerFromHtml.length > 0) {
+				this.sendCandidatesToPeer(peerFromHtml, iceCand, '' + cand['sdpMid'], idx)
+			} else {
+				this.sendCandidates(iceCand, '' + cand['sdpMid'], idx)
+			}
+			return
+		}
+		if (kind == 'peerConnected') {
+			this.groupConnectedN = this.groupConnectedN + 1
+			this.noteConnected()
+			this.sub = '群语音中 · ' + this.groupConnectedN + '人已接通'
+			this.emit()
+			this.pushUi()
+			this.maybeMeshPeers()
 			return
 		}
 		if (kind == 'connected') {
 			this.noteConnected()
+			if (this.isGroupCall) {
+				this.sub = '群语音中'
+				this.maybeMeshPeers()
+			}
 			this.emit()
 			this.pushUi()
 			return
 		}
 		if (kind == 'failed') {
+			if (this.isGroupCall && this.connectedAt > 0) {
+				console.warn('[call] ignore peer fail in group')
+				return
+			}
 			this.sub = '连接失败'
 			this.emit()
 			this.hangup(true)
 			return
 		}
 		if (kind == 'error') {
+			if (this.connectedAt > 0 || this.phase == 'connected') {
+				console.warn('[call] ignore engine error after connected', payload)
+				return
+			}
 			uni.showToast({ title: payload.length > 0 ? payload : '通话失败', icon: 'none' })
 			this.hangup(false)
 			return
@@ -1179,42 +2081,23 @@ export class CallManager {
 	}
 
 	async accept(): Promise<void> {
-		if (this.phase != 'ringing') return
+		if (this.phase != 'ringing' && this.phase != 'connecting') return
 		if (!webrtcReady()) {
-			uni.showToast({ title: '当前环境不支持通话', icon: 'none' })
+			uni.showToast({ title: webrtcHint(), icon: 'none' })
 			return
 		}
-		this.phase = 'connecting'
-		this.sub = '正在接通…'
-		this.emit()
-		this.openPage()
-		// #ifndef H5
-		await this.appAnswer()
-		return
-		// #endif
-		// #ifdef H5
-		if (this.pendingRemoteSdp.length == 0) return
-		if (!(await this.ensurePeer())) return
-		if (!(await this.addLocalMedia())) return
-		try {
-			const pc = this.rtcPc
-			if (pc == null) return
-			const offerDesc: UTSJSONObject = {}
-			offerDesc['type'] = 'offer'
-			offerDesc['sdp'] = this.pendingRemoteSdp
-			await pc.setRemoteDescription(offerDesc)
-			this.remoteDescReady = true
-			await this.flushIce()
-			const answer = await pc.createAnswer()
-			await pc.setLocalDescription(answer)
-			await this.sendAnswer(`${answer.sdp}`)
-			this.noteConnected()
-			this.emit()
-		} catch (e) {
-			uni.showToast({ title: `${e}`, icon: 'none' })
-			this.hangup(true)
+		if (this.pendingRemoteSdp.length < 20) {
+			uni.showToast({ title: '来电信息不完整，无法接通', icon: 'none' })
+			return
 		}
-		// #endif
+		unlockH5CallMedia(this.isVideo)
+		if (this.phase == 'ringing') {
+			this.phase = 'connecting'
+			this.sub = '正在接通…'
+			this.emit()
+		}
+		if (this.pageOpen == false) this.openPage()
+		await this.appAnswer()
 	}
 
 	reject(): void {
@@ -1222,6 +2105,21 @@ export class CallManager {
 	}
 
 	sendHangup(reason: string): void {
+		if (this.isGroupCall && this.groupPeerIds.length > 0) {
+			for (let i = 0; i < this.groupPeerIds.length; i++) {
+				const peer = this.groupPeerIds[i]
+				let cid = this.groupPeerCallIds[i]
+				if (cid.length == 0) cid = this.callId
+				const hang: UTSJSONObject = {}
+				hang['call_id'] = cid
+				hang['version'] = '1'
+				hang['party_id'] = this.partyId
+				hang['reason'] = reason
+				if (this.groupCallId.length > 0) hang['group_id'] = this.groupCallId
+				this.notifyCall('m.call.hangup', hang, this.roomId, peer)
+			}
+			return
+		}
 		const hang = this.baseCallContent()
 		hang['reason'] = reason
 		this.send('m.call.hangup', hang)
@@ -1237,9 +2135,16 @@ export class CallManager {
 	}
 
 	async sendCallRecord(roomId: string, isVideo: boolean, status: string, duration: number, initiator: string, callId: string): Promise<void> {
+		if (callId.length > 0) {
+			for (let i = 0; i < this.recordedCallIds.length; i++) {
+				if (this.recordedCallIds[i] == callId) return
+			}
+			this.recordedCallIds.push(callId)
+			if (this.recordedCallIds.length > 40) this.recordedCallIds.splice(0, 10)
+		}
 		const matrix = getMatrix()
 		if (matrix == null || roomId.length == 0) return
-		const kind = isVideo ? '视频通话' : '语音通话'
+		const kind = isVideo ? '视频通话' : (this.isGroupCall ? '群语音' : '语音通话')
 		let body = '[' + kind + ']'
 		if (status == 'answered') {
 			body = '[' + kind + '] ' + formatCallDur(duration)
@@ -1251,7 +2156,7 @@ export class CallManager {
 			body = '[' + kind + '] 未接听'
 		}
 		const info: UTSJSONObject = {}
-		info['call_type'] = isVideo ? 'video' : 'voice'
+		info['call_type'] = isVideo ? 'video' : (this.isGroupCall ? 'group_voice' : 'voice')
 		info['call_status'] = status
 		info['call_duration'] = duration
 		info['call_initiator'] = initiator
@@ -1273,12 +2178,15 @@ export class CallManager {
 			content: content
 		}
 		try {
-			for (let hi = 0; hi < matrix.timelineHandlers.length; hi++) {
-				try { matrix.timelineHandlers[hi](ev, roomId) } catch (e0) {}
-			}
-			const legacy = matrix.onRoomTimeline
-			if (legacy != null) {
-				try { legacy(ev, roomId) } catch (e1) {}
+			if (matrix.timelineHandlers.length > 0) {
+				for (let hi = 0; hi < matrix.timelineHandlers.length; hi++) {
+					try { matrix.timelineHandlers[hi](ev, roomId) } catch (e0) {}
+				}
+			} else {
+				const legacy = matrix.onRoomTimeline
+				if (legacy != null) {
+					try { legacy(ev, roomId) } catch (e1) {}
+				}
 			}
 		} catch (e2) {
 			console.warn('[call] record local ui', e2)
@@ -1296,6 +2204,7 @@ export class CallManager {
 			this.leavePageIfNeeded()
 			return
 		}
+		this.phase = 'ended'
 		const rid = this.roomId
 		const cid = this.callId
 		const peer = this.peerUserId.length > 0 ? this.peerUserId : this.inviteeId
@@ -1324,11 +2233,13 @@ export class CallManager {
 		hang['room_id'] = rid
 		const shouldNotify = notify && cid.length > 0
 		this.lastHangAt = Date.now()
+		this.noteClosedCall(cid)
 		this.clearTimer()
 		const hangMsg: UTSJSONObject = {}
 		hangMsg['cmd'] = 'hangup'
 		this.sendToHtml(hangMsg)
 		this.htmlEval = null
+		this.htmlPost = null
 		this.htmlReady = false
 		this.htmlLoaded = false
 		destroyCallEngine()
@@ -1360,23 +2271,39 @@ export class CallManager {
 		this.invitePosted = false
 		this.outgoingReady = false
 		this.incomingArmed = false
+		this.incomingPrompted = false
 		this.lastInvite = null
 		this.htmlBoot = ''
 		this.htmlLoaded = false
 		this.connectedAt = 0
 		this.initiatorId = ''
+		this.micWaitN = 0
+		this.pendingAnswerSdp = ''
 		this.clearDom()
 		if (shouldNotify) {
+			const wasGroup = this.isGroupCall
 			this.sendCallRecord(rid, wasVideo, status, duration, initiator, cid)
-			this.notifyCall(signalType, hang, rid, peer)
+			if (wasGroup) {
+				if (signalType == 'm.call.reject') this.sendReject()
+				else this.sendHangup(hang['reason'] != null ? ('' + hang['reason']) : 'user_hangup')
+			} else {
+				this.notifyCall(signalType, hang, rid, peer)
+			}
 		}
 		this.inviteeId = ''
 		this.peerUserId = ''
+		this.isGroupCall = false
+		this.groupCallId = ''
+		this.groupPeerIds = []
+		this.groupPeerCallIds = []
+		this.groupConnectedN = 0
+		this.groupMeshDone = false
 		this.phase = 'idle'
 		this.callId = ''
 		this.roomId = ''
 		this.sub = ''
 		this.peerName = ''
+		this.peerAvatar = ''
 		this.isIncoming = false
 		this.pageOpen = false
 		this.clearSnap()
@@ -1386,44 +2313,18 @@ export class CallManager {
 
 	toggleMute(): void {
 		this.muted = !this.muted
-		// #ifndef H5
 		const m: UTSJSONObject = {}
 		m['cmd'] = 'mute'
 		this.sendToHtml(m)
-		// #endif
-		// #ifdef H5
-		try {
-			const stream = this.localStream
-			if (stream != null) {
-				const tracks = stream.getAudioTracks()
-				for (let i = 0; i < tracks.length; i++) {
-					tracks[i].enabled = !this.muted
-				}
-			}
-		} catch (e) {}
-		// #endif
 		this.emit()
 	}
 
 	toggleCamera(): void {
 		this.cameraOff = !this.cameraOff
-		// #ifndef H5
 		const m: UTSJSONObject = {}
 		m['cmd'] = 'camera'
 		m['off'] = this.cameraOff ? '1' : '0'
 		this.sendToHtml(m)
-		// #endif
-		// #ifdef H5
-		try {
-			const stream = this.localStream
-			if (stream != null) {
-				const tracks = stream.getVideoTracks()
-				for (let i = 0; i < tracks.length; i++) {
-					tracks[i].enabled = !this.cameraOff
-				}
-			}
-		} catch (e) {}
-		// #endif
 		this.emit()
 	}
 
@@ -1434,16 +2335,11 @@ export class CallManager {
 		this.camFlipping = true
 		this.camRear = !this.camRear
 		const facing = this.camRear ? 'environment' : 'user'
-		// #ifndef H5
 		const m: UTSJSONObject = {}
 		m['cmd'] = 'flip'
 		m['facing'] = facing
 		this.sendToHtml(m)
 		console.log('[call] flip camera', facing)
-		// #endif
-		// #ifdef H5
-		this.flipH5Camera(facing)
-		// #endif
 		setTimeout(() => {
 			this.camFlipping = false
 		}, 1500)
@@ -1452,10 +2348,16 @@ export class CallManager {
 	async flipH5Camera(facing: string): Promise<void> {
 		// #ifdef H5
 		try {
-			const nv = await (window as any).navigator.mediaDevices.getUserMedia({
-				audio: false,
-				video: { facingMode: { ideal: facing }, width: { ideal: 640 }, height: { ideal: 480 } }
-			})
+			const g = h5Global()
+			const nav = (g != null && g.navigator != null) ? g.navigator : null
+			const devices = (nav != null) ? nav.mediaDevices : null
+			if (devices == null || devices.getUserMedia == null) return
+			const video: UTSJSONObject = {}
+			video['facingMode'] = facing
+			const cons: UTSJSONObject = {}
+			cons['audio'] = false
+			cons['video'] = video
+			const nv = await devices.getUserMedia(cons)
 			const nt = nv.getVideoTracks()[0]
 			if (nt == null) {
 				this.camRear = !this.camRear
@@ -1512,6 +2414,14 @@ export class CallManager {
 		if (matrix == null) return
 		if (this.phase != 'idle') return
 		const events = matrix.getBufferedEvents(rid)
+		for (let i = 0; i < events.length; i++) {
+			const ev = events[i]
+			const t = ev.type
+			if (t != 'm.call.hangup' && t != 'm.call.reject') continue
+			const empty: UTSJSONObject = {}
+			const content = (ev.content != null) ? ev.content : empty
+			this.noteClosedCall(fieldStr(content, 'call_id'))
+		}
 		let i = 0
 		while (i < events.length) {
 			const ev = events[i]
@@ -1529,6 +2439,23 @@ export class CallManager {
 		this.seenVoip.push(key)
 		if (this.seenVoip.length > 80) {
 			this.seenVoip.splice(0, 20)
+		}
+		return false
+	}
+
+	noteClosedCall(callId: string): void {
+		if (callId.length == 0) return
+		for (let i = 0; i < this.closedCallIds.length; i++) {
+			if (this.closedCallIds[i] == callId) return
+		}
+		this.closedCallIds.push(callId)
+		if (this.closedCallIds.length > 40) this.closedCallIds.splice(0, 10)
+	}
+
+	isClosedCall(callId: string): boolean {
+		if (callId.length == 0) return false
+		for (let i = 0; i < this.closedCallIds.length; i++) {
+			if (this.closedCallIds[i] == callId) return true
 		}
 		return false
 	}
@@ -1556,6 +2483,14 @@ export class CallManager {
 	}
 
 	handleEvent(event: MatrixEvent, rid: string): void {
+		try {
+			this.handleVoipEvent(event, rid)
+		} catch (e) {
+			console.warn('[call] handleEvent', e)
+		}
+	}
+
+	handleVoipEvent(event: MatrixEvent, rid: string): void {
 		const type = event.type
 		const sender = (event.sender != null) ? event.sender : ''
 		const empty: UTSJSONObject = {}
@@ -1568,10 +2503,21 @@ export class CallManager {
 		const activeId = (matrix0 != null) ? matrix0.callActiveId : ''
 		if (type == 'm.call.invite' && activeId.length > 0 && activeId == callId) return
 		if (type == 'm.call.invite' && this.callId == callId && this.phase != 'idle') return
+		if (this.isClosedCall(callId)) {
+			if (type == 'm.call.invite') console.log('[call] ignore closed invite', callId)
+			return
+		}
 		const eid = (event.event_id != null) ? event.event_id : ''
 		const ts0 = event.origin_server_ts != null ? event.origin_server_ts : 0
 		let key = eid
-		if (key.length == 0) key = type + '|' + callId + '|' + ('' + ts0)
+		if (key.length == 0) {
+			let extra = fieldStr(content, 'call_id')
+			try {
+				const packed = JSON.stringify(content)
+				if (packed != null && packed.length > 0) extra = packed
+			} catch (eKey) {}
+			key = type + '|' + callId + '|' + ('' + ts0) + '|' + extra
+		}
 		if (this.alreadySeen(key)) return
 		const age = this.eventAgeMs(event)
 		if (age > 90000) {
@@ -1581,7 +2527,7 @@ export class CallManager {
 		console.log('[call] handle', type, 'id=', callId, 'from=', sender, 'room=', roomId)
 		const matrix = getMatrix()
 		const myId = (matrix != null) ? matrix.userId : ''
-		if (sender == myId) {
+		if (sender.length > 0 && sender == myId) {
 			console.log('[call] ignore own event', type)
 			return
 		}
@@ -1601,6 +2547,26 @@ export class CallManager {
 				console.log('[call] invitee mismatch', invitee, myId)
 				return
 			}
+			const groupId = fieldStr(content, 'group_id')
+			const isGroupInvite = fieldStr(content, 'group_call') == '1' || groupId.length > 0
+			const sdp = pickCallSdp(content)
+			if (sdp.indexOf('ice-ufrag:stub') >= 0) {
+				console.warn('[call] ignore stub invite')
+				return
+			}
+			// 已在同群通话中：追加一路成员连接
+			if (isGroupInvite && this.isGroupCall && this.groupCallId.length > 0 && groupId == this.groupCallId && (this.phase == 'connected' || this.phase == 'connecting' || this.phase == 'outgoing' || this.phase == 'ringing')) {
+				this.setGroupPeerCallId(sender, callId)
+				const msg: UTSJSONObject = {}
+				msg['cmd'] = 'startAnswerPeer'
+				msg['peer'] = sender
+				msg['sdp'] = sdp
+				msg['video'] = '0'
+				this.fillHtmlIce(msg)
+				this.sendToHtml(msg)
+				console.log('[call] join group peer', sender)
+				return
+			}
 			if (this.phase != 'idle' && this.phase != 'ringing') {
 				const live = this.connectedAt > 0 || this.invitePosted || this.answerSent
 				if (live) {
@@ -1617,24 +2583,18 @@ export class CallManager {
 				this.invitePosted = false
 				this.incomingArmed = false
 				this.connectedAt = 0
-				this.htmlEval = null
-				this.htmlReady = false
-				this.htmlLoaded = false
 				this.clearSnap()
 			}
-			const offer = content.getJSON('offer')
-			let sdp = ''
-			if (offer != null) sdp = fieldStr(offer, 'sdp')
-			if (sdp.length == 0) sdp = fieldStr(content, 'sdp')
-			if (sdp.length < 80 || sdp.indexOf('ice-ufrag:stub') >= 0) {
-				console.warn('[call] ignore invalid invite sdp', sdp.length)
-				return
+			if (sdp.length < 20) {
+				console.warn('[call] invite sdp weak', sdp.length, 'still ringing')
+			} else {
+				console.log('[call] invite sdp', sdp.length)
 			}
 			this.pendingRemoteSdp = sdp
 			this.roomId = roomId
 			this.callId = callId
 			this.partyId = makePartyId()
-			this.isVideo = sdp.indexOf('m=video') >= 0
+			this.isVideo = !isGroupInvite && (sdp.indexOf('m=video') >= 0 || fieldStr(content, 'offer_video') == '1')
 			this.isIncoming = true
 			this.phase = 'ringing'
 			this.inviteeId = ''
@@ -1649,126 +2609,175 @@ export class CallManager {
 			this.htmlPollN = 0
 			this.invitePosted = false
 			this.incomingArmed = false
+			this.isGroupCall = isGroupInvite
+			this.groupCallId = groupId.length > 0 ? groupId : ''
+			this.groupPeerIds = []
+			this.groupPeerCallIds = []
+			this.groupConnectedN = 0
+			this.groupMeshDone = false
+			if (isGroupInvite) {
+				const gps = this.parseGroupPeers(content)
+				for (let gi = 0; gi < gps.length; gi++) {
+					if (gps[gi] == myId) continue
+					this.setGroupPeerCallId(gps[gi], pairCallId(this.groupCallId.length > 0 ? this.groupCallId : callId, myId, gps[gi]))
+				}
+				this.setGroupPeerCallId(sender, callId)
+				if (this.groupCallId.length == 0) this.groupCallId = callId
+			}
 			const cached = matrix != null ? matrix.getCachedUserName(sender) : ''
-			this.peerName = cached.length > 0 ? cached : localPart(sender)
-			this.sub = this.isVideo ? '邀请你视频通话' : '邀请你语音通话'
+			if (this.isGroupCall) {
+				this.peerName = '群语音(' + (this.groupPeerIds.length > 0 ? this.groupPeerIds.length : 1) + '人)'
+				this.sub = (cached.length > 0 ? cached : localPart(sender)) + ' 邀请你加入群语音'
+			} else {
+				this.peerName = cached.length > 0 ? cached : localPart(sender)
+				if (this.peerName.length == 0) this.peerName = '对方'
+				this.sub = this.isVideo ? '邀请你视频通话' : '邀请你语音通话'
+			}
 			this.muted = false
 			this.cameraOff = false
 			this.camRear = false
 			this.htmlBoot = 'in'
+			this.fillPeerProfile()
 			this.emit()
 			this.armTimeout()
 			this.openPage()
 			this.requestCallPerms()
+			this.kickTurn()
+			preloadH5EngineJs()
 			return
 		}
 
-		if (this.callId.length > 0 && callId != this.callId) return
-		if (Date.now() - this.lastHangAt < 1500 && this.phase == 'idle') return
+		if (this.isGroupCall) {
+			const peerForCall = this.peerOfCallId(callId)
+			if (peerForCall.length == 0 && this.callId.length > 0 && callId != this.callId && callId.indexOf(this.groupCallId) != 0) return
+		} else if (this.callId.length > 0 && callId != this.callId) {
+			return
+		}
+		if (Date.now() - this.lastHangAt < 4000 && this.phase == 'idle') return
 
 		if (type == 'm.call.answer') {
-			if (this.phase != 'outgoing' && this.phase != 'connecting') {
+			if (this.phase != 'outgoing' && this.phase != 'connecting' && this.phase != 'connected') {
 				console.log('[call] ignore answer, not calling', this.phase)
 				return
 			}
-			if (this.callId.length == 0 || this.callId != callId) {
+			const answerPeer = this.isGroupCall ? this.peerOfCallId(callId) : ''
+			if (!this.isGroupCall && (this.callId.length == 0 || this.callId != callId)) {
 				console.log('[call] ignore answer, call mismatch')
 				return
 			}
-			const answer = content.getJSON('answer')
-			let sdp = ''
-			if (answer != null) sdp = fieldStr(answer, 'sdp')
-			// #ifdef H5
-			const pc = this.rtcPc
-			if (pc != null && sdp.length > 0) {
-				const desc: UTSJSONObject = {}
-				desc['type'] = 'answer'
-				desc['sdp'] = sdp
-				pc.setRemoteDescription(desc).then(() => {
-					this.remoteDescReady = true
-					this.flushIce()
-					this.noteConnected()
-					this.emit()
-				}).catch((e) => console.warn('[call] answer', e))
+			if (this.isGroupCall && answerPeer.length == 0 && this.callId != callId) {
+				console.log('[call] ignore answer, group call mismatch')
+				return
 			}
-			// #endif
-			// #ifndef H5
+			if (!this.isGroupCall && this.remoteDescReady) {
+				console.log('[call] answer already applied')
+				return
+			}
+			const answer = jsonObj(content, 'answer')
+			let sdp = pickCallSdp(content)
+			if (sdp.length == 0) sdp = fieldStr(answer, 'sdp')
 			if (sdp.length > 0) {
+				this.pendingAnswerSdp = sdp
 				const msg: UTSJSONObject = {}
 				msg['cmd'] = 'remoteAnswer'
 				msg['sdp'] = sdp
+				if (answerPeer.length > 0) msg['peer'] = answerPeer
+				else if (sender.length > 0 && this.isGroupCall) msg['peer'] = sender
 				this.sendToHtml(msg)
 				this.remoteDescReady = true
 				this.flushAppIce()
-				this.noteConnected()
-				this.emit()
-				this.pushUi()
+				if (this.phase != 'connected') {
+					this.phase = 'connecting'
+					this.sub = this.isGroupCall ? '群成员接通中…' : '正在连接…'
+					this.emit()
+					this.pushUi()
+				}
+				console.log('[call] remote answer to engine', sdp.length, answerPeer)
+			} else {
+				console.warn('[call] answer without sdp')
 			}
-			// #endif
 			return
 		}
 
 		if (type == 'm.call.negotiate') {
 			if (this.phase == 'idle' || this.phase == 'ended') return
 			if (this.callId.length == 0 || this.callId != callId) return
-			const desc = content.getJSON('description')
-			let sdp = ''
-			if (desc != null) sdp = fieldStr(desc, 'sdp')
+			const desc = jsonObj(content, 'description')
+			let sdp = fieldStr(desc, 'sdp')
+			if (sdp.length == 0) sdp = fieldStr(content, 'sdp')
 			if (sdp.length == 0) return
 			this.pendingRemoteSdp = sdp
 			if (sdp.indexOf('m=video') >= 0) this.isVideo = true
 			if (this.phase == 'ringing') return
-			// #ifndef H5
 			const neg: UTSJSONObject = {}
 			neg['cmd'] = 'remoteOffer'
 			neg['sdp'] = sdp
 			this.sendToHtml(neg)
-			// #endif
 			return
 		}
 
 		if (type == 'm.call.candidates') {
-			if (this.phase == 'idle' || this.phase == 'ended') return
-			if (this.callId.length == 0 || this.callId != callId) return
-			const raw = content.getArray('candidates')
-			if (raw == null) return
+			if (this.phase == 'ended') return
+			const icePeer = this.isGroupCall ? this.peerOfCallId(callId) : ''
+			if (this.phase == 'idle') {
+				const raw0 = jsonArr(content, 'candidates')
+				for (let k = 0; k < raw0.length; k++) {
+					const c0 = raw0[k]
+					const cand0 = fieldStr(c0, 'candidate')
+					if (cand0.length == 0) continue
+					const ice0: UTSJSONObject = {}
+					ice0['candidate'] = cand0
+					ice0['sdpMid'] = fieldStr(c0, 'sdpMid')
+					ice0['sdpMLineIndex'] = fieldStr(c0, 'sdpMLineIndex')
+					ice0['call'] = callId
+					if (icePeer.length > 0) ice0['peer'] = icePeer
+					this.pendingIce.push(ice0)
+				}
+				return
+			}
+			if (!this.isGroupCall && (this.callId.length == 0 || this.callId != callId)) return
+			if (this.isGroupCall && icePeer.length == 0 && this.callId != callId) return
+			const raw = jsonArr(content, 'candidates')
+			if (raw.length == 0) return
 			for (let i = 0; i < raw.length; i++) {
-				const one = raw[i]
-				if (one == null) continue
-				const c = one as UTSJSONObject
+				const c = raw[i]
 				const cand = fieldStr(c, 'candidate')
 				if (cand.length == 0) continue
 				const ice: UTSJSONObject = {}
 				ice['candidate'] = cand
 				ice['sdpMid'] = fieldStr(c, 'sdpMid')
-				const midIdx = c.getNumber('sdpMLineIndex')
-				ice['sdpMLineIndex'] = (midIdx != null) ? midIdx : 0
-				// #ifdef H5
-				const pc = this.rtcPc
-				if (pc != null && this.remoteDescReady) {
-					pc.addIceCandidate(ice)
-				} else {
-					this.pendingIce.push(ice)
-				}
-				// #endif
-				// #ifndef H5
-				if (this.htmlEval != null) {
+				const midRaw = fieldStr(c, 'sdpMLineIndex')
+				const midIdx = parseFloat(midRaw)
+				ice['sdpMLineIndex'] = (midRaw.length > 0 && midIdx == midIdx) ? midIdx : 0
+				if (icePeer.length > 0) ice['peer'] = icePeer
+				this.pendingIce.push(ice)
+				if (this.engineReady()) {
 					const msg: UTSJSONObject = {}
 					msg['cmd'] = 'ice'
 					msg['candidate'] = cand
 					msg['sdpMid'] = fieldStr(c, 'sdpMid')
 					msg['sdpMLineIndex'] = ice['sdpMLineIndex']
+					if (icePeer.length > 0) msg['peer'] = icePeer
+					else if (sender.length > 0 && this.isGroupCall) msg['peer'] = sender
 					this.sendToHtml(msg)
-				} else {
-					this.pendingIce.push(ice)
 				}
-				// #endif
 			}
 			return
 		}
 
 		if (type == 'm.call.hangup' || type == 'm.call.reject') {
-			if (this.callId.length > 0 && callId != this.callId) return
+			if (this.isGroupCall) {
+				const leftPeer = this.peerOfCallId(callId)
+				if (leftPeer.length > 0 && this.connectedAt > 0 && callId != this.callId) {
+					console.log('[call] group peer left', leftPeer)
+					if (this.groupConnectedN > 0) this.groupConnectedN = this.groupConnectedN - 1
+					this.sub = '群语音中 · ' + (this.groupConnectedN > 0 ? this.groupConnectedN : 0) + '人'
+					this.emit()
+					return
+				}
+			} else if (this.callId.length > 0 && callId != this.callId) {
+				return
+			}
 			if (this.phase == 'idle' || this.phase == 'ended') {
 				this.leavePageIfNeeded()
 				return

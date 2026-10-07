@@ -26,6 +26,28 @@
 	"mp-toutiao": {
 		"usingComponents": true
 	},
+	"h5": {
+		"title": "i-tiklink",
+		"router": {
+			"mode": "hash",
+			"base": "./"
+		},
+		"devServer": {
+			"https": true,
+			"proxy": {
+				"/_matrix": {
+					"target": "https://matrix.itiklink.com",
+					"changeOrigin": true,
+					"secure": false
+				},
+				"/.well-known": {
+					"target": "https://matrix.itiklink.com",
+					"changeOrigin": true,
+					"secure": false
+				}
+			}
+		}
+	},
 	"uniStatistics": {
 		"enable": false
 	},
@@ -62,6 +84,10 @@
 		}
 	},
 	"app-ios": {
+		"privacyDescription": {
+			"NSMicrophoneUsageDescription": "需要使用麦克风进行语音通话",
+			"NSCameraUsageDescription": "需要使用摄像头进行视频通话"
+		},
 		"distribute": {
 			"modules": {},
 			"icons": {},

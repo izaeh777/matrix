@@ -23,6 +23,7 @@ export function startMatrixSession(session: SessionInfo): MatrixClient {
 	setMatrix(client)
 	saveSession(session)
 	bindCallToMatrix()
+	client.startSync()
 	return client
 }
 
@@ -37,5 +38,17 @@ export function openChat(roomId: string, highlight: string = ''): void {
 	uni.setStorageSync('pending_chat_room', roomId)
 	uni.setStorageSync('last_chat_room', roomId)
 	uni.setStorageSync('pending_chat_highlight', highlight)
-	uni.navigateTo({ url: '/pages/chat/chat' })
+	let url = '/pages/chat/chat?roomId=' + encodeURIComponent(roomId)
+	if (highlight.length > 0) url += '&highlight=' + encodeURIComponent(highlight)
+	uni.navigateTo({ url: url })
+}
+
+export function openGroupInfo(roomId: string): void {
+	uni.navigateTo({ url: '/pages/group/group?roomId=' + encodeURIComponent(roomId) })
+}
+
+export function openGroupPick(mode: string, roomId: string = ''): void {
+	let url = '/pages/group/pick?mode=' + encodeURIComponent(mode)
+	if (roomId.length > 0) url += '&roomId=' + encodeURIComponent(roomId)
+	uni.navigateTo({ url: url })
 }

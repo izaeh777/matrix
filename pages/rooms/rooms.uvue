@@ -58,14 +58,14 @@
 			<view v-if="!loading && rooms.length == 0" class="empty">
 				<text class="empty-icon">💬</text>
 				<text class="empty-title">还没有任何对话</text>
-				<text class="empty-hint">点击右上角 + 加入或创建房间</text>
+				<text class="empty-hint">点击右上角 + 发起群聊或加入房间</text>
 			</view>
 
 			<view
 				v-for="room in rooms"
 				:key="room.room_id"
 				class="room-item"
-				:class="{ 'room-active': roomHasUnread(room) }"
+				:class="{ 'room-active': roomHasUnread(room), 'room-pin': roomPinned(room) }"
 				@click="onOpenRoom(room.room_id)"
 				@longpress="onLongPressRoom(room)"
 			>
@@ -75,7 +75,8 @@
 						:src="roomAvatarSrc(room)"
 						fallback="/static/logo.png"
 					></image>
-					<view v-if="roomHasUnread(room)" class="avatar-badge">
+					<view v-if="roomHasUnread(room) && roomMuted(room)" class="mute-dot"></view>
+					<view v-else-if="roomHasUnread(room)" class="avatar-badge">
 						<text class="avatar-badge-text">{{ roomUnreadText(room) }}</text>
 					</view>
 				</view>
@@ -86,7 +87,8 @@
 					</view>
 					<view class="room-line2">
 						<text class="room-preview" :class="{ 'room-preview-active': roomHasUnread(room) }">{{ roomPreviewText(room) }}</text>
-						<view v-if="roomHasUnread(room)" class="mention-dot"></view>
+						<text v-if="roomMuted(room)" class="mute-mark">🔕</text>
+						<view v-if="roomHasUnread(room) && !roomMuted(room)" class="mention-dot"></view>
 					</view>
 				</view>
 			</view>
@@ -124,25 +126,21 @@
 					<text class="action-subtitle">{{ actionRoomSub }}</text>
 				</view>
 				<view class="action-list">
+					<view class="action-item" @click="doRoomAction('pin')">
+						<text class="action-icon">📌</text>
+						<text class="action-label">{{ pinActionLabel }}</text>
+					</view>
+					<view class="action-item" @click="doRoomAction('mute')">
+						<text class="action-icon">🔕</text>
+						<text class="action-label">{{ muteActionLabel }}</text>
+					</view>
 					<view class="action-item" @click="doRoomAction('invite')">
 						<text class="action-icon">＋</text>
 						<text class="action-label">邀请成员</text>
 					</view>
-					<view class="action-item" @click="doRoomAction('rename')">
-						<text class="action-icon">✎</text>
-						<text class="action-label">修改名称</text>
-					</view>
-					<view class="action-item" @click="doRoomAction('topic')">
-						<text class="action-icon">🏷</text>
-						<text class="action-label">修改主题</text>
-					</view>
-					<view class="action-item" @click="doRoomAction('tag')">
-						<text class="action-icon">⭐</text>
-						<text class="action-label">置顶 / 添加标签</text>
-					</view>
 					<view class="action-item danger" @click="doRoomAction('leave')">
 						<text class="action-icon">⎋</text>
-						<text class="action-label">退出房间</text>
+						<text class="action-label">删除该聊天</text>
 					</view>
 				</view>
 				<view class="action-cancel" @click="roomAction.show = false">
@@ -155,10 +153,10 @@
 
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted, computed } from 'vue'
-	import { getMatrix, MatrixRoom, MatrixEvent, errText, InvitedRoomInfo, CreateRoomOpts } from '@/common/matrix.uts'
+	import { getMatrix, MatrixRoom, MatrixEvent, errText, InvitedRoomInfo, CreateRoomOpts, roomIsGroup, sortRoomList, localPartOf } from '@/common/matrix.uts'
 	import { loadSession, SessionInfo, loadRoomList, saveRoomList, loadRoomChat } from '@/common/storage.uts'
-	import { openChat } from '@/common/app.uts'
-	import { getCallManager, CallSnapshot } from '@/common/call.uts'
+	import { openChat, bootstrapMatrix, openGroupPick } from '@/common/app.uts'
+	import { getCallManager, CallSnapshot, h5TapRunAnswer, unlockH5CallMedia } from '@/common/call.uts'
 
 	const rooms = ref<Array<MatrixRoom>>([])
 	const invites = ref<Array<InvitedRoomInfo>>([])
@@ -200,6 +198,12 @@
 	function inviteHasFrom(inv: InvitedRoomInfo): boolean {
 		return inv.inviter.length > 0
 	}
+	function roomPinned(room: MatrixRoom): boolean {
+		return room.favourite == true
+	}
+	function roomMuted(room: MatrixRoom): boolean {
+		return room.muted == true
+	}
 	function roomHasUnread(room: MatrixRoom): boolean {
 		const c = room.unread_count
 		if (c == null) return false
@@ -223,10 +227,27 @@
 	}
 	function roomPreviewText(room: MatrixRoom): string {
 		const p = room.last_message_preview
-		if (p != null && p.length > 0) return p
-		const t = room.topic
-		if (t != null && t.length > 0) return t
-		return '暂无消息'
+		let preview = ''
+		if (p != null && p.length > 0) preview = p
+		if (preview.length == 0) {
+			const t = room.topic
+			if (t != null && t.length > 0) return t
+			return '暂无消息'
+		}
+		if (roomIsGroup(room)) {
+			const sid = room.last_message_sender
+			if (sid != null && sid.length > 0) {
+				const matrix = getMatrix()
+				const me = matrix != null ? matrix.userId : ''
+				if (sid != me) {
+					let name = ''
+					if (matrix != null) name = matrix.getCachedUserName(sid)
+					if (name.length == 0) name = localPartOf(sid)
+					return name + ': ' + preview
+				}
+			}
+		}
+		return preview
 	}
 	function roomTimeText(room: MatrixRoom): string {
 		const ts = room.last_message_ts
@@ -234,6 +255,16 @@
 		return formatTime(ts)
 	}
 
+	const pinActionLabel = computed((): string => {
+		const r = roomAction.value.room
+		if (r != null && r.favourite == true) return '取消置顶'
+		return '置顶聊天'
+	})
+	const muteActionLabel = computed((): string => {
+		const r = roomAction.value.room
+		if (r != null && r.muted == true) return '取消免打扰'
+		return '消息免打扰'
+	})
 	const actionRoomName = computed((): string => {
 		const r = roomAction.value.room
 		if (r == null) return ''
@@ -294,13 +325,32 @@
 	}
 
 	function pickStr(obj: UTSJSONObject, key: string): string {
-		const s = obj.getString(key)
-		if (s != null && s.length > 0) return s
-		const v = obj[key]
-		if (v == null) return ''
-		const t = '' + v
-		if (t == 'null' || t == 'undefined' || t == '[object Object]') return ''
-		return t
+		try {
+			const v = obj[key]
+			if (v != null) {
+				const t = '' + v
+				if (t.length > 0 && t != 'null' && t != 'undefined' && t != '[object Object]') return t
+			}
+		} catch (e0) {}
+		try {
+			const s = obj.getString(key)
+			if (s != null && s.length > 0) return s
+		} catch (e1) {}
+		return ''
+	}
+	function pickNum(obj: UTSJSONObject, key: string): number {
+		try {
+			const raw = obj[key]
+			if (raw != null) {
+				const n = parseFloat('' + raw)
+				if (n == n) return n
+			}
+		} catch (e0) {}
+		try {
+			const v = obj.getNumber(key)
+			if (v != null) return v
+		} catch (e1) {}
+		return 0
 	}
 
 	function roomToRow(r: MatrixRoom): UTSJSONObject {
@@ -328,6 +378,12 @@
 		if (otherName != null && otherName.length > 0) o['other_displayname'] = otherName
 		const otherAv = r.other_avatar
 		if (otherAv != null && otherAv.length > 0) o['other_avatar'] = otherAv
+		if (r.is_direct == true) o['is_direct'] = 'true'
+		if (r.is_direct == false) o['is_direct'] = 'false'
+		const mc = r.member_count
+		if (mc != null) o['member_count'] = mc
+		if (r.favourite == true) o['favourite'] = 'true'
+		if (r.muted == true) o['muted'] = 'true'
 		return o
 	}
 
@@ -343,18 +399,25 @@
 		if (alias.length > 0) room.canonical_alias = alias
 		const preview = pickStr(o, 'last_message_preview')
 		if (preview.length > 0) room.last_message_preview = preview
-		const ts = o.getNumber('last_message_ts')
-		if (ts != null) room.last_message_ts = ts
+		const ts = pickNum(o, 'last_message_ts')
+		if (ts > 0) room.last_message_ts = ts
 		const sender = pickStr(o, 'last_message_sender')
 		if (sender.length > 0) room.last_message_sender = sender
-		const unread = o.getNumber('unread_count')
-		if (unread != null) room.unread_count = unread
+		const unread = pickNum(o, 'unread_count')
+		if (unread > 0) room.unread_count = unread
 		const otherId = pickStr(o, 'other_user_id')
 		if (otherId.length > 0) room.other_user_id = otherId
 		const otherName = pickStr(o, 'other_displayname')
 		if (otherName.length > 0) room.other_displayname = otherName
 		const otherAv = pickStr(o, 'other_avatar')
 		if (otherAv.length > 0) room.other_avatar = otherAv
+		const directStr = pickStr(o, 'is_direct')
+		if (directStr == 'true') room.is_direct = true
+		if (directStr == 'false') room.is_direct = false
+		const mc = pickNum(o, 'member_count')
+		if (mc > 0) room.member_count = mc
+		if (pickStr(o, 'favourite') == 'true') room.favourite = true
+		if (pickStr(o, 'muted') == 'true') room.muted = true
 		return room
 	}
 
@@ -407,8 +470,8 @@
 		const text = previewFromChatRow(last)
 		if (text.length == 0) return false
 		room.last_message_preview = text
-		const ts = last.getNumber('ts')
-		if (ts != null && ts > 0) room.last_message_ts = ts
+		const ts = pickNum(last, 'ts')
+		if (ts > 0) room.last_message_ts = ts
 		const sender = pickStr(last, 'sender')
 		if (sender.length > 0) room.last_message_sender = sender
 		return true
@@ -427,11 +490,7 @@
 			out.push(room)
 		}
 		if (out.length == 0) return false
-		out.sort((a, b) => {
-			const ta = a.last_message_ts != null ? a.last_message_ts : 0
-			const tb = b.last_message_ts != null ? b.last_message_ts : 0
-			return tb - ta
-		})
+		sortRoomList(out)
 		rooms.value = out
 		return true
 	}
@@ -444,6 +503,16 @@
 		let changed = false
 		for (let i = 0; i < list.length; i++) {
 			const room = list[i]
+			const fav = matrix.isRoomFavourite(room.room_id)
+			const mute = matrix.isRoomMuted(room.room_id)
+			if (room.favourite != fav) {
+				room.favourite = fav
+				changed = true
+			}
+			if (room.muted != mute) {
+				room.muted = mute
+				changed = true
+			}
 			const last = matrix.roomLastMessage.get(room.room_id)
 			if (last != null && last.body.length > 0) {
 				const curTs = room.last_message_ts != null ? room.last_message_ts : 0
@@ -459,11 +528,7 @@
 			}
 		}
 		if (!changed) return
-		list.sort((a, b) => {
-			const ta = a.last_message_ts != null ? a.last_message_ts : 0
-			const tb = b.last_message_ts != null ? b.last_message_ts : 0
-			return tb - ta
-		})
+		sortRoomList(list)
 		rooms.value = list.slice()
 		schedulePersistRooms()
 	}
@@ -541,11 +606,8 @@
 				return
 			}
 			const c = event.content != null ? event.content : ({} as UTSJSONObject)
-			const mtRaw = c.getString('msgtype')
-			const mt = (mtRaw != null) ? mtRaw : ''
-			let body = ''
-			const bodyRaw = c.getString('body')
-			if (bodyRaw != null) body = bodyRaw
+			const mt = pickStr(c, 'msgtype')
+			let body = pickStr(c, 'body')
 			if (mt == 'm.audio') body = '[语音]'
 			else if (mt == 'm.image') body = '[图片]'
 			else if (mt == 'm.file') body = '[文件]'
@@ -576,7 +638,8 @@
 	async function setupRooms(): Promise<void> {
 		session.value = loadSession()
 		const hadCache = applyRoomListCache()
-		const matrix = getMatrix()
+		let matrix = getMatrix()
+		if (matrix == null) matrix = bootstrapMatrix()
 		if (matrix == null) {
 			uni.reLaunch({ url: '/pages/login/login' })
 			return
@@ -591,10 +654,14 @@
 			if (state == 'PREPARED') applyLastFromSync()
 		})
 		offInvite = matrix.onInvite((_roomId: string) => {
-			uni.showToast({ title: '你收到一条新邀请', icon: 'none' })
 			loadInvites()
+			loadRooms()
 		})
 		offTimeline = matrix.onTimeline((event: MatrixEvent, rid: string) => {
+			if (event.type.indexOf('m.call.') == 0) {
+				getCallManager().handleEvent(event, rid)
+				return
+			}
 			if (event.type != 'm.room.message') return
 			refreshOneRoom(rid, event)
 		})
@@ -607,13 +674,13 @@
 		stopOff(offCall)
 		offCall = callMgr.onChange((s: CallSnapshot) => {
 			incomingCall.value = s.phase == 'ringing' && s.isIncoming
-			incomingCallTitle.value = s.peerName
-			incomingCallSub.value = s.sub
+			incomingCallTitle.value = s.isVideo ? '视频来电' : s.peerName
+			incomingCallSub.value = s.isVideo ? (s.peerName + ' 邀请你视频通话') : s.sub
 		})
 		const snap = callMgr.getSnapshot()
 		incomingCall.value = snap.phase == 'ringing' && snap.isIncoming
-		incomingCallTitle.value = snap.peerName
-		incomingCallSub.value = snap.sub
+		incomingCallTitle.value = snap.isVideo ? '视频来电' : snap.peerName
+		incomingCallSub.value = snap.isVideo ? (snap.peerName + ' 邀请你视频通话') : snap.sub
 		const unreadHandler = (rid: string, count: number) => {
 			const idx = rooms.value.findIndex((r: MatrixRoom) => r.room_id == rid)
 			if (idx >= 0) {
@@ -802,12 +869,12 @@
 
 	function onJoin() {
 		uni.showActionSheet({
-			itemList: ['加入已有房间', '创建新房间'],
+			itemList: ['发起群聊', '加入已有房间'],
 			success: (res) => {
 				if (res.tapIndex == 0) {
-					joinExistingRoom()
+					openGroupPick('create')
 				} else if (res.tapIndex == 1) {
-					createNewRoom()
+					joinExistingRoom()
 				}
 			}
 		})
@@ -818,9 +885,9 @@
 	}
 
 	function acceptIncomingCall() {
-		const mgr = getCallManager()
-		mgr.openPage()
-		uni.showToast({ title: '请点通话页的接听', icon: 'none' })
+		h5TapRunAnswer()
+		getCallManager().accept()
+		incomingCall.value = false
 	}
 	function rejectIncomingCall() {
 		getCallManager().reject()
@@ -901,42 +968,22 @@
 		if (matrix == null) return
 		try {
 			if (action == 'invite') {
-				uni.showModal({
-					title: '邀请成员',
-					editable: true,
-					placeholderText: '输入用户ID，如 @user:matrix.itiklink.com',
-					success: (res) => {
-						if (!res.confirm) return
-						inviteMemberByInput(room.room_id, res.content)
-					}
-				})
-			} else if (action == 'rename') {
-				const oldName = (room.name != null) ? room.name : ''
-				uni.showModal({
-					title: '修改房间名',
-					editable: true,
-					content: oldName,
-					success: (res) => {
-						if (res.confirm) {
-							renameRoomByInput(room.room_id, res.content)
-						}
-					}
-				})
-			} else if (action == 'topic') {
-				const oldTopic = (room.topic != null) ? room.topic : ''
-				uni.showModal({
-					title: '修改房间主题',
-					editable: true,
-					content: oldTopic,
-					success: (res) => {
-						if (res.confirm) {
-							setTopicByInput(room.room_id, res.content)
-						}
-					}
-				})
-			} else if (action == 'tag') {
-				await matrix.addRoomTag(room.room_id, 'm.favourite', 0.1)
-				uni.showToast({ title: '已置顶', icon: 'success' })
+				openGroupPick('invite', room.room_id)
+			} else if (action == 'pin') {
+				const next = room.favourite != true
+				await matrix.favouriteRoom(room.room_id, next)
+				room.favourite = next
+				sortRoomList(rooms.value)
+				rooms.value = rooms.value.slice()
+				schedulePersistRooms()
+				uni.showToast({ title: next ? '已置顶' : '已取消置顶', icon: 'success' })
+			} else if (action == 'mute') {
+				const next = room.muted != true
+				await matrix.setRoomMuted(room.room_id, next)
+				room.muted = next
+				rooms.value = rooms.value.slice()
+				schedulePersistRooms()
+				uni.showToast({ title: next ? '已开启免打扰' : '已关闭免打扰', icon: 'success' })
 			} else if (action == 'leave') {
 				const leaveName = (room.name != null) ? room.name : '此房间'
 				uni.showModal({
@@ -1266,6 +1313,28 @@
 
 	.room-item.room-active {
 		background-color: #fafbfc;
+	}
+
+	.room-item.room-pin {
+		background-color: #f7f7f7;
+	}
+
+	.mute-dot {
+		position: absolute;
+		top: -4rpx;
+		right: -4rpx;
+		width: 20rpx;
+		height: 20rpx;
+		border-radius: 10rpx;
+		background-color: #c8c8c8;
+		border-width: 4rpx;
+		border-color: #fff;
+	}
+
+	.mute-mark {
+		font-size: 22rpx;
+		color: #b2b2b2;
+		margin-left: 8rpx;
 	}
 
 	.avatar-wrap {

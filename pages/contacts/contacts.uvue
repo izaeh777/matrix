@@ -67,6 +67,10 @@
 			<text class="empty-title">通讯录</text>
 			<text class="empty-desc">在上方搜索框输入用户名\n即可找到其他用户并发消息</text>
 			<view class="entry-buttons">
+				<view class="entry-btn" @click="onCreateGroup">
+					<text class="entry-btn-icon">👥</text>
+					<text class="entry-btn-text">发起群聊</text>
+				</view>
 				<view class="entry-btn" @click="onOpenDiscover">
 					<text class="entry-btn-icon">🌍</text>
 					<text class="entry-btn-text">公开房间</text>
@@ -105,7 +109,7 @@
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted } from 'vue'
 	import { getMatrix, errText, DirectoryUser } from '@/common/matrix.uts'
-	import { openChat } from '@/common/app.uts'
+	import { openChat, openGroupPick } from '@/common/app.uts'
 
 	type PresenceCache = {
 		presence: string
@@ -264,6 +268,10 @@
 
 	function onOpenSettings() {
 		uni.navigateTo({ url: '/pages/settings/settings' })
+	}
+
+	function onCreateGroup() {
+		openGroupPick('create')
 	}
 
 	async function onStartChatById() {

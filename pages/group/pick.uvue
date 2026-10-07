@@ -1,0 +1,415 @@
+<template>
+	<view class="pick-page">
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">{{ pageTitle }}</text>
+			<text class="topbar-done" :class="selectedIds.length > 0 ? 'topbar-done-on' : ''" @click="onDone">完成({{ selectedIds.length }})</text>
+		</view>
+		<view class="search-bar">
+			<input
+				class="search-input"
+				v-model="searchText"
+				placeholder="搜索"
+				placeholder-class="search-ph"
+				@confirm="onSearch"
+				@input="onSearchInput"
+			/>
+		</view>
+		<scroll-view class="pick-list" scroll-y>
+			<view v-if="searching" class="hint-row">
+				<text class="hint-text">搜索中…</text>
+			</view>
+			<view v-else-if="users.length == 0" class="hint-row">
+				<text class="hint-text">{{ emptyHint }}</text>
+			</view>
+			<view
+				v-for="user in users"
+				:key="user.user_id"
+				class="user-row"
+				@click="toggleUser(user)"
+			>
+				<view class="check" :class="isSelected(user.user_id) ? 'check-on' : ''">
+					<text v-if="isSelected(user.user_id)" class="check-mark">✓</text>
+				</view>
+				<image class="avatar" :src="avatarOf(user)" mode="aspectFill"></image>
+				<view class="user-info">
+					<text class="user-name">{{ nameOf(user) }}</text>
+					<text class="user-id">{{ user.user_id }}</text>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref } from 'vue'
+	import { getMatrix, errText, DirectoryUser, localPartOf, CreateRoomOpts } from '@/common/matrix.uts'
+
+	type PickUser = {
+		user_id: string
+		display_name: string
+		avatar_url: string
+	}
+
+	const mode = ref<string>('create')
+	const roomId = ref<string>('')
+	const searchText = ref<string>('')
+	const searching = ref<boolean>(false)
+	const users = ref<Array<PickUser>>([])
+	const selectedIds = ref<Array<string>>([])
+	const selectedUsers: Array<PickUser> = []
+	let searchTimer: number | null = null
+	const pageTitle = ref<string>('发起群聊')
+	const emptyHint = ref<string>('搜索用户，或从最近聊天里选人')
+
+	function goBack(): void {
+		uni.navigateBack()
+	}
+
+	function nameOf(user: PickUser): string {
+		if (user.display_name.length > 0) return user.display_name
+		return localPartOf(user.user_id)
+	}
+
+	function avatarOf(user: PickUser): string {
+		const matrix = getMatrix()
+		if (matrix == null) return '/static/logo.png'
+		if (user.avatar_url.length > 0) {
+			const http = matrix.mxcToHttp(user.avatar_url, 80, 80)
+			if (http.length > 0) return http
+		}
+		return '/static/logo.png'
+	}
+
+	function isSelected(uid: string): boolean {
+		return selectedIds.value.indexOf(uid) >= 0
+	}
+
+	function toggleUser(user: PickUser): void {
+		const uid = user.user_id
+		const idx = selectedIds.value.indexOf(uid)
+		if (idx >= 0) {
+			selectedIds.value.splice(idx, 1)
+			let i = 0
+			while (i < selectedUsers.length) {
+				if (selectedUsers[i].user_id == uid) {
+					selectedUsers.splice(i, 1)
+					break
+				}
+				i++
+			}
+		} else {
+			selectedIds.value.push(uid)
+			selectedUsers.push(user)
+		}
+		selectedIds.value = selectedIds.value.slice()
+	}
+
+	function mergeUser(user: PickUser): void {
+		const list = users.value
+		for (let i = 0; i < list.length; i++) {
+			if (list[i].user_id == user.user_id) return
+		}
+		list.push(user)
+	}
+
+	function fromDir(u: DirectoryUser): PickUser {
+		const row: PickUser = {
+			user_id: u.user_id,
+			display_name: u.display_name,
+			avatar_url: u.avatar_url
+		}
+		return row
+	}
+
+	async function loadRecent(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const rooms = await matrix.listRooms()
+			for (let i = 0; i < rooms.length; i++) {
+				const r = rooms[i]
+				if (r.is_direct != true) continue
+				const uid = r.other_user_id
+				if (uid == null || uid.length == 0) continue
+				if (uid == matrix.userId) continue
+				const dn = r.other_displayname != null ? r.other_displayname : ''
+				const av = r.other_avatar != null ? r.other_avatar : ''
+				const row: PickUser = {
+					user_id: uid,
+					display_name: dn.length > 0 ? dn : localPartOf(uid),
+					avatar_url: av
+				}
+				mergeUser(row)
+			}
+			users.value = users.value.slice()
+		} catch (e) {}
+	}
+
+	async function runSearch(term: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		const q = term.trim()
+		if (q.length == 0) {
+			users.value = []
+			await loadRecent()
+			return
+		}
+		searching.value = true
+		try {
+			const found = await matrix.searchUsers(q)
+			users.value = []
+			for (let i = 0; i < found.length; i++) {
+				if (found[i].user_id == matrix.userId) continue
+				mergeUser(fromDir(found[i]))
+			}
+			if (q.indexOf('@') == 0 && q.indexOf(':') > 0) {
+				const row: PickUser = {
+					user_id: q,
+					display_name: localPartOf(q),
+					avatar_url: ''
+				}
+				mergeUser(row)
+			}
+			users.value = users.value.slice()
+		} catch (e) {
+			uni.showToast({ title: errText(e, '搜索失败'), icon: 'none' })
+		}
+		searching.value = false
+	}
+
+	function onSearch(): void {
+		runSearch(searchText.value)
+	}
+
+	function onSearchInput(): void {
+		const old = searchTimer
+		searchTimer = null
+		if (old != null) clearTimeout(old)
+		searchTimer = setTimeout((): void => {
+			searchTimer = null
+			runSearch(searchText.value)
+		}, 400) as number | null
+	}
+
+	function defaultGroupName(): string {
+		const parts: Array<string> = []
+		const matrix = getMatrix()
+		if (matrix != null) {
+			const mine = matrix.getCachedUserName(matrix.userId)
+			if (mine.length > 0) parts.push(mine)
+			else parts.push(localPartOf(matrix.userId))
+		}
+		let i = 0
+		while (i < selectedUsers.length && parts.length < 3) {
+			parts.push(nameOf(selectedUsers[i]))
+			i++
+		}
+		return parts.join('、')
+	}
+
+	async function createGroupNow(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (selectedIds.value.length == 1) {
+			uni.showLoading({ title: '正在打开…' })
+			try {
+				const rid = await matrix.startDM(selectedIds.value[0])
+				uni.hideLoading()
+				uni.redirectTo({ url: '/pages/chat/chat?roomId=' + encodeURIComponent(rid) })
+			} catch (e) {
+				uni.hideLoading()
+				uni.showToast({ title: errText(e, '发起聊天失败'), icon: 'none' })
+			}
+			return
+		}
+		uni.showLoading({ title: '创建中…' })
+		try {
+			const opts: CreateRoomOpts = {
+				name: defaultGroupName(),
+				topic: '',
+				preset: 'private_chat',
+				invite: selectedIds.value.slice(),
+				is_direct: false
+			}
+			const rid = await matrix.createRoom(opts)
+			uni.hideLoading()
+			uni.redirectTo({ url: '/pages/chat/chat?roomId=' + encodeURIComponent(rid) })
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: errText(e, '创建失败'), icon: 'none' })
+		}
+	}
+
+	async function inviteNow(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (roomId.value.length == 0) return
+		uni.showLoading({ title: '邀请中…' })
+		try {
+			for (let i = 0; i < selectedIds.value.length; i++) {
+				await matrix.inviteUser(roomId.value, selectedIds.value[i])
+			}
+			uni.hideLoading()
+			uni.showToast({ title: '已添加到群聊', icon: 'success' })
+			setTimeout((): void => {
+				uni.navigateBack()
+			}, 400)
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: errText(e, '邀请失败'), icon: 'none' })
+		}
+	}
+
+	function onDone(): void {
+		if (selectedIds.value.length == 0) {
+			uni.showToast({ title: '请选择联系人', icon: 'none' })
+			return
+		}
+		if (mode.value == 'invite') {
+			inviteNow()
+			return
+		}
+		createGroupNow()
+	}
+
+	function optStr(obj: UTSJSONObject, key: string): string {
+		try {
+			const v = obj[key]
+			if (v != null) {
+				const s = '' + v
+				if (s.length > 0 && s != 'null' && s != 'undefined') return s
+			}
+		} catch (e) {}
+		return ''
+	}
+
+	onLoad((options: UTSJSONObject) => {
+		const m = optStr(options, 'mode')
+		if (m.length > 0) mode.value = m
+		const rid = optStr(options, 'roomId')
+		if (rid.length > 0) {
+			try {
+				roomId.value = decodeURIComponent(rid)
+			} catch (e) {
+				roomId.value = rid
+			}
+		}
+		if (mode.value == 'invite') {
+			pageTitle.value = '选择联系人'
+			emptyHint.value = '搜索要邀请的用户'
+		}
+		loadRecent()
+	})
+</script>
+
+<style>
+	.pick-page {
+		flex: 1;
+		background-color: #ededed;
+		flex-direction: column;
+	}
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		padding: 48rpx 20rpx 16rpx 20rpx;
+		background-color: #ededed;
+	}
+	.back-btn {
+		width: 72rpx;
+	}
+	.back-text {
+		font-size: 56rpx;
+		color: #181818;
+	}
+	.topbar-title {
+		flex: 1;
+		text-align: center;
+		font-size: 34rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.topbar-done {
+		font-size: 28rpx;
+		color: #b2b2b2;
+		width: 160rpx;
+		text-align: right;
+	}
+	.topbar-done-on {
+		color: #07c160;
+		font-weight: 600;
+	}
+	.search-bar {
+		padding: 8rpx 24rpx 16rpx 24rpx;
+	}
+	.search-input {
+		height: 72rpx;
+		background-color: #ffffff;
+		border-radius: 8rpx;
+		padding-left: 20rpx;
+		padding-right: 20rpx;
+		font-size: 28rpx;
+	}
+	.search-ph {
+		color: #b2b2b2;
+	}
+	.pick-list {
+		flex: 1;
+		background-color: #ffffff;
+	}
+	.hint-row {
+		padding: 48rpx 0;
+		align-items: center;
+	}
+	.hint-text {
+		font-size: 26rpx;
+		color: #999999;
+	}
+	.user-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 20rpx 24rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f2f2f5;
+	}
+	.check {
+		width: 40rpx;
+		height: 40rpx;
+		border-radius: 20rpx;
+		border-width: 2rpx;
+		border-color: #cfcfcf;
+		margin-right: 20rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.check-on {
+		background-color: #07c160;
+		border-color: #07c160;
+	}
+	.check-mark {
+		color: #ffffff;
+		font-size: 22rpx;
+	}
+	.avatar {
+		width: 80rpx;
+		height: 80rpx;
+		border-radius: 10rpx;
+		background-color: #e0e0e6;
+		margin-right: 20rpx;
+	}
+	.user-info {
+		flex: 1;
+		flex-direction: column;
+	}
+	.user-name {
+		font-size: 30rpx;
+		color: #1a1a1a;
+	}
+	.user-id {
+		font-size: 22rpx;
+		color: #999999;
+		margin-top: 4rpx;
+	}
+</style>

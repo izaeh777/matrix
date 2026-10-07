@@ -45,6 +45,22 @@
 			}
 		},
 		{
+			"path": "pages/group/group",
+			"style": {
+				"navigationBarTitleText": "聊天信息",
+				"navigationStyle": "custom",
+				"backgroundColor": "#EDEDED"
+			}
+		},
+		{
+			"path": "pages/group/pick",
+			"style": {
+				"navigationBarTitleText": "选择联系人",
+				"navigationStyle": "custom",
+				"backgroundColor": "#EDEDED"
+			}
+		},
+		{
 			"path": "pages/profile/profile",
 			"style": {
 				"navigationBarTitleText": "我的",
