@@ -6,11 +6,34 @@
 				<text class="back-text">‹</text>
 			</view>
 			<view class="topbar-center">
-				<text class="topbar-title">{{ roomTitleBar }}</text>
+				<text class="topbar-title">{{ roomName }}</text>
 			</view>
 			<view class="topbar-right" @click="openInfo">
-				<text class="more-people">{{ isGroup ? '⊙' : '···' }}</text>
+				<text class="more-people">···</text>
 			</view>
+		</view>
+		<view v-if="headerMembers.length > 0" class="member-strip-wrap">
+			<scroll-view class="member-strip" direction="horizontal" :show-scrollbar="false" :rebound="false">
+				<view class="member-strip-row">
+					<view
+						v-for="(m, i) in headerMembers"
+						:key="m.user_id"
+						class="member-chip"
+						:class="{ 'member-chip-focus': i == focusMemberIndex }"
+					>
+						<image
+							v-if="senderAvatar(m.user_id).length > 0"
+							class="member-ava"
+							:src="senderAvatar(m.user_id)"
+							mode="aspectFill"
+						></image>
+						<view v-else class="member-ava member-ava-fallback">
+							<text class="member-ava-text">{{ senderInitial(m.user_id) }}</text>
+						</view>
+					</view>
+				</view>
+			</scroll-view>
+			<view class="member-strip-glow"></view>
 		</view>
 
 			<view v-if="roomEncrypted" class="encrypt-banner">
@@ -32,7 +55,9 @@
 		</view>
 		<scroll-view
 			class="messages"
-			scroll-y
+			direction="vertical"
+			:show-scrollbar="false"
+			:rebound="false"
 			:scroll-into-view="scrollInto"
 			:scroll-top="scrollTop"
 			:scroll-with-animation="false"
@@ -68,8 +93,6 @@
 				</view>
 				<view class="msg-main">
 				<view class="msg-bubble" :class="{ 'msg-bubble-img': msg.msgtype == 'm.image' }">
-					<text v-if="isGroup && msg.sender != currentUserId && msg.msgtype != 'm.image'" class="msg-sender">{{ senderName(msg.sender) }}</text>
-
 					<view v-if="msg.msgtype == 'm.encrypted'" class="msg-content">
 						<text class="msg-text msg-encrypted">{{ msg.body }}</text>
 					</view>
@@ -98,8 +121,12 @@
 
 					<!-- 音频 -->
 					<view v-else-if="isAudioMsg(msg)" class="msg-audio" :style="{ width: audioBubbleWidth(msg) }" @click="playAudio(msg)">
-						<text class="audio-icon">{{ playingAudioId == msg.event_id ? '⏸' : '▶' }}</text>
-						<text class="audio-label">语音</text>
+						<view class="audio-wave">
+							<view class="audio-bar b1"></view>
+							<view class="audio-bar b2"></view>
+							<view class="audio-bar b3"></view>
+							<view class="audio-bar b4"></view>
+						</view>
 						<text class="audio-dur">{{ audioSeconds(msg) }}″</text>
 					</view>
 
@@ -156,10 +183,10 @@
 				<text class="voice-hold-text">{{ isRecording ? voiceStatusText : '按住 说话' }}</text>
 			</view>
 			<view v-else class="input-field-wrap">
-				<input
+					<input
 					class="msg-input"
 					v-model="inputText"
-					placeholder=""
+					placeholder="请输入消息"
 					placeholder-class="input-placeholder"
 					confirm-type="send"
 					@input="onInputChange"
@@ -168,8 +195,10 @@
 					@confirm="onSend"
 				/>
 			</view>
-			<text class="input-tool-text" @click="toggleEmojiPanel">😊</text>
-			<text v-if="inputText.trim().length == 0" class="input-tool-text plus-btn" @click="toggleMorePanel">＋</text>
+			<text class="input-tool-text" @click="toggleEmojiPanel">☺</text>
+			<view v-if="inputText.trim().length == 0" class="plus-circle" @click="toggleMorePanel">
+				<text class="plus-circle-text">＋</text>
+			</view>
 			<view v-else class="btn-send" @click="onSend">
 				<text class="btn-send-text">发送</text>
 			</view>
@@ -325,7 +354,7 @@
 <script setup lang="uts">
 	import { ref, onUnmounted, onMounted, computed, nextTick } from 'vue'
 	import { getMatrix, MatrixClient, MatrixMessage, MatrixEvent, errText, RoomMember, roomIsGroup, memberDisplayName } from '@/common/matrix.uts'
-	import { bootstrapMatrix, openGroupInfo } from '@/common/app.uts'
+	import { bootstrapMatrix, openGroupInfo, ensureMatrixClient, hasPlatformLogin } from '@/common/app.uts'
 	import { getCallManager, CallSnapshot, h5TapRunAnswer, unlockH5CallMedia } from '@/common/call.uts'
 	import { loadRoomChat, saveRoomChat } from '@/common/storage.uts'
 
@@ -432,6 +461,25 @@
 	const scrollTop = ref<number>(999999)
 	const scrollInto = ref<string>('')
 	const currentUserId = ref<string>('')
+	const headerMembers = computed((): Array<RoomMember> => {
+		const list = groupMembers.value
+		const out: Array<RoomMember> = []
+		for (let i = 0; i < list.length; i++) {
+			const mem = list[i].membership
+			if (mem == 'join' || mem == 'invite') out.push(list[i])
+			if (out.length >= 8) break
+		}
+		return out
+	})
+	const focusMemberIndex = computed((): number => {
+		const list = headerMembers.value
+		if (list.length == 0) return -1
+		const me = currentUserId.value
+		for (let i = 0; i < list.length; i++) {
+			if (list[i].user_id != me) return i
+		}
+		return Math.floor(list.length / 2)
+	})
 	const atMembers = computed((): Array<RoomMember> => {
 		const out: Array<RoomMember> = []
 		const me = currentUserId.value
@@ -1748,17 +1796,19 @@
 		} catch (e) {
 			roomEncrypted.value = false
 		}
-		if (isGroup.value) {
-			try {
-				const list = await matrix.getRoomMembers(roomId.value)
-				groupMembers.value = list
+		try {
+			const list = await matrix.getRoomMembers(roomId.value)
+			groupMembers.value = list
+			if (isGroup.value) {
 				let n = 0
 				for (let i = 0; i < list.length; i++) {
 					const m = list[i].membership
 					if (m == 'join' || m == 'invite') n++
 				}
 				if (n > memberCount.value) memberCount.value = n
-			} catch (e2) {}
+			}
+		} catch (e2) {}
+		if (isGroup.value) {
 			try {
 				const ids = await matrix.getJoinedMembers(roomId.value)
 				if (ids.length > memberCount.value) memberCount.value = ids.length
@@ -2645,9 +2695,16 @@
 	}
 
 	async function initChat() {
-		const matrix = await getMatrix2()
+		let matrix = await getMatrix2()
 		if (matrix == null) {
-			uni.reLaunch({ url: '/pages/login/login' })
+			matrix = ensureMatrixClient()
+		}
+		if (matrix == null) {
+			if (hasPlatformLogin()) {
+				try { uni.navigateBack({}) } catch (e0) {
+					uni.redirectTo({ url: '/pages/home/home' })
+				}
+			}
 			return
 		}
 		currentUserId.value = matrix.userId
@@ -2913,20 +2970,30 @@
 <style>
 	.chat-page {
 		flex: 1;
-		background-color: #ededed;
+		background-color: #ffffff;
 		display: flex;
 		flex-direction: column;
 		position: relative;
 	}
+	/* #ifdef H5 */
+	.chat-page ::-webkit-scrollbar {
+		width: 0;
+		height: 0;
+		display: none;
+	}
+	.member-strip,
+	.messages {
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+	}
+	/* #endif */
 
 	.topbar {
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
-		padding: 48rpx 20rpx 12rpx 20rpx;
-		background-color: #ededed;
-		border-bottom-width: 1rpx;
-		border-bottom-color: #d9d9d9;
+		padding: 48rpx 20rpx 8rpx 20rpx;
+		background-color: #ffffff;
 	}
 
 	.topbar-center {
@@ -3001,6 +3068,69 @@
 	.more-people {
 		font-size: 40rpx;
 		color: #181818;
+	}
+	.member-strip-wrap {
+		position: relative;
+		background-color: #ffffff;
+		padding-bottom: 8rpx;
+	}
+	.member-strip {
+		width: 100%;
+		height: 160rpx;
+		background-color: #ffffff;
+		/* #ifdef H5 */
+		overflow-x: auto;
+		overflow-y: hidden;
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+		/* #endif */
+	}
+	.member-strip-row {
+		flex-direction: row;
+		flex-wrap: nowrap;
+		align-items: center;
+		padding: 12rpx 28rpx 20rpx;
+	}
+	.member-chip {
+		margin-right: 22rpx;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+	}
+	.member-ava {
+		width: 88rpx;
+		height: 88rpx;
+		border-radius: 44rpx;
+		background-color: #e8eef8;
+		border-width: 4rpx;
+		border-color: #ffffff;
+		border-style: solid;
+	}
+	.member-chip-focus .member-ava {
+		width: 112rpx;
+		height: 112rpx;
+		border-radius: 56rpx;
+		border-width: 6rpx;
+		border-color: #ffffff;
+		box-shadow: 0 12rpx 28rpx rgba(47, 111, 242, 0.28);
+	}
+	.member-strip-glow {
+		position: absolute;
+		left: 20%;
+		right: 20%;
+		bottom: 0;
+		height: 36rpx;
+		border-radius: 50%;
+		background-color: rgba(120, 170, 255, 0.18);
+	}
+	.member-ava-fallback {
+		align-items: center;
+		justify-content: center;
+	}
+	.member-ava-text {
+		font-size: 28rpx;
+		color: #2f6ff2;
+		font-weight: 700;
 	}
 
 	.at-mask {
@@ -3084,7 +3214,7 @@
 		flex: 1;
 		height: 0;
 		padding: 20rpx 20rpx;
-		background-color: #ededed;
+		background-color: #ffffff;
 	}
 	.chat-bottom-anchor {
 		width: 100%;
@@ -3156,7 +3286,7 @@
 	.msg-avatar {
 		width: 72rpx;
 		height: 72rpx;
-		border-radius: 12rpx;
+		border-radius: 36rpx;
 		background-color: #e8e8e8;
 		display: flex;
 		align-items: center;
@@ -3170,11 +3300,11 @@
 	.msg-avatar-me {
 		margin-right: 0;
 		margin-left: 14rpx;
-		background-color: #07c160;
+		background-color: #e8eef8;
 	}
 
 	.msg-avatar-me .avatar-letter {
-		color: #ffffff;
+		color: #2f6ff2;
 	}
 
 	.msg-avatar-img {
@@ -3189,16 +3319,21 @@
 	}
 
 	.msg-bubble {
-		background-color: #ffffff;
-		border-radius: 14rpx 14rpx 14rpx 4rpx;
-		padding: 18rpx 22rpx;
+		background-color: #2f6ff2;
+		border-radius: 28rpx;
+		padding: 20rpx 24rpx;
 		max-width: 520rpx;
 		flex-direction: column;
+		box-shadow: 0 8rpx 20rpx rgba(47, 111, 242, 0.22);
 	}
 
 	.msg-row-me .msg-bubble {
-		background-color: #95ec69;
-		border-radius: 14rpx 14rpx 4rpx 14rpx;
+		background-color: #ffffff;
+		border-radius: 28rpx;
+		border-width: 1rpx;
+		border-color: #e8eef8;
+		border-style: solid;
+		box-shadow: 0 6rpx 18rpx rgba(47, 111, 242, 0.08);
 	}
 
 	/* 图片消息：不区分左右，不加气泡背景和边框 */
@@ -3222,7 +3357,7 @@
 
 	.msg-image-uniform .msg-img {
 		width: 360rpx;
-		border-radius: 8rpx;
+		border-radius: 16rpx;
 	}
 
 	.msg-sender {
@@ -3238,13 +3373,13 @@
 
 	.msg-text {
 		font-size: 30rpx;
-		color: #1a1a1a;
+		color: #ffffff;
 		line-height: 1.55;
 		max-width: 476rpx;
 	}
 
 	.msg-row-me .msg-text {
-		color: #1a1a1a;
+		color: #2f6ff2;
 	}
 
 	.msg-time {
@@ -3262,14 +3397,14 @@
 		justify-content: flex-end;
 	}
 
-	/* ---- 输入栏（微信手机版风格） ---- */
+	/* ---- 输入栏 ---- */
 	.input-bar {
 		flex-direction: row;
 		align-items: center;
-		padding: 12rpx 12rpx 40rpx 12rpx;
-		background-color: #f7f7f7;
+		padding: 16rpx 16rpx 40rpx 16rpx;
+		background-color: #ffffff;
 		border-top-width: 1rpx;
-		border-top-color: #d9d9d9;
+		border-top-color: #f0f2f5;
 		z-index: 20;
 	}
 	.input-tool {
@@ -3280,8 +3415,24 @@
 	}
 	.input-tool-text {
 		font-size: 40rpx;
-		color: #181818;
+		color: #333333;
 		padding: 0 8rpx;
+	}
+	.plus-circle {
+		width: 56rpx;
+		height: 56rpx;
+		border-radius: 28rpx;
+		border-width: 2rpx;
+		border-color: #333333;
+		border-style: solid;
+		align-items: center;
+		justify-content: center;
+		margin-left: 4rpx;
+	}
+	.plus-circle-text {
+		font-size: 34rpx;
+		color: #333333;
+		line-height: 1;
 	}
 	.voice-hold {
 		flex: 1;
@@ -3314,12 +3465,13 @@
 
 	.input-field-wrap {
 		flex: 1;
-		background-color: #ffffff;
-		border-radius: 10rpx;
-		padding: 0 16rpx;
-		min-height: 64rpx;
+		background-color: #f5f7fb;
+		border-radius: 40rpx;
+		padding: 0 24rpx;
+		min-height: 72rpx;
 		max-height: 200rpx;
 		justify-content: center;
+		margin: 0 8rpx;
 	}
 
 	.msg-input {
@@ -3417,7 +3569,7 @@
 
 	/* 发送按钮 */
 	.btn-send {
-		background-color: #07c160;
+		background-color: #2f6ff2;
 		border-radius: 8rpx;
 		padding: 14rpx 28rpx;
 		margin-left: 10rpx;
@@ -3436,8 +3588,10 @@
 
 	/* ---- 底部更多功能面板（微信风格） ---- */
 	.more-panel {
-		background-color: #f7f7f7;
+		background-color: #ffffff;
 		padding: 32rpx 30rpx;
+		border-top-width: 1rpx;
+		border-top-color: #f0f2f5;
 	}
 
 	.more-grid {
@@ -3473,7 +3627,7 @@
 	/* 图片消息 */
 	.msg-img {
 		width: 360rpx;
-		border-radius: 12rpx;
+		border-radius: 16rpx;
 		background-color: #ffffff;
 	}
 
@@ -3512,29 +3666,33 @@
 	.msg-audio {
 		flex-direction: row;
 		align-items: center;
-		padding: 12rpx;
-		min-width: 200rpx;
+		padding: 4rpx 8rpx;
+		min-width: 160rpx;
 	}
-
-	.audio-icon {
-		font-size: 36rpx;
-		color: #07c160;
-		margin-right: 12rpx;
+	.audio-wave {
+		flex-direction: row;
+		align-items: flex-end;
+		height: 36rpx;
+		margin-right: 14rpx;
 	}
-
+	.audio-bar {
+		width: 6rpx;
+		border-radius: 3rpx;
+		background-color: #ffffff;
+		margin-right: 5rpx;
+	}
+	.audio-bar.b1 { height: 16rpx; }
+	.audio-bar.b2 { height: 28rpx; }
+	.audio-bar.b3 { height: 20rpx; }
+	.audio-bar.b4 { height: 32rpx; margin-right: 0; }
+	.msg-row-me .audio-bar {
+		background-color: #2f6ff2;
+	}
 	.audio-dur {
 		font-size: 28rpx;
-		color: #1a1a1a;
-		margin-left: 8rpx;
+		color: #ffffff;
 	}
-	.audio-label {
-		font-size: 28rpx;
-		color: #1a1a1a;
-		margin-left: 4rpx;
-	}
-	.msg-row-me .audio-dur { color: #1a1a1a; }
-	.msg-row-me .audio-label { color: #1a1a1a; }
-	.msg-row-me .audio-icon { color: #1a1a1a; }
+	.msg-row-me .audio-dur { color: #2f6ff2; }
 
 	/* 位置 */
 	.msg-location {
@@ -3567,7 +3725,7 @@
 	}
 
 	.msg-row-me .msg-edited {
-		color: rgba(255,255,255,0.7);
+		color: rgba(47, 111, 242, 0.55);
 	}
 
 	/* 发送失败（微信感叹号） */
@@ -3606,106 +3764,17 @@
 		margin-bottom: 6rpx;
 	}
 
-	/* 图片 */
+	/* 图片（兜底，主样式见上方） */
 	.msg-img {
-		width: 320rpx;
-		border-radius: 10rpx;
+		width: 360rpx;
+		border-radius: 16rpx;
 		background-color: #ffffff;
 	}
 
-	/* 文件 */
-	.msg-file {
-		flex-direction: row;
-		align-items: center;
-		padding: 6rpx;
-		min-width: 240rpx;
-	}
-
-	.file-icon {
-		font-size: 44rpx;
-		margin-right: 12rpx;
-	}
-
-	.file-info {
-		flex: 1;
-	}
-
-	.file-name {
-		font-size: 26rpx;
-		color: #1a1a1a;
-	}
-
-	.file-size {
-		font-size: 22rpx;
-		color: #888;
-		margin-top: 4rpx;
-	}
-
-	.msg-row-me .file-name { color: #1a1a1a; }
-	.msg-row-me .file-size { color: rgba(255,255,255,0.7); }
-
-	/* 语音 */
-	.msg-audio {
-		flex-direction: row;
-		align-items: center;
-		padding: 12rpx;
-		min-width: 200rpx;
-	}
-
-	.audio-icon {
-		font-size: 36rpx;
-		color: #07c160;
-		margin-right: 12rpx;
-	}
-
-	.audio-dur {
-		font-size: 28rpx;
-		color: #1a1a1a;
-		margin-left: 8rpx;
-	}
-	.audio-label {
-		font-size: 28rpx;
-		color: #1a1a1a;
-		margin-left: 4rpx;
-	}
-	.msg-row-me .audio-dur { color: #1a1a1a; }
-	.msg-row-me .audio-label { color: #1a1a1a; }
-
-	/* 位置 */
-	.msg-location {
-		flex-direction: row;
-		align-items: center;
-		padding: 12rpx;
-	}
-
-	.loc-icon {
-		font-size: 36rpx;
-		margin-right: 8rpx;
-	}
-
-	.loc-text {
-		font-size: 26rpx;
-		color: #1a1a1a;
-	}
-
-	.msg-row-me .loc-text { color: #1a1a1a; }
-
-	/* 已撤回 */
-	.msg-redacted {
-		color: #888;
-		font-size: 26rpx;
-		font-style: italic;
-	}
-
-	/* 编辑标记 */
-	.msg-edited {
-		font-size: 20rpx;
-		color: #888;
-		margin-left: 8rpx;
-	}
+	.msg-row-me .loc-text { color: #2f6ff2; }
 
 	.msg-row-me .msg-edited {
-		color: rgba(255,255,255,0.6);
+		color: rgba(47, 111, 242, 0.55);
 	}
 
 	/* 已读/未读 */

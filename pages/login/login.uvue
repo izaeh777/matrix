@@ -5,7 +5,7 @@
 			<view class="header">
 				<text class="brand">i-tiklink</text>
 				<view class="lang" @click="onLang">
-					<text class="lang-icon">◎</text>
+					<image class="lang-icon" src="/static/login/china.png" mode="aspectFit"></image>
 					<text class="lang-text">简体中文</text>
 					<text class="lang-caret">▾</text>
 				</view>
@@ -42,7 +42,7 @@
 			<view class="method" @click="onOther('wave')">
 				<image class="method-icon" src="/static/login/fb.png" mode="aspectFit" />
 			</view>
-			<view class="method" @click="goLogin">
+			<view class="method" @click="goEmailLogin">
 				<image class="method-icon" src="/static/login/ball-big.png" mode="aspectFit" />
 			</view>
 		</view>
@@ -54,8 +54,12 @@
 		uni.navigateTo({ url: '/pages/login/login-email' })
 	}
 
+	function goEmailLogin() {
+		uni.navigateTo({ url: '/pages/login/login-mail' })
+	}
+
 	function onRegister() {
-		uni.showToast({ title: '请联系管理员开通账号', icon: 'none' })
+		uni.navigateTo({ url: '/pages/login/login-mail?mode=register' })
 	}
 
 	function onLang() {
@@ -63,6 +67,10 @@
 	}
 
 	function onOther(name: string) {
+		if (name == 'tp') {
+			uni.showToast({ title: '钱包登录暂未开放', icon: 'none' })
+			return
+		}
 		uni.showToast({ title: '该登录方式暂未开放', icon: 'none' })
 	}
 </script>
@@ -114,24 +122,24 @@
 		align-items: center;
 		border-width: 2rpx;
 		border-style: solid;
-		border-color: #d7e4f5;
-		background-color: #ffffff;
+		border-color: #7eb6f5;
+		background-color: #f3f8ff;
 		border-radius: 999rpx;
-		padding: 10rpx 20rpx;
+		padding: 10rpx 22rpx;
 	}
 	.lang-icon {
-		font-size: 22rpx;
-		color: #4b6b8a;
-		margin-right: 8rpx;
+		width: 28rpx;
+		height: 28rpx;
+		margin-right: 10rpx;
 	}
 	.lang-text {
 		font-size: 24rpx;
 		color: #334155;
 	}
 	.lang-caret {
-		font-size: 22rpx;
-		color: #94a3b8;
-		margin-left: 6rpx;
+		font-size: 20rpx;
+		color: #1a1a1a;
+		margin-left: 8rpx;
 	}
 
 	.mascot-wrap {
@@ -174,13 +182,16 @@
 
 	.btn-primary {
 		width: 622rpx;
-		height: 96rpx;
-		background-color: #1e6fff;
-		border-radius: 20rpx;
+		height: 112rpx;
+		background-color: #1861c8;
+		border-radius: 48rpx;
 		justify-content: center;
 		align-items: center;
 		position: relative;
 		z-index: 2;
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #1454b0;
 	}
 	.btn-primary-text {
 		color: #ffffff;
@@ -189,18 +200,18 @@
 	}
 	.btn-outline {
 		width: 622rpx;
-		height: 96rpx;
+		height: 112rpx;
 		margin-top: 22rpx;
-		border-width: 3rpx;
+		border-width: 2rpx;
 		border-style: solid;
-		border-color: #1e6fff;
+		border-color: #1861c8;
 		background-color: #ffffff;
-		border-radius: 20rpx;
+		border-radius: 48rpx;
 		justify-content: center;
 		align-items: center;
 	}
 	.btn-outline-text {
-		color: #1e6fff;
+		color: #1861c8;
 		font-size: 32rpx;
 		font-weight: 600;
 	}

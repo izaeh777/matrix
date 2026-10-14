@@ -1,0 +1,260 @@
+/**
+ * 平台认证（itiklink /api/v1/auth）
+ * 鉴权头: token: <access_token>
+ */
+
+const API_HOST = 'https://m.itiklink.com'
+const KEY_PLATFORM = 'platform_session_v1'
+
+function isH5DevHost(host: string): boolean {
+	if (host == 'localhost' || host == '127.0.0.1' || host == '[::1]' || host == '::1') return true
+	if (host.endsWith('.localhost')) return true
+	if (host.startsWith('192.168.') || host.startsWith('10.')) return true
+	if (host.startsWith('172.')) {
+		const parts = host.split('.')
+		if (parts.length > 1) {
+			const n = parseInt(parts[1])
+			if (n >= 16 && n <= 31) return true
+		}
+	}
+	return false
+}
+
+function apiBase(): string {
+	// #ifdef H5
+	try {
+		const loc = (window as any).location
+		if (loc != null && isH5DevHost('' + loc.hostname)) return ''
+	} catch (e0) {}
+	// #endif
+	return API_HOST
+}
+
+export type PlatformSession = {
+	token: string
+	email: string
+	nickname: string
+	user_id: string
+}
+
+function pickStr(obj: UTSJSONObject, key: string): string {
+	try {
+		const v = obj[key]
+		if (v != null) {
+			const s = '' + v
+			if (s.length > 0 && s != 'null' && s != 'undefined' && s != '[object Object]') return s
+		}
+	} catch (e0) {}
+	try {
+		const s2 = obj.getString(key)
+		if (s2 != null && s2.length > 0 && s2 != 'null') return s2
+	} catch (e1) {}
+	return ''
+}
+
+function pickNum(obj: UTSJSONObject, key: string): number {
+	try {
+		const n = obj.getNumber(key)
+		if (n != null) return n
+	} catch (e0) {}
+	try {
+		const raw = obj[key]
+		if (raw == null) return 0
+		const n = parseFloat('' + raw)
+		if (n == n) return n
+	} catch (e1) {}
+	return 0
+}
+
+export function savePlatformSession(session: PlatformSession): void {
+	try {
+		uni.setStorageSync(KEY_PLATFORM, JSON.stringify(session))
+	} catch (e) {
+		console.error('savePlatformSession fail', e)
+	}
+}
+
+export function loadPlatformSession(): PlatformSession | null {
+	try {
+		const raw = uni.getStorageSync(KEY_PLATFORM)
+		if (raw == null) return null
+		const text = ('' + raw).trim()
+		if (text.length == 0 || text.charAt(0) != '{') return null
+		const obj = JSON.parse(text) as UTSJSONObject
+		const token = pickStr(obj, 'token')
+		if (token.length == 0) return null
+		const s: PlatformSession = {
+			token: token,
+			email: pickStr(obj, 'email'),
+			nickname: pickStr(obj, 'nickname'),
+			user_id: pickStr(obj, 'user_id')
+		}
+		return s
+	} catch (e) {
+		return null
+	}
+}
+
+export function clearPlatformSession(): void {
+	try {
+		uni.removeStorageSync(KEY_PLATFORM)
+	} catch (e) {}
+}
+
+export function platformToken(): string {
+	const s = loadPlatformSession()
+	if (s == null) return ''
+	return s.token
+}
+
+function httpPostForm(path: string, fields: UTSJSONObject, withAuth: boolean): Promise<UTSJSONObject> {
+	const url = apiBase() + path
+	const header: UTSJSONObject = {
+		'Content-Type': 'application/x-www-form-urlencoded'
+	}
+	if (withAuth) {
+		const t = platformToken()
+		if (t.length > 0) header['token'] = t
+	}
+	return new Promise((resolve, reject) => {
+		uni.request({
+			url: url,
+			method: 'POST',
+			timeout: 20000,
+			header: header,
+			data: fields,
+			success: (res) => {
+				try {
+					const code = res.statusCode
+					if (code < 200 || code >= 300) {
+						reject(new Error('HTTP_' + code))
+						return
+					}
+					const data = res.data as UTSJSONObject
+					if (data == null) {
+						reject(new Error('empty'))
+						return
+					}
+					resolve(data)
+				} catch (e) {
+					reject(new Error('parse fail'))
+				}
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}
+
+function assertOk(root: UTSJSONObject, fallback: string): UTSJSONObject {
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : fallback)
+	}
+	const data = root['data'] as UTSJSONObject
+	if (data == null) {
+		const empty: UTSJSONObject = {}
+		return empty
+	}
+	return data
+}
+
+function parseSession(data: UTSJSONObject, emailFallback: string): PlatformSession {
+	let token = pickStr(data, 'token')
+	if (token.length == 0) token = pickStr(data, 'access_token')
+	if (token.length == 0) {
+		const user = data['user'] as UTSJSONObject
+		if (user != null) {
+			token = pickStr(user, 'token')
+			if (token.length == 0) token = pickStr(user, 'access_token')
+		}
+	}
+	if (token.length == 0) throw new Error('登录成功但未返回 token')
+
+	let email = pickStr(data, 'email')
+	let nickname = pickStr(data, 'nickname')
+	if (nickname.length == 0) nickname = pickStr(data, 'username')
+	if (nickname.length == 0) nickname = pickStr(data, 'name')
+	let userId = pickStr(data, 'user_id')
+	if (userId.length == 0) {
+		const idNum = pickNum(data, 'id')
+		if (idNum > 0) userId = '' + idNum
+	}
+	const userObj = data['user'] as UTSJSONObject
+	if (userObj != null) {
+		if (email.length == 0) email = pickStr(userObj, 'email')
+		if (nickname.length == 0) {
+			nickname = pickStr(userObj, 'nickname')
+			if (nickname.length == 0) nickname = pickStr(userObj, 'username')
+		}
+		if (userId.length == 0) {
+			userId = pickStr(userObj, 'id')
+			if (userId.length == 0) {
+				const n = pickNum(userObj, 'id')
+				if (n > 0) userId = '' + n
+			}
+		}
+	}
+	if (email.length == 0) email = emailFallback
+	const out: PlatformSession = {
+		token: token,
+		email: email,
+		nickname: nickname,
+		user_id: userId
+	}
+	return out
+}
+
+/** 发送邮箱验证码 event=register|login|resetpwd */
+export async function sendEmailCode(email: string, event: string): Promise<void> {
+	const fields: UTSJSONObject = {
+		email: email,
+		event: event
+	}
+	const root = await httpPostForm('/api/v1/auth/email/send-code', fields, false)
+	assertOk(root, '验证码发送失败')
+}
+
+/** 邮箱验证码登录 */
+export async function emailLogin(email: string, code: string): Promise<PlatformSession> {
+	const fields: UTSJSONObject = {
+		email: email,
+		code: code
+	}
+	const root = await httpPostForm('/api/v1/auth/email/login', fields, false)
+	const data = assertOk(root, '登录失败')
+	const session = parseSession(data, email)
+	savePlatformSession(session)
+	return session
+}
+
+/** 邮箱注册 */
+export async function emailRegister(email: string, code: string, password: string, nickname: string): Promise<PlatformSession> {
+	const fields: UTSJSONObject = {
+		email: email,
+		code: code,
+		password: password,
+		nickname: nickname
+	}
+	const root = await httpPostForm('/api/v1/auth/email/register', fields, false)
+	const data = assertOk(root, '注册失败')
+	// 注册成功后可能不带 token，再走一次登录
+	let token = pickStr(data, 'token')
+	if (token.length == 0) token = pickStr(data, 'access_token')
+	if (token.length > 0) {
+		const session = parseSession(data, email)
+		savePlatformSession(session)
+		return session
+	}
+	return await emailLogin(email, code)
+}
+
+export async function platformLogout(): Promise<void> {
+	try {
+		const fields: UTSJSONObject = {}
+		await httpPostForm('/api/v1/auth/logout', fields, true)
+	} catch (e) {}
+	clearPlatformSession()
+}

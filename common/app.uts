@@ -2,8 +2,9 @@
  * 全局应用状态管理
  * 用 uni-app 的 getApp() globalData 模式
  */
-import { MatrixClient, setMatrix, clearMatrix } from './matrix.uts'
+import { MatrixClient, setMatrix, clearMatrix, getMatrix } from './matrix.uts'
 import { saveSession, loadSession, clearSession, SessionInfo } from './storage.uts'
+import { loadPlatformSession } from './platform.uts'
 import { bindCallToMatrix, getCallManager } from './call.uts'
 
 export function bootstrapMatrix(): MatrixClient | null {
@@ -14,6 +15,33 @@ export function bootstrapMatrix(): MatrixClient | null {
 	setMatrix(client)
 	bindCallToMatrix()
 	return client
+}
+
+/** 是否已有平台邮箱登录态（不含 Matrix） */
+export function hasPlatformLogin(): boolean {
+	return loadPlatformSession() != null
+}
+
+/** 引导补登 Matrix（聊天账号），不清除平台 session */
+export function openMatrixLogin(): void {
+	uni.showToast({ title: '聊天需先登录 Matrix 账号', icon: 'none' })
+	uni.navigateTo({ url: '/pages/login/login-email' })
+}
+
+/**
+ * 确保 Matrix 可用。
+ * 仅平台登录时不踢到登录首页（避免“被退出”），改为引导 Matrix 登录。
+ */
+export function ensureMatrixClient(): MatrixClient | null {
+	let matrix = getMatrix()
+	if (matrix == null) matrix = bootstrapMatrix()
+	if (matrix != null) return matrix
+	if (hasPlatformLogin()) {
+		openMatrixLogin()
+		return null
+	}
+	uni.reLaunch({ url: '/pages/login/login' })
+	return null
 }
 
 export function startMatrixSession(session: SessionInfo): MatrixClient {

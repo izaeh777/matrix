@@ -44,6 +44,21 @@
 					"target": "https://matrix.itiklink.com",
 					"changeOrigin": true,
 					"secure": false
+				},
+				"/api/cms": {
+					"target": "https://m.itiklink.com",
+					"changeOrigin": true,
+					"secure": false
+				},
+				"/api/v1": {
+					"target": "https://m.itiklink.com",
+					"changeOrigin": true,
+					"secure": false
+				},
+				"/assets": {
+					"target": "https://m.itiklink.com",
+					"changeOrigin": true,
+					"secure": false
 				}
 			}
 		}

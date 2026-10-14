@@ -2,13 +2,13 @@
 	<view class="profile-page">
 		<view class="top-row">
 			<view class="lang-pill" @click="onSoon">
-				<text class="lang-globe">🌐</text>
+				<image class="lang-globe" src="/static/login/china.png" mode="aspectFit"></image>
 				<text class="lang-text">简体中文</text>
 				<text class="lang-caret">▾</text>
 			</view>
 			<view class="top-right">
-				<text class="top-icon" @click="onSoon">🔔</text>
-				<text class="top-icon" @click="onSettings">⚙</text>
+				<image class="top-icon" src="/static/login/e1.png" mode="aspectFit" @click="goNotify"></image>
+				<image class="top-icon" src="/static/login/e2.png" mode="aspectFit" @click="onSettings"></image>
 			</view>
 		</view>
 
@@ -51,20 +51,20 @@
 				</view>
 			</view>
 			<view class="quick-row">
-				<view class="quick-item" @click="onSoon">
-					<text class="quick-ico">▦</text>
+				<view class="quick-item" @click="goStats">
+					<image class="quick-ico" src="/static/login/q4.png" mode="aspectFit"></image>
 					<text class="quick-label">项目分析</text>
 				</view>
 				<view class="quick-item" @click="goRooms">
-					<text class="quick-ico">💬</text>
+					<image class="quick-ico" src="/static/login/q3.png" mode="aspectFit"></image>
 					<text class="quick-label">沟通交流</text>
 				</view>
 				<view class="quick-item" @click="onSoon">
-					<text class="quick-ico">◎</text>
+					<image class="quick-ico" src="/static/login/q2.png" mode="aspectFit"></image>
 					<text class="quick-label">项目分成</text>
 				</view>
 				<view class="quick-item" @click="onSoon">
-					<text class="quick-ico">♡</text>
+					<image class="quick-ico" src="/static/login/q1.png" mode="aspectFit"></image>
 					<text class="quick-label">专属服务</text>
 				</view>
 			</view>
@@ -73,40 +73,70 @@
 		<view class="func-card">
 			<text class="func-title">功能中心</text>
 			<view class="func-cell" @click="onDiscover">
-				<text class="func-ico">☁</text>
+				<image class="func-ico" src="/static/login/f1.png" mode="aspectFit"></image>
 				<text class="func-label">我的发布</text>
 				<text class="func-arrow">›</text>
 			</view>
 			<view class="func-line"></view>
 			<view class="func-cell" @click="goContacts">
-				<text class="func-ico">♡</text>
+				<image class="func-ico" src="/static/login/f2.png" mode="aspectFit"></image>
 				<text class="func-label">我的关注</text>
 				<text class="func-arrow">›</text>
 			</view>
 			<view class="func-line"></view>
 			<view class="func-cell" @click="onInvite">
-				<text class="func-ico">☺</text>
+				<image class="func-ico" src="/static/login/f3.png" mode="aspectFit"></image>
 				<text class="func-label">邀请好友</text>
 				<text class="func-arrow">›</text>
 			</view>
 		</view>
 
 		<view class="wx-tabbar">
-			<view class="wx-tab" @click="goRooms">
-				<text class="wx-tab-icon">💬</text>
-				<text class="wx-tab-label">微信</text>
+			<view class="wx-tab" @click="goHome">
+				<image class="wx-tab-icon" src="/static/login/s11.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">首页</text>
 			</view>
-			<view class="wx-tab" @click="goContacts">
-				<text class="wx-tab-icon">👤</text>
-				<text class="wx-tab-label">通讯录</text>
+			<view class="wx-tab" @click="goRooms">
+				<image class="wx-tab-icon" src="/static/login/s22.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">消息</text>
 			</view>
 			<view class="wx-tab" @click="onDiscover">
-				<text class="wx-tab-icon">◈</text>
+				<image class="wx-tab-icon" src="/static/login/s33.png" mode="aspectFit"></image>
 				<text class="wx-tab-label">发现</text>
 			</view>
+			<view class="wx-tab" @click="goNotify">
+				<image class="wx-tab-icon" src="/static/login/s44.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">通知</text>
+			</view>
 			<view class="wx-tab wx-tab-on">
-				<text class="wx-tab-icon">◎</text>
-				<text class="wx-tab-label">我</text>
+				<image class="wx-tab-icon" src="/static/login/s5.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">我的</text>
+			</view>
+		</view>
+
+		<view v-if="showInvite" class="invite-mask" @click="closeInvite">
+			<view class="invite-sheet" @click.stop="">
+				<text class="invite-title">邀请好友</text>
+				<text class="invite-desc">邀请新用户提前获得新项目信息以及平台会员其他特权时刻关注平台信息</text>
+				<image class="invite-qr" :src="inviteQr" mode="aspectFit"></image>
+				<view class="or-row">
+					<view class="or-line"></view>
+					<text class="or-text">或</text>
+					<view class="or-line"></view>
+				</view>
+				<view class="code-pill" @click="copyFriendCode">
+					<text class="code-text">我的好友码 {{ friendCode }}</text>
+					<text class="code-copy">⧉</text>
+				</view>
+				<view v-if="showCodeInput" class="code-input-wrap">
+					<input class="code-input" v-model="enterCode" placeholder="请输入好友码" />
+					<view class="code-go" @click="applyFriendCode">
+						<text class="code-go-text">添加</text>
+					</view>
+				</view>
+				<view class="invite-btn" @click="onEnterCode">
+					<text class="invite-btn-text">{{ showCodeInput ? '收起' : '输入好友码' }}</text>
+				</view>
 			</view>
 		</view>
 	</view>
@@ -116,27 +146,55 @@
 	import { ref, computed, onMounted, onUnmounted } from 'vue'
 	import { getMatrix } from '@/common/matrix.uts'
 	import { loadSession, saveSession, SessionInfo } from '@/common/storage.uts'
+	import { loadPlatformSession, PlatformSession } from '@/common/platform.uts'
+	import { friendCodeOf, inviteQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
+	import { openChat } from '@/common/app.uts'
 
 	const session = ref<SessionInfo | null>(loadSession())
+	const platform = ref<PlatformSession | null>(loadPlatformSession())
 	const displayName = computed(() => {
 		const s = session.value
-		if (s == null) return ''
-		if (s.display_name != null && s.display_name.length > 0) return s.display_name
-		return s.user_id
+		if (s != null) {
+			if (s.display_name != null && s.display_name.length > 0) return s.display_name
+			return s.user_id
+		}
+		const p = platform.value
+		if (p != null) {
+			if (p.nickname.length > 0) return p.nickname
+			return p.email
+		}
+		return ''
 	})
 	const userId = computed(() => {
 		const s = session.value
-		if (s == null) return ''
-		return s.user_id
+		if (s != null) return s.user_id
+		const p = platform.value
+		if (p != null) {
+			if (p.user_id.length > 0) return p.user_id
+			return p.email
+		}
+		return ''
 	})
 	const accountName = computed(() => {
 		const s = session.value
-		if (s == null) return ''
-		const id = s.user_id
-		if (id.length == 0) return ''
-		return id.split(':')[0].replace('@', '')
+		if (s != null) {
+			const id = s.user_id
+			if (id.length == 0) return ''
+			return id.split(':')[0].replace('@', '')
+		}
+		const p = platform.value
+		if (p != null) {
+			if (p.email.length > 0) return p.email
+			return p.user_id
+		}
+		return ''
 	})
 	const avatarUrl = ref<string>('/static/login/tiki.png')
+	const showInvite = ref<boolean>(false)
+	const showCodeInput = ref<boolean>(false)
+	const enterCode = ref<string>('')
+	const friendCode = computed((): string => friendCodeOf(userId.value as string))
+	const inviteQr = computed((): string => inviteQrUrl(userId.value as string))
 	let offSync: (() => void) | null = null
 
 	function stopOff(handler: (() => void) | null): void {
@@ -145,11 +203,13 @@
 	}
 
 	async function setupProfile(): Promise<void> {
+		platform.value = loadPlatformSession()
 		const matrix = getMatrix()
-		if (matrix == null) {
+		if (matrix == null && platform.value == null && session.value == null) {
 			uni.reLaunch({ url: '/pages/login/login' })
 			return
 		}
+		if (matrix == null) return
 		try {
 			const p = await matrix.getProfile(userId.value)
 			const s = session.value
@@ -187,7 +247,13 @@
 	function onSoon() {
 		uni.showToast({ title: '即将开放', icon: 'none' })
 	}
+	function goStats() {
+		uni.navigateTo({ url: '/pages/stats/stats' })
+	}
 
+	function goHome() {
+		uni.redirectTo({ url: '/pages/home/home' })
+	}
 	function goRooms() {
 		uni.redirectTo({ url: '/pages/rooms/rooms' })
 	}
@@ -200,6 +266,9 @@
 	function onDiscover() {
 		uni.redirectTo({ url: '/pages/discover/discover' })
 	}
+	function goNotify() {
+		uni.redirectTo({ url: '/pages/notify/notify' })
+	}
 	function onSettings() {
 		uni.navigateTo({ url: '/pages/settings/settings' })
 	}
@@ -209,12 +278,44 @@
 			uni.showToast({ title: '暂无账号', icon: 'none' })
 			return
 		}
+		showCodeInput.value = false
+		enterCode.value = ''
+		showInvite.value = true
+	}
+
+	function closeInvite(): void {
+		showInvite.value = false
+	}
+
+	function copyFriendCode(): void {
 		uni.setClipboardData({
-			data: id,
+			data: friendCode.value,
 			success: () => {
-				uni.showToast({ title: '已复制你的账号', icon: 'none' })
+				uni.showToast({ title: '好友码已复制', icon: 'none' })
 			}
 		})
+	}
+
+	function onEnterCode(): void {
+		showCodeInput.value = !showCodeInput.value
+	}
+
+	async function applyFriendCode(): Promise<void> {
+		const code = enterCode.value.trim()
+		if (code.length == 0) {
+			uni.showToast({ title: '请输入好友码', icon: 'none' })
+			return
+		}
+		const target = matrixIdFromFriendCode(code)
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const rid = await matrix.startDM(target)
+			showInvite.value = false
+			openChat(rid)
+		} catch (e) {
+			uni.showToast({ title: '未找到该好友码', icon: 'none' })
+		}
 	}
 </script>
 
@@ -223,6 +324,7 @@
 		flex: 1;
 		background-color: #f3f6fb;
 		flex-direction: column;
+		position: relative;
 	}
 	.top-row {
 		flex-direction: row;
@@ -234,20 +336,23 @@
 	.lang-pill {
 		flex-direction: row;
 		align-items: center;
-		background-color: #ffffff;
+		background-color: #f3f8ff;
 		border-radius: 40rpx;
 		padding: 10rpx 22rpx;
+		border-width: 2rpx;
+		border-color: #7eb6f5;
+		border-style: solid;
 	}
-	.lang-globe { font-size: 28rpx; margin-right: 8rpx; }
+	.lang-globe { width: 28rpx; height: 28rpx; margin-right: 8rpx; }
 	.lang-text { font-size: 26rpx; color: #1a1a1a; }
-	.lang-caret { font-size: 22rpx; color: #888; margin-left: 6rpx; }
+	.lang-caret { font-size: 20rpx; color: #1a1a1a; margin-left: 6rpx; }
 	.top-right {
 		flex-direction: row;
 		align-items: center;
 	}
 	.top-icon {
-		font-size: 40rpx;
-		color: #333;
+		width: 40rpx;
+		height: 40rpx;
 		margin-left: 28rpx;
 	}
 	.user-row {
@@ -353,12 +458,14 @@
 	}
 	.quick-item {
 		flex: 1;
+		flex-direction: row;
 		align-items: center;
+		justify-content: center;
 	}
 	.quick-ico {
-		font-size: 32rpx;
-		color: #4b5563;
-		margin-bottom: 8rpx;
+		width: 28rpx;
+		height: 28rpx;
+		margin-right: 6rpx;
 	}
 	.quick-label {
 		font-size: 22rpx;
@@ -382,9 +489,8 @@
 		padding: 28rpx 24rpx;
 	}
 	.func-ico {
-		font-size: 34rpx;
-		color: #374151;
-		width: 48rpx;
+		width: 36rpx;
+		height: 36rpx;
 		margin-right: 16rpx;
 	}
 	.func-label {
@@ -414,7 +520,117 @@
 		align-items: center;
 		padding: 10rpx 0 12rpx;
 	}
-	.wx-tab-icon { font-size: 40rpx; margin-bottom: 4rpx; }
+	.wx-tab-icon { width: 44rpx; height: 44rpx; margin-bottom: 4rpx; }
 	.wx-tab-label { font-size: 20rpx; color: #181818; }
-	.wx-tab-on .wx-tab-label { color: #3b82f6; }
+	.wx-tab-on .wx-tab-label { color: #2f6ff2; }
+	.invite-mask {
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba(0, 0, 0, 0.45);
+		justify-content: flex-end;
+	}
+	.invite-sheet {
+		background-color: #ffffff;
+		border-radius: 36rpx 36rpx 0 0;
+		padding: 40rpx 40rpx 56rpx;
+		align-items: center;
+	}
+	.invite-title {
+		font-size: 36rpx;
+		font-weight: 800;
+		color: #1a1a1a;
+		margin-bottom: 16rpx;
+	}
+	.invite-desc {
+		font-size: 24rpx;
+		color: #6b7280;
+		text-align: center;
+		line-height: 36rpx;
+		margin-bottom: 28rpx;
+	}
+	.invite-qr {
+		width: 360rpx;
+		height: 360rpx;
+		margin-bottom: 28rpx;
+	}
+	.or-row {
+		flex-direction: row;
+		align-items: center;
+		width: 100%;
+		margin-bottom: 24rpx;
+	}
+	.or-line {
+		flex: 1;
+		height: 1rpx;
+		background-color: #ececec;
+	}
+	.or-text {
+		font-size: 24rpx;
+		color: #9aa3af;
+		margin: 0 18rpx;
+	}
+	.code-pill {
+		width: 100%;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		border-radius: 48rpx;
+		border-width: 2rpx;
+		border-color: #2f6ff2;
+		border-style: solid;
+		padding: 22rpx 24rpx;
+		margin-bottom: 20rpx;
+	}
+	.code-text {
+		font-size: 28rpx;
+		color: #2f6ff2;
+		font-weight: 600;
+	}
+	.code-copy {
+		font-size: 28rpx;
+		color: #2f6ff2;
+		margin-left: 12rpx;
+	}
+	.code-input-wrap {
+		width: 100%;
+		flex-direction: row;
+		align-items: center;
+		margin-bottom: 16rpx;
+	}
+	.code-input {
+		flex: 1;
+		background-color: #f3f6fb;
+		border-radius: 16rpx;
+		padding: 18rpx 20rpx;
+		font-size: 28rpx;
+	}
+	.code-go {
+		margin-left: 12rpx;
+		background-color: #2f6ff2;
+		border-radius: 16rpx;
+		padding: 18rpx 24rpx;
+	}
+	.code-go-text {
+		color: #ffffff;
+		font-size: 26rpx;
+	}
+	.invite-btn {
+		width: 100%;
+		background-color: #1861c8;
+		border-radius: 48rpx;
+		height: 112rpx;
+		align-items: center;
+		justify-content: center;
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #1454b0;
+	}
+	.invite-btn-text {
+		color: #ffffff;
+		font-size: 32rpx;
+		font-weight: 600;
+	}
 </style>

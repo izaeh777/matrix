@@ -1,0 +1,636 @@
+<template>
+	<view class="home-page">
+		<view class="home-top">
+			<text class="brand">i-tiklink</text>
+			<view class="user-pill">
+				<view class="pill-user" @click="goProfile">
+					<image class="pill-avatar" :src="avatarUrl" mode="aspectFill"></image>
+					<text class="pill-name">{{ shortName }}</text>
+					<text class="pill-caret">▾</text>
+				</view>
+				<view class="pill-bell" @click="goNotify">
+					<image class="bell-img" src="/static/login/k1.png" mode="aspectFit"></image>
+				</view>
+			</view>
+		</view>
+
+		<scroll-view class="home-scroll" scroll-y>
+			<view class="banner">
+				<view class="banner-left">
+					<text class="banner-title">发现优质项目</text>
+					<text class="banner-title">链接无限商机</text>
+					<text class="banner-sub">Web3 项目提示·交流·合作·共赢平台</text>
+					<view class="banner-actions">
+						<view class="btn-solid" @click="goPublish">
+							<text class="btn-solid-text">发布项目</text>
+						</view>
+						<view class="btn-outline" @click="goSearch">
+							<text class="btn-outline-text">搜索项目</text>
+						</view>
+					</view>
+				</view>
+				<image class="banner-mascot" src="/static/login/tiki.png" mode="aspectFit"></image>
+			</view>
+
+			<view class="section">
+				<view class="section-head">
+					<text class="section-title">最新动态</text>
+					<text class="section-more" @click="goDiscover">更多 ›</text>
+				</view>
+				<view class="timeline-card">
+					<view v-if="latest.length == 0" class="empty-tip">
+						<text class="empty-tip-text">暂无动态</text>
+					</view>
+					<view
+						v-for="(item, idx) in latest"
+						:key="item.id"
+						class="timeline-row"
+						@click="onArchive(item)"
+					>
+						<view class="timeline-rail">
+							<view class="timeline-dot"></view>
+							<view v-if="idx < latest.length - 1" class="timeline-line"></view>
+						</view>
+						<view class="timeline-body">
+							<text class="timeline-title">{{ item.title }}</text>
+							<text class="timeline-sub">{{ archiveSub(item) }}</text>
+						</view>
+						<text class="timeline-arrow">›</text>
+					</view>
+				</view>
+			</view>
+
+			<view class="section">
+				<view class="section-head">
+					<text class="section-title">热门项目</text>
+					<text class="section-more" @click="goDiscover">查看更多 ›</text>
+				</view>
+				<view v-if="hot.length == 0" class="empty-tip">
+					<text class="empty-tip-text">暂无项目</text>
+				</view>
+				<view
+					v-for="item in hot"
+					:key="item.id"
+					class="project-card"
+					@click="onArchive(item)"
+				>
+					<view class="project-cover-wrap">
+						<image
+							v-if="coverOf(item).length > 0"
+							class="project-cover"
+							:src="coverOf(item)"
+							mode="aspectFill"
+						></image>
+						<view v-else class="project-cover project-cover-fallback"></view>
+						<view class="project-cover-mask">
+							<text class="project-name">{{ item.title }}</text>
+							<text class="project-desc-short">{{ shortDesc(item) }}</text>
+							<view class="tag-row">
+								<view class="tag"><text class="tag-text">Web</text></view>
+								<view class="tag"><text class="tag-text">热门</text></view>
+							</view>
+						</view>
+					</view>
+					<text class="project-desc">{{ item.description }}</text>
+				</view>
+			</view>
+
+			<view v-if="friendLinks.length > 0" class="section">
+				<view class="section-head">
+					<text class="section-title">友情链接</text>
+				</view>
+				<view class="friend-card">
+					<view class="friend-grid">
+						<view
+							v-for="link in friendLinks"
+							:key="link.id"
+							class="friend-item"
+							@click="onFriendLink(link)"
+						>
+							<image
+								v-if="friendImage(link).length > 0"
+								class="friend-logo"
+								:src="friendImage(link)"
+								mode="aspectFit"
+							></image>
+							<view v-else class="friend-logo-fallback">
+								<text class="friend-logo-text">{{ friendInitial(link) }}</text>
+							</view>
+							<text class="friend-name">{{ link.title }}</text>
+						</view>
+					</view>
+				</view>
+			</view>
+
+			<view class="scroll-pad"></view>
+		</scroll-view>
+
+		<view class="wx-tabbar">
+			<view class="wx-tab wx-tab-on">
+				<image class="wx-tab-icon" src="/static/login/s1.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">首页</text>
+			</view>
+			<view class="wx-tab" @click="goRooms">
+				<image class="wx-tab-icon" src="/static/login/s22.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">消息</text>
+			</view>
+			<view class="wx-tab" @click="goDiscover">
+				<image class="wx-tab-icon" src="/static/login/s33.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">发现</text>
+			</view>
+			<view class="wx-tab" @click="goNotify">
+				<image class="wx-tab-icon" src="/static/login/s44.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">通知</text>
+			</view>
+			<view class="wx-tab" @click="goProfile">
+				<image class="wx-tab-icon" src="/static/login/s55.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">我的</text>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, computed, onMounted } from 'vue'
+	import { loadSession, saveSession } from '@/common/storage.uts'
+	import { loadPlatformSession } from '@/common/platform.uts'
+	import { getMatrix } from '@/common/matrix.uts'
+	import {
+		fetchCmsHome,
+		fetchFriendLinks,
+		cmsAssetUrl,
+		openCmsLink,
+		openArchiveDetail,
+		CmsArchiveItem,
+		CmsFriendLink
+	} from '@/common/cms.uts'
+
+	const session = loadSession()
+	const platform = loadPlatformSession()
+	const avatarUrl = ref<string>('/static/login/tiki.png')
+	const latest = ref<Array<CmsArchiveItem>>([])
+	const hot = ref<Array<CmsArchiveItem>>([])
+	const friendLinks = ref<Array<CmsFriendLink>>([])
+
+	const shortName = computed((): string => {
+		let name = ''
+		if (session != null) {
+			if (session.display_name != null && session.display_name.length > 0) {
+				name = session.display_name
+			} else {
+				name = session.user_id.split(':')[0].replace('@', '')
+			}
+		} else if (platform != null) {
+			if (platform.nickname.length > 0) name = platform.nickname
+			else name = platform.email
+		}
+		if (name.length == 0) return '游客'
+		if (name.length <= 10) return name
+		return name.substring(0, 6) + '…' + name.substring(name.length - 4)
+	})
+
+	async function loadAvatar(): Promise<void> {
+		if (session == null) return
+		if (session.avatar_url != null && session.avatar_url.length > 0) {
+			const matrix0 = getMatrix()
+			if (matrix0 != null) {
+				let url = matrix0.mxcToHttp(session.avatar_url, 96, 96)
+				const token = matrix0.accessToken
+				if (token.length > 0 && url.indexOf('access_token=') < 0) {
+					url = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'access_token=' + encodeURIComponent(token)
+				}
+				if (url.length > 0) {
+					avatarUrl.value = url
+					return
+				}
+			}
+		}
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const p = await matrix.getProfile(session.user_id)
+			if (p.avatar_url != null && p.avatar_url.length > 0) {
+				session.avatar_url = p.avatar_url
+				saveSession(session)
+				let url = matrix.mxcToHttp(p.avatar_url, 96, 96)
+				const token = matrix.accessToken
+				if (token.length > 0 && url.indexOf('access_token=') < 0) {
+					url = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'access_token=' + encodeURIComponent(token)
+				}
+				if (url.length > 0) avatarUrl.value = url
+			}
+		} catch (e) {
+			console.warn('首页头像拉取失败', e)
+		}
+	}
+
+	function coverOf(item: CmsArchiveItem): string {
+		return cmsAssetUrl(item.image)
+	}
+
+	function shortDesc(item: CmsArchiveItem): string {
+		const d = item.description
+		if (d.length == 0) return '精选内容'
+		if (d.length <= 16) return d
+		return d.substring(0, 16) + '…'
+	}
+
+	function archiveSub(item: CmsArchiveItem): string {
+		if (item.views > 0) return '浏览 ' + item.views
+		return '已上线'
+	}
+
+	function friendImage(link: CmsFriendLink): string {
+		return cmsAssetUrl(link.image)
+	}
+
+	function friendInitial(link: CmsFriendLink): string {
+		const t = link.title
+		if (t.length == 0) return '链'
+		return t.substring(0, 1)
+	}
+
+	function onFriendLink(link: CmsFriendLink): void {
+		openCmsLink(link.website)
+	}
+
+	function onArchive(item: CmsArchiveItem): void {
+		openArchiveDetail(item.id)
+	}
+
+	function onSoon(): void {
+		uni.showToast({ title: '即将开放', icon: 'none' })
+	}
+
+	function goRooms(): void {
+		uni.redirectTo({ url: '/pages/rooms/rooms' })
+	}
+	function goDiscover(): void {
+		uni.redirectTo({ url: '/pages/discover/discover' })
+	}
+	function goNotify(): void {
+		uni.redirectTo({ url: '/pages/notify/notify' })
+	}
+	function goProfile(): void {
+		uni.redirectTo({ url: '/pages/profile/profile' })
+	}
+	function goSearch(): void {
+		uni.navigateTo({ url: '/pages/search/search' })
+	}
+	function goPublish(): void {
+		uni.navigateTo({ url: '/pages/project/publish' })
+	}
+
+	async function loadHome(): Promise<void> {
+		try {
+			const home = await fetchCmsHome()
+			latest.value = home.latest.slice(0, 5)
+			hot.value = home.hot.slice(0, 6)
+		} catch (e) {
+			console.warn('加载首页失败', e)
+		}
+		try {
+			friendLinks.value = await fetchFriendLinks()
+		} catch (e2) {
+			console.warn('加载友链失败', e2)
+		}
+	}
+
+	onMounted(() => {
+		loadAvatar()
+		loadHome()
+	})
+</script>
+
+<style>
+	.home-page {
+		flex: 1;
+		background-color: #ffffff;
+		flex-direction: column;
+	}
+	.home-top {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 60rpx 28rpx 16rpx;
+	}
+	.brand {
+		font-size: 40rpx;
+		font-weight: 800;
+		color: #1d6ef5;
+	}
+	.user-pill {
+		flex-direction: row;
+		align-items: center;
+		background-color: #f3f8ff;
+		border-radius: 999rpx;
+		padding: 6rpx 18rpx 6rpx 6rpx;
+		border-width: 2rpx;
+		border-color: #5b9cf0;
+		border-style: solid;
+	}
+	.pill-user {
+		flex-direction: row;
+		align-items: center;
+		margin-right: 18rpx;
+	}
+	.pill-avatar {
+		width: 48rpx;
+		height: 48rpx;
+		border-radius: 24rpx;
+		margin-right: 10rpx;
+		background-color: #e8eef8;
+	}
+	.pill-name {
+		font-size: 22rpx;
+		color: #333;
+		max-width: 160rpx;
+		lines: 1;
+		text-overflow: ellipsis;
+	}
+	.pill-caret {
+		font-size: 18rpx;
+		color: #1a1a1a;
+		margin-left: 4rpx;
+	}
+	.pill-bell {
+		padding: 4rpx 8rpx 4rpx 2rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.bell-img {
+		width: 32rpx;
+		height: 32rpx;
+	}
+	.home-scroll {
+		flex: 1;
+		height: 0;
+	}
+	.banner {
+		margin: 8rpx 24rpx 28rpx;
+		background-color: #eaf3ff;
+		border-radius: 28rpx;
+		padding: 28rpx 20rpx 24rpx 28rpx;
+		flex-direction: row;
+		align-items: center;
+		overflow: hidden;
+	}
+	.banner-left {
+		flex: 1;
+	}
+	.banner-title {
+		font-size: 36rpx;
+		font-weight: 800;
+		color: #1a4fb8;
+		line-height: 48rpx;
+	}
+	.banner-sub {
+		font-size: 20rpx;
+		color: #6b8fc4;
+		margin-top: 12rpx;
+		margin-bottom: 22rpx;
+	}
+	.banner-actions {
+		flex-direction: row;
+		align-items: center;
+	}
+	.btn-solid {
+		background-color: #2f6ff2;
+		border-radius: 28rpx;
+		padding: 12rpx 26rpx;
+		margin-right: 14rpx;
+	}
+	.btn-solid-text {
+		font-size: 24rpx;
+		color: #ffffff;
+		font-weight: 600;
+	}
+	.btn-outline {
+		background-color: #ffffff;
+		border-radius: 28rpx;
+		padding: 12rpx 26rpx;
+		border-width: 1rpx;
+		border-color: #2f6ff2;
+		border-style: solid;
+	}
+	.btn-outline-text {
+		font-size: 24rpx;
+		color: #2f6ff2;
+		font-weight: 600;
+	}
+	.banner-mascot {
+		width: 180rpx;
+		height: 220rpx;
+		margin-left: 8rpx;
+	}
+	.section {
+		padding: 0 24rpx 28rpx;
+	}
+	.section-head {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 16rpx;
+	}
+	.section-title {
+		font-size: 32rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.section-more {
+		font-size: 24rpx;
+		color: #9aa3af;
+	}
+	.timeline-card {
+		background-color: #ffffff;
+		border-radius: 20rpx;
+		border-width: 1rpx;
+		border-color: #eef2f7;
+		border-style: solid;
+		padding: 8rpx 8rpx 8rpx 16rpx;
+	}
+	.timeline-row {
+		flex-direction: row;
+		align-items: flex-start;
+		padding: 18rpx 12rpx 18rpx 0;
+	}
+	.timeline-rail {
+		width: 28rpx;
+		align-items: center;
+		padding-top: 10rpx;
+		margin-right: 12rpx;
+	}
+	.timeline-dot {
+		width: 14rpx;
+		height: 14rpx;
+		border-radius: 7rpx;
+		background-color: #2f6ff2;
+	}
+	.timeline-line {
+		width: 2rpx;
+		flex: 1;
+		min-height: 56rpx;
+		background-color: #d6e4ff;
+		margin-top: 6rpx;
+	}
+	.timeline-body {
+		flex: 1;
+	}
+	.timeline-title {
+		font-size: 28rpx;
+		color: #1a1a1a;
+		font-weight: 600;
+		lines: 2;
+		text-overflow: ellipsis;
+		margin-bottom: 8rpx;
+	}
+	.timeline-sub {
+		font-size: 22rpx;
+		color: #9aa3af;
+	}
+	.timeline-arrow {
+		font-size: 32rpx;
+		color: #c5c5c5;
+		padding-left: 8rpx;
+		padding-top: 4rpx;
+	}
+	.project-card {
+		background-color: #ffffff;
+		border-radius: 24rpx;
+		overflow: hidden;
+		margin-bottom: 24rpx;
+		border-width: 1rpx;
+		border-color: #eef2f7;
+		border-style: solid;
+	}
+	.project-cover-wrap {
+		height: 280rpx;
+		position: relative;
+	}
+	.project-cover {
+		width: 100%;
+		height: 280rpx;
+	}
+	.project-cover-fallback {
+		background-color: #1d4ed8;
+	}
+	.project-cover-mask {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		padding: 24rpx;
+		background-color: rgba(15, 40, 100, 0.35);
+	}
+	.project-name {
+		font-size: 34rpx;
+		font-weight: 800;
+		color: #ffffff;
+		margin-bottom: 8rpx;
+	}
+	.project-desc-short {
+		font-size: 24rpx;
+		color: #e8efff;
+		margin-bottom: 12rpx;
+	}
+	.tag-row {
+		flex-direction: row;
+	}
+	.tag {
+		background-color: rgba(255, 255, 255, 0.85);
+		border-radius: 8rpx;
+		padding: 4rpx 12rpx;
+		margin-right: 10rpx;
+	}
+	.tag-text {
+		font-size: 20rpx;
+		color: #1d4ed8;
+	}
+	.project-desc {
+		font-size: 24rpx;
+		color: #6b7280;
+		padding: 20rpx 24rpx 24rpx;
+		lines: 2;
+		text-overflow: ellipsis;
+	}
+	.friend-card {
+		background-color: #ffffff;
+		border-radius: 20rpx;
+		border-width: 1rpx;
+		border-color: #eef2f7;
+		border-style: solid;
+		padding: 12rpx 8rpx 8rpx;
+	}
+	.friend-grid {
+		flex-direction: row;
+		flex-wrap: wrap;
+	}
+	.friend-item {
+		width: 25%;
+		align-items: center;
+		padding: 16rpx 8rpx 20rpx;
+	}
+	.friend-logo {
+		width: 120rpx;
+		height: 48rpx;
+		margin-bottom: 10rpx;
+		background-color: #f3f6fb;
+		border-radius: 8rpx;
+	}
+	.friend-logo-fallback {
+		width: 88rpx;
+		height: 88rpx;
+		border-radius: 20rpx;
+		background-color: #dbe7f8;
+		align-items: center;
+		justify-content: center;
+		margin-bottom: 10rpx;
+	}
+	.friend-logo-text {
+		font-size: 32rpx;
+		color: #2f6ff2;
+		font-weight: 700;
+	}
+	.friend-name {
+		font-size: 22rpx;
+		color: #4b5563;
+		text-align: center;
+		lines: 1;
+		text-overflow: ellipsis;
+	}
+	.empty-tip {
+		padding: 28rpx;
+		align-items: center;
+	}
+	.empty-tip-text {
+		font-size: 24rpx;
+		color: #9aa3af;
+	}
+	.scroll-pad {
+		height: 24rpx;
+	}
+	.wx-tabbar {
+		flex-direction: row;
+		background-color: #ffffff;
+		border-top-width: 1rpx;
+		border-top-color: #eaeaea;
+		padding-bottom: 24rpx;
+	}
+	.wx-tab {
+		flex: 1;
+		align-items: center;
+		padding: 10rpx 0 12rpx;
+	}
+	.wx-tab-icon {
+		width: 44rpx;
+		height: 44rpx;
+		margin-bottom: 4rpx;
+	}
+	.wx-tab-label {
+		font-size: 20rpx;
+		color: #181818;
+	}
+	.wx-tab-on .wx-tab-label {
+		color: #2f6ff2;
+	}
+</style>

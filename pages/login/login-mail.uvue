@@ -1,0 +1,354 @@
+<template>
+	<view class="page">
+		<view class="top-bar">
+			<view class="back-btn" @click="onBack">
+				<text class="back-icon">‹</text>
+			</view>
+			<text class="top-title">{{ isRegister ? '注册' : '邮箱登录' }}</text>
+			<view class="top-spacer"></view>
+		</view>
+
+		<text class="brand">i-tiklink</text>
+		<text class="card-title">{{ isRegister ? '创建账号' : '欢迎回来' }}</text>
+		<text class="card-subtitle">使用邮箱验证码{{ isRegister ? '注册' : '登录' }}</text>
+
+		<view class="field">
+			<text class="field-label">邮箱</text>
+			<view class="input-box">
+				<input
+					class="input"
+					type="text"
+					v-model="email"
+					placeholder="请输入邮箱"
+					placeholder-class="placeholder"
+				/>
+			</view>
+		</view>
+
+		<view class="field">
+			<text class="field-label">验证码</text>
+			<view class="input-box">
+				<input
+					class="input"
+					type="number"
+					v-model="code"
+					placeholder="请输入验证码"
+					placeholder-class="placeholder"
+				/>
+				<text
+					class="code-btn"
+					:class="codeWait > 0 ? 'code-btn-off' : ''"
+					@click="onSendCode"
+				>{{ codeWait > 0 ? (codeWait + 's') : '获取验证码' }}</text>
+			</view>
+		</view>
+
+		<view v-if="isRegister" class="field">
+			<text class="field-label">昵称</text>
+			<view class="input-box">
+				<input
+					class="input"
+					type="text"
+					v-model="nickname"
+					placeholder="请输入昵称（可选）"
+					placeholder-class="placeholder"
+				/>
+			</view>
+		</view>
+
+		<view v-if="isRegister" class="field">
+			<text class="field-label">密码</text>
+			<view class="input-box">
+				<input
+					class="input"
+					:type="showPwd ? 'text' : 'password'"
+					v-model="password"
+					placeholder="不少于 6 位"
+					placeholder-class="placeholder"
+				/>
+				<text class="input-eye" @click="togglePwd">{{ showPwd ? '隐藏' : '显示' }}</text>
+			</view>
+		</view>
+
+		<view class="btn-login" :class="loading ? 'btn-login-off' : ''" @click="onSubmit">
+			<text class="btn-login-text">{{ loading ? '请稍候…' : (isRegister ? '注册并登录' : '登录') }}</text>
+		</view>
+
+		<view class="signup-row">
+			<text class="signup-text">{{ isRegister ? '已有账号？' : '还没有账号？' }}</text>
+			<text class="signup-link" @click="toggleMode">{{ isRegister ? '去登录' : '注册账号' }}</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, onUnmounted } from 'vue'
+	import { sendEmailCode, emailLogin, emailRegister } from '@/common/platform.uts'
+
+	const isRegister = ref<boolean>(false)
+	const email = ref<string>('')
+	const code = ref<string>('')
+	const nickname = ref<string>('')
+	const password = ref<string>('')
+	const showPwd = ref<boolean>(false)
+	const loading = ref<boolean>(false)
+	const codeWait = ref<number>(0)
+	let codeTimer: number | null = null
+
+	onLoad((opts: UTSJSONObject) => {
+		try {
+			const m = opts['mode']
+			if (m != null && ('' + m) == 'register') isRegister.value = true
+		} catch (e) {}
+	})
+
+	onUnmounted(() => {
+		if (codeTimer != null) {
+			clearInterval(codeTimer)
+			codeTimer = null
+		}
+	})
+
+	function onBack() {
+		uni.navigateBack()
+	}
+
+	function togglePwd() {
+		showPwd.value = !showPwd.value
+	}
+
+	function toggleMode() {
+		isRegister.value = !isRegister.value
+	}
+
+	function validEmail(v: string): boolean {
+		if (v.length < 5) return false
+		if (v.indexOf('@') < 1) return false
+		if (v.indexOf('.') < 0) return false
+		return true
+	}
+
+	function startCodeCountdown(): void {
+		codeWait.value = 60
+		if (codeTimer != null) {
+			clearInterval(codeTimer)
+			codeTimer = null
+		}
+		codeTimer = setInterval(() => {
+			if (codeWait.value <= 1) {
+				codeWait.value = 0
+				if (codeTimer != null) {
+					clearInterval(codeTimer)
+					codeTimer = null
+				}
+				return
+			}
+			codeWait.value = codeWait.value - 1
+		}, 1000)
+	}
+
+	async function onSendCode(): Promise<void> {
+		if (codeWait.value > 0 || loading.value) return
+		const em = email.value.trim()
+		if (!validEmail(em)) {
+			uni.showToast({ title: '请输入正确邮箱', icon: 'none' })
+			return
+		}
+		const event = isRegister.value ? 'register' : 'login'
+		uni.showLoading({ title: '发送中…' })
+		try {
+			await sendEmailCode(em, event)
+			uni.hideLoading()
+			uni.showToast({ title: '验证码已发送', icon: 'none' })
+			startCodeCountdown()
+		} catch (e) {
+			uni.hideLoading()
+			let msg = '发送失败'
+			try { msg = '' + e } catch (e2) {}
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? msg : '发送失败', icon: 'none', duration: 3000 })
+		}
+	}
+
+	async function onSubmit(): Promise<void> {
+		if (loading.value) return
+		const em = email.value.trim()
+		const cd = code.value.trim()
+		if (!validEmail(em)) {
+			uni.showToast({ title: '请输入正确邮箱', icon: 'none' })
+			return
+		}
+		if (cd.length == 0) {
+			uni.showToast({ title: '请输入验证码', icon: 'none' })
+			return
+		}
+		if (isRegister.value) {
+			if (password.value.length < 6) {
+				uni.showToast({ title: '密码不少于 6 位', icon: 'none' })
+				return
+			}
+		}
+
+		loading.value = true
+		uni.showLoading({ title: isRegister.value ? '注册中…' : '登录中…' })
+		try {
+			if (isRegister.value) {
+				await emailRegister(em, cd, password.value, nickname.value.trim())
+			} else {
+				await emailLogin(em, cd)
+			}
+			uni.hideLoading()
+			uni.showToast({ title: '登录成功', icon: 'success' })
+			setTimeout(() => {
+				uni.reLaunch({ url: '/pages/home/home' })
+			}, 500)
+		} catch (e) {
+			uni.hideLoading()
+			loading.value = false
+			let msg = '操作失败'
+			try { msg = '' + e } catch (e2) {}
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? msg : '操作失败', icon: 'none', duration: 3000 })
+		}
+	}
+</script>
+
+<style>
+	.page {
+		flex: 1;
+		background: linear-gradient(180deg, #eaf6ff 0%, #ffffff 40%);
+		padding: 24rpx 48rpx 48rpx;
+	}
+
+	.top-bar {
+		flex-direction: row;
+		align-items: center;
+		margin-top: 40rpx;
+		margin-bottom: 40rpx;
+	}
+	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
+		justify-content: center;
+		align-items: center;
+	}
+	.back-icon {
+		font-size: 64rpx;
+		color: #1e6fff;
+		font-weight: 400;
+		line-height: 64rpx;
+	}
+	.top-title {
+		flex: 1;
+		text-align: center;
+		font-size: 34rpx;
+		font-weight: 700;
+		color: #0f172a;
+		margin-right: 72rpx;
+	}
+	.top-spacer {
+		width: 72rpx;
+		height: 72rpx;
+	}
+
+	.brand {
+		font-size: 40rpx;
+		font-weight: 700;
+		color: #1e7dff;
+		margin-bottom: 12rpx;
+	}
+	.card-title {
+		font-size: 48rpx;
+		font-weight: 700;
+		color: #0f172a;
+		margin-bottom: 10rpx;
+	}
+	.card-subtitle {
+		font-size: 26rpx;
+		color: #64748b;
+		margin-bottom: 48rpx;
+	}
+
+	.field {
+		margin-bottom: 28rpx;
+	}
+	.field-label {
+		font-size: 24rpx;
+		color: #475569;
+		margin-bottom: 12rpx;
+		font-weight: 600;
+	}
+	.input-box {
+		flex-direction: row;
+		align-items: center;
+		background-color: #f4f8fd;
+		border-radius: 16rpx;
+		padding: 0 24rpx;
+		height: 96rpx;
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #e2eef8;
+	}
+	.input-eye {
+		font-size: 24rpx;
+		color: #1e6fff;
+		padding: 8rpx;
+	}
+	.code-btn {
+		font-size: 24rpx;
+		color: #1e6fff;
+		font-weight: 600;
+		padding: 8rpx 4rpx 8rpx 16rpx;
+		flex-shrink: 0;
+	}
+	.code-btn-off {
+		color: #94a3b8;
+	}
+	.input {
+		flex: 1;
+		font-size: 30rpx;
+		color: #0f172a;
+		background-color: transparent;
+		height: 96rpx;
+	}
+	.placeholder {
+		color: #b8c4d4;
+	}
+
+	.btn-login {
+		height: 112rpx;
+		background-color: #1861c8;
+		border-radius: 48rpx;
+		margin-top: 24rpx;
+		justify-content: center;
+		align-items: center;
+		flex-direction: row;
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #1454b0;
+	}
+	.btn-login-off {
+		background-color: #8fb4ff;
+		border-color: #7aa6f0;
+	}
+	.btn-login-text {
+		color: #ffffff;
+		font-size: 32rpx;
+		font-weight: 600;
+	}
+
+	.signup-row {
+		flex-direction: row;
+		justify-content: center;
+		margin-top: 36rpx;
+	}
+	.signup-text {
+		font-size: 26rpx;
+		color: #64748b;
+	}
+	.signup-link {
+		font-size: 26rpx;
+		color: #1e6fff;
+		font-weight: 600;
+	}
+</style>

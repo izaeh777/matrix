@@ -3,7 +3,14 @@
 		{
 			"path": "pages/index/index",
 			"style": {
-				"navigationBarTitleText": "Matrix Chat"
+				"navigationBarTitleText": "i-tiklink"
+			}
+		},
+		{
+			"path": "pages/home/home",
+			"style": {
+				"navigationBarTitleText": "首页",
+				"navigationStyle": "custom"
 			}
 		},
 		{
@@ -21,10 +28,19 @@
 			}
 		},
 		{
+			"path": "pages/login/login-mail",
+			"style": {
+				"navigationBarTitleText": "邮箱登录",
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "pages/rooms/rooms",
 			"style": {
-				"navigationBarTitleText": "消息",
-				"navigationStyle": "custom"
+				"navigationBarTitleText": "消息中心",
+				"navigationStyle": "custom",
+				"backgroundColor": "#FFFFFF",
+				"backgroundColorContent": "#FFFFFF"
 			}
 		},
 		{
@@ -32,7 +48,8 @@
 			"style": {
 				"navigationBarTitleText": "聊天",
 				"navigationStyle": "custom",
-				"backgroundColor": "#EDEDED"
+				"backgroundColor": "#FFFFFF",
+				"backgroundColorContent": "#FFFFFF"
 			}
 		},
 		{
@@ -89,16 +106,50 @@
 			}
 		},
 		{
+			"path": "pages/notify/notify",
+			"style": {
+				"navigationBarTitleText": "最新资讯",
+				"navigationStyle": "custom",
+				"backgroundColor": "#F3F6FB"
+			}
+		},
+		{
+			"path": "pages/article/detail",
+			"style": {
+				"navigationBarTitleText": "资讯详情",
+				"navigationStyle": "custom",
+				"backgroundColor": "#FFFFFF",
+				"backgroundColorContent": "#FFFFFF"
+			}
+		},
+		{
 			"path": "pages/settings/settings",
 			"style": {
 				"navigationBarTitleText": "设置",
 				"navigationStyle": "custom"
 			}
+		},
+		{
+			"path": "pages/project/publish",
+			"style": {
+				"navigationBarTitleText": "发布项目",
+				"navigationStyle": "custom",
+				"backgroundColor": "#F5F7FB"
+			}
+		},
+		{
+			"path": "pages/stats/stats",
+			"style": {
+				"navigationBarTitleText": "数据统计",
+				"navigationStyle": "custom",
+				"backgroundColor": "#F5F6F8",
+				"backgroundColorContent": "#F5F6F8"
+			}
 		}
 	],
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
-		"navigationBarTitleText": "Matrix Chat",
+		"navigationBarTitleText": "i-tiklink",
 		"navigationBarBackgroundColor": "#F8F8F8",
 		"backgroundColor": "#F8F8F8"
 	},

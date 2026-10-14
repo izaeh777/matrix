@@ -1,0 +1,348 @@
+<template>
+	<view class="notify-page">
+		<view class="header">
+			<view class="header-top">
+				<view class="spacer"></view>
+				<view class="lang-pill" @click="onLang">
+					<image class="lang-globe" src="/static/login/china.png" mode="aspectFit"></image>
+					<text class="lang-text">简体中文</text>
+					<text class="lang-caret">▾</text>
+				</view>
+			</view>
+			<view class="title-block">
+				<view class="title-line1">
+					<text class="title-char">最</text>
+					<text class="title-char title-char-blue">新</text>
+				</view>
+				<view class="title-line2">
+					<view class="title-indent">
+						<text class="title-char">资</text>
+						<text class="title-char">讯</text>
+					</view>
+					<view class="date-wrap">
+						<text class="date-num">{{ dayText }}</text>
+						<text class="date-sep">|</text>
+						<text class="date-week">{{ weekText }}</text>
+					</view>
+				</view>
+			</view>
+		</view>
+
+		<scroll-view class="list" scroll-y>
+			<view v-if="loading && items.length == 0" class="empty">
+				<text class="empty-text">加载中…</text>
+			</view>
+			<view v-else-if="items.length == 0" class="empty">
+				<text class="empty-text">暂无资讯</text>
+			</view>
+			<view
+				v-for="(item, idx) in items"
+				:key="item.id"
+				class="news-row"
+				@click="onOpen(item)"
+			>
+				<view class="news-left">
+					<text class="news-title">{{ item.title }}</text>
+					<view class="news-meta">
+						<text class="news-tag">{{ tagOf(idx) }}</text>
+						<text class="news-time">{{ timeOf(item) }}</text>
+					</view>
+				</view>
+				<view class="news-right">
+					<image
+						v-if="coverOf(item).length > 0"
+						class="news-thumb"
+						:src="coverOf(item)"
+						mode="aspectFill"
+					></image>
+					<view v-else class="news-thumb news-thumb-fallback"></view>
+					<text class="news-likes">{{ likeOf(item) }}点赞</text>
+				</view>
+			</view>
+			<view class="scroll-pad"></view>
+		</scroll-view>
+
+		<view class="wx-tabbar">
+			<view class="wx-tab" @click="goHome">
+				<image class="wx-tab-icon" src="/static/login/s11.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">首页</text>
+			</view>
+			<view class="wx-tab" @click="goRooms">
+				<image class="wx-tab-icon" src="/static/login/s22.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">消息</text>
+			</view>
+			<view class="wx-tab" @click="goDiscover">
+				<image class="wx-tab-icon" src="/static/login/s33.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">发现</text>
+			</view>
+			<view class="wx-tab wx-tab-on">
+				<image class="wx-tab-icon" src="/static/login/s4.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">通知</text>
+			</view>
+			<view class="wx-tab" @click="goProfile">
+				<image class="wx-tab-icon" src="/static/login/s55.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">我的</text>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, computed, onMounted } from 'vue'
+	import {
+		fetchCmsHome,
+		fetchChannelArchives,
+		cmsAssetUrl,
+		formatPublishAgo,
+		openArchiveDetail,
+		CmsArchiveItem
+	} from '@/common/cms.uts'
+
+	const loading = ref<boolean>(false)
+	const items = ref<Array<CmsArchiveItem>>([])
+
+	const weekNames: Array<string> = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+
+	const dayText = computed((): string => {
+		const d = new Date()
+		return '' + d.getDate()
+	})
+	const weekText = computed((): string => {
+		const d = new Date()
+		return weekNames[d.getDay()]
+	})
+
+	function coverOf(item: CmsArchiveItem): string {
+		return cmsAssetUrl(item.image)
+	}
+
+	function timeOf(item: CmsArchiveItem): string {
+		return formatPublishAgo(item.publishtime)
+	}
+
+	function likeOf(item: CmsArchiveItem): number {
+		if (item.likes > 0) return item.likes
+		if (item.views > 0) return item.views % 500
+		return 300
+	}
+
+	function tagOf(idx: number): string {
+		if (idx % 3 == 0) return '原创'
+		if (idx % 3 == 1) return '摘自于X'
+		return '原创'
+	}
+
+	function onOpen(item: CmsArchiveItem): void {
+		openArchiveDetail(item.id)
+	}
+
+	function onLang(): void {
+		uni.showToast({ title: '当前仅支持简体中文', icon: 'none' })
+	}
+
+	function goHome(): void {
+		uni.redirectTo({ url: '/pages/home/home' })
+	}
+	function goRooms(): void {
+		uni.redirectTo({ url: '/pages/rooms/rooms' })
+	}
+	function goDiscover(): void {
+		uni.redirectTo({ url: '/pages/discover/discover' })
+	}
+	function goProfile(): void {
+		uni.redirectTo({ url: '/pages/profile/profile' })
+	}
+
+	async function loadNews(): Promise<void> {
+		loading.value = true
+		try {
+			let list: Array<CmsArchiveItem> = []
+			try {
+				list = await fetchChannelArchives(0, '', 'news')
+			} catch (e0) {
+				try {
+					list = await fetchChannelArchives(1, '')
+				} catch (e1) {}
+			}
+			if (list.length == 0) {
+				const home = await fetchCmsHome()
+				list = home.latest
+				if (list.length == 0) list = home.hot
+			}
+			items.value = list
+		} catch (e) {
+			console.warn('加载资讯失败', e)
+		}
+		loading.value = false
+	}
+
+	onMounted(() => {
+		loadNews()
+	})
+</script>
+
+<style>
+	.notify-page {
+		flex: 1;
+		background-color: #f3f7fc;
+		flex-direction: column;
+	}
+	.header {
+		padding: 48rpx 32rpx 28rpx;
+		background-color: #f3f7fc;
+	}
+	.header-top {
+		flex-direction: row;
+		justify-content: flex-end;
+		margin-bottom: 8rpx;
+	}
+	.spacer { flex: 1; }
+	.lang-pill {
+		flex-direction: row;
+		align-items: center;
+		background-color: #ffffff;
+		border-radius: 40rpx;
+		padding: 10rpx 22rpx;
+		border-width: 2rpx;
+		border-color: #7eb6f5;
+		border-style: solid;
+	}
+	.lang-globe { width: 28rpx; height: 28rpx; margin-right: 8rpx; }
+	.lang-text { font-size: 26rpx; color: #333333; }
+	.lang-caret { font-size: 20rpx; color: #1a1a1a; margin-left: 6rpx; }
+	.title-block {
+		flex-direction: column;
+		align-items: stretch;
+		width: 100%;
+	}
+	.title-line1 {
+		flex-direction: row;
+		align-items: center;
+	}
+	.title-char {
+		font-size: 96rpx;
+		font-weight: 800;
+		color: #2a2a2a;
+		line-height: 110rpx;
+		height: 110rpx;
+	}
+	.title-char-blue {
+		color: #2f6ff2;
+	}
+	.title-line2 {
+		flex-direction: row;
+		align-items: flex-end;
+		justify-content: space-between;
+		width: 100%;
+	}
+	.title-indent {
+		flex-direction: row;
+		padding-left: 96rpx;
+	}
+	.date-wrap {
+		flex-direction: row;
+		align-items: flex-end;
+		padding-bottom: 16rpx;
+	}
+	.date-num {
+		font-size: 40rpx;
+		font-weight: 800;
+		color: #2a2a2a;
+		letter-spacing: 2rpx;
+		line-height: 44rpx;
+	}
+	.date-sep {
+		font-size: 28rpx;
+		color: #2a2a2a;
+		margin: 0 10rpx;
+		line-height: 40rpx;
+	}
+	.date-week {
+		font-size: 28rpx;
+		font-weight: 700;
+		color: #2a2a2a;
+		line-height: 40rpx;
+	}
+	.list {
+		flex: 1;
+		height: 0;
+		background-color: #ffffff;
+		border-radius: 32rpx 32rpx 0 0;
+		margin-top: -8rpx;
+		padding: 12rpx 0 0;
+	}
+	.news-row {
+		flex-direction: row;
+		padding: 28rpx 32rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f0f2f5;
+	}
+	.news-left {
+		flex: 1;
+		padding-right: 20rpx;
+	}
+	.news-title {
+		font-size: 28rpx;
+		color: #1a1a1a;
+		font-weight: 600;
+		lines: 2;
+		text-overflow: ellipsis;
+		margin-bottom: 16rpx;
+		line-height: 40rpx;
+	}
+	.news-meta {
+		flex-direction: row;
+		align-items: center;
+	}
+	.news-tag {
+		font-size: 22rpx;
+		color: #2f6ff2;
+		margin-right: 12rpx;
+	}
+	.news-time {
+		font-size: 22rpx;
+		color: #9aa3af;
+	}
+	.news-right {
+		width: 180rpx;
+		align-items: flex-end;
+	}
+	.news-thumb {
+		width: 180rpx;
+		height: 120rpx;
+		border-radius: 12rpx;
+		background-color: #e5e7eb;
+		margin-bottom: 8rpx;
+	}
+	.news-thumb-fallback {
+		background-color: #93c5fd;
+	}
+	.news-likes {
+		font-size: 20rpx;
+		color: #9aa3af;
+	}
+	.empty {
+		padding: 80rpx;
+		align-items: center;
+	}
+	.empty-text {
+		font-size: 26rpx;
+		color: #9aa3af;
+	}
+	.scroll-pad { height: 24rpx; }
+	.wx-tabbar {
+		flex-direction: row;
+		background-color: #ffffff;
+		border-top-width: 1rpx;
+		border-top-color: #eaeaea;
+		padding-bottom: 24rpx;
+	}
+	.wx-tab {
+		flex: 1;
+		align-items: center;
+		padding: 10rpx 0 12rpx;
+	}
+	.wx-tab-icon { width: 44rpx; height: 44rpx; margin-bottom: 4rpx; }
+	.wx-tab-label { font-size: 20rpx; color: #181818; }
+	.wx-tab-on .wx-tab-label { color: #2f6ff2; }
+</style>

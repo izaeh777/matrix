@@ -1,0 +1,603 @@
+/**
+ * CMS 接口（itiklink）
+ * OpenAPI: https://m.itiklink.com/openapi.yaml
+ * 友链: GET /api/cms/friendlink  operationId=index_friendlink
+ */
+
+export type CmsFriendLink = {
+	id: number
+	title: string
+	image: string
+	website: string
+	intro: string
+}
+
+export type CmsArchiveItem = {
+	id: number
+	channel_id: number
+	title: string
+	image: string
+	description: string
+	views: number
+	likes: number
+	comments: number
+	publishtime: number
+}
+
+export type CmsArchiveDetail = {
+	id: number
+	channel_id: number
+	channel_name: string
+	title: string
+	image: string
+	description: string
+	content: string
+	tags: Array<string>
+	author: string
+	views: number
+	likes: number
+	comments: number
+	publishtime: number
+	outlink: string
+	prev_id: number
+	prev_title: string
+	next_id: number
+	next_title: string
+}
+
+export type CmsHomeData = {
+	latest: Array<CmsArchiveItem>
+	hot: Array<CmsArchiveItem>
+}
+
+const CMS_HOST = 'https://m.itiklink.com'
+
+function isH5DevHost(host: string): boolean {
+	if (host == 'localhost' || host == '127.0.0.1' || host == '[::1]' || host == '::1') return true
+	if (host.endsWith('.localhost')) return true
+	if (host.startsWith('192.168.') || host.startsWith('10.')) return true
+	if (host.startsWith('172.')) {
+		const parts = host.split('.')
+		if (parts.length > 1) {
+			const n = parseInt(parts[1])
+			if (n >= 16 && n <= 31) return true
+		}
+	}
+	return false
+}
+
+export function cmsHttpBase(): string {
+	// #ifdef H5
+	try {
+		const loc = (window as any).location
+		if (loc != null && isH5DevHost('' + loc.hostname)) return ''
+	} catch (e0) {}
+	// #endif
+	return CMS_HOST
+}
+
+export function cmsAssetUrl(path: string): string {
+	if (path.length == 0) return ''
+	if (path.indexOf('http://') == 0 || path.indexOf('https://') == 0) return path
+	if (path.indexOf('//') == 0) return 'https:' + path
+	const base = cmsHttpBase()
+	const host = base.length > 0 ? base : CMS_HOST
+	if (path.charAt(0) == '/') return host + path
+	return host + '/' + path
+}
+
+function pickStr(obj: UTSJSONObject, key: string): string {
+	try {
+		const v = obj[key]
+		if (v != null) {
+			const s = '' + v
+			if (s.length > 0 && s != 'null' && s != 'undefined' && s != '[object Object]') return s
+		}
+	} catch (e0) {}
+	try {
+		const s2 = obj.getString(key)
+		if (s2 != null && s2.length > 0 && s2 != 'null') return s2
+	} catch (e1) {}
+	return ''
+}
+
+function pickNum(obj: UTSJSONObject, key: string): number {
+	try {
+		const n = obj.getNumber(key)
+		if (n != null) return n
+	} catch (e0) {}
+	try {
+		const raw = obj[key]
+		if (raw == null) return 0
+		const n = parseFloat('' + raw)
+		if (n == n) return n
+	} catch (e1) {}
+	return 0
+}
+
+function parseList(raw: any | null): Array<UTSJSONObject> {
+	const out: Array<UTSJSONObject> = []
+	if (raw == null) return out
+	try {
+		const arr = raw as Array<any>
+		if (arr != null && arr.length != null) {
+			for (let i = 0; i < arr.length; i++) {
+				const one = arr[i]
+				if (one == null) continue
+				out.push(one as UTSJSONObject)
+			}
+			return out
+		}
+	} catch (e0) {}
+	return out
+}
+
+function httpGetJson(path: string): Promise<UTSJSONObject> {
+	const url = cmsHttpBase() + path
+	return new Promise((resolve, reject) => {
+		uni.request({
+			url: url,
+			method: 'GET',
+			timeout: 15000,
+			success: (res) => {
+				try {
+					const code = res.statusCode
+					if (code < 200 || code >= 300) {
+						reject(new Error('HTTP_' + code))
+						return
+					}
+					const data = res.data as UTSJSONObject
+					if (data == null) {
+						reject(new Error('empty'))
+						return
+					}
+					resolve(data)
+				} catch (e) {
+					reject(new Error('parse fail'))
+				}
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}
+
+function parseFriendLinkRows(rows: Array<UTSJSONObject>): Array<CmsFriendLink> {
+	const out: Array<CmsFriendLink> = []
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i]
+		const title = pickStr(row, 'title')
+		const website = pickStr(row, 'website')
+		if (title.length == 0 && website.length == 0) continue
+		const item: CmsFriendLink = {
+			id: pickNum(row, 'id'),
+			title: title.length > 0 ? title : website,
+			image: pickStr(row, 'image'),
+			website: website,
+			intro: pickStr(row, 'intro')
+		}
+		out.push(item)
+	}
+	return out
+}
+
+function parseArchiveRows(rows: Array<UTSJSONObject>): Array<CmsArchiveItem> {
+	const out: Array<CmsArchiveItem> = []
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i]
+		const title = pickStr(row, 'title')
+		if (title.length == 0) continue
+		const item: CmsArchiveItem = {
+			id: pickNum(row, 'id'),
+			channel_id: pickNum(row, 'channel_id'),
+			title: title,
+			image: pickStr(row, 'image'),
+			description: pickStr(row, 'description'),
+			views: pickNum(row, 'views'),
+			likes: pickNum(row, 'likes'),
+			comments: pickNum(row, 'comments'),
+			publishtime: pickNum(row, 'publishtime')
+		}
+		out.push(item)
+	}
+	return out
+}
+
+function listFromData(data: UTSJSONObject | null, key: string): Array<UTSJSONObject> {
+	if (data == null) return []
+	let rows = parseList(data[key])
+	if (rows.length == 0) {
+		try {
+			rows = parseList(data.getArray(key))
+		} catch (e0) {}
+	}
+	return rows
+}
+
+/**
+ * 友情链接列表（CMS 首页）
+ * GET /api/cms/friendlink
+ * 若无图，回退导航接口里同名项的图标
+ */
+export async function fetchFriendLinks(): Promise<Array<CmsFriendLink>> {
+	const root = await httpGetJson('/api/cms/friendlink')
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '加载友链失败')
+	}
+	const data = root['data'] as UTSJSONObject
+	const out = parseFriendLinkRows(listFromData(data, 'list'))
+	let needImg = false
+	for (let i = 0; i < out.length; i++) {
+		if (out[i].image.length == 0) {
+			needImg = true
+			break
+		}
+	}
+	if (!needImg) return out
+	try {
+		const navRoot = await httpGetJson('/api/cms/navigation')
+		if (pickNum(navRoot, 'code') != 1) return out
+		const navData = navRoot['data'] as UTSJSONObject
+		const navRows = parseFriendLinkRows(listFromData(navData, 'list'))
+		for (let i = 0; i < out.length; i++) {
+			if (out[i].image.length > 0) continue
+			const t = out[i].title
+			const w = out[i].website
+			for (let j = 0; j < navRows.length; j++) {
+				if ((t.length > 0 && navRows[j].title == t) || (w.length > 0 && navRows[j].website == w)) {
+					if (navRows[j].image.length > 0) {
+						out[i].image = navRows[j].image
+					}
+					break
+				}
+			}
+		}
+	} catch (e1) {}
+	return out
+}
+
+/**
+ * CMS 首页聚合：最新 + 热门
+ * GET /api/cms/index
+ */
+export async function fetchCmsHome(): Promise<CmsHomeData> {
+	const root = await httpGetJson('/api/cms/index')
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '加载首页失败')
+	}
+	const data = root['data'] as UTSJSONObject
+	const empty: CmsHomeData = { latest: [], hot: [] }
+	if (data == null) return empty
+	return {
+		latest: parseArchiveRows(listFromData(data, 'latest')),
+		hot: parseArchiveRows(listFromData(data, 'hot'))
+	}
+}
+
+/**
+ * 栏目内容列表
+ * GET /api/cms/channels/archives
+ * 必须传 channel_id>0 或 diyname
+ */
+export async function fetchChannelArchives(channelId: number, keyword: string = '', diyname: string = ''): Promise<Array<CmsArchiveItem>> {
+	if (channelId <= 0 && diyname.length == 0) {
+		throw new Error('缺少栏目标识（channel_id 或 diyname）')
+	}
+	let path = '/api/cms/channels/archives?include_children=1'
+	if (channelId > 0) {
+		path += '&channel_id=' + channelId
+	} else {
+		path += '&diyname=' + encodeURIComponent(diyname)
+	}
+	if (keyword.length > 0) path += '&keyword=' + encodeURIComponent(keyword)
+	const root = await httpGetJson(path)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '加载内容失败')
+	}
+	const data = root['data'] as UTSJSONObject
+	if (data == null) return []
+	let rows = listFromData(data, 'list')
+	if (rows.length == 0) rows = listFromData(data, 'data')
+	if (rows.length == 0) rows = parseList(data)
+	return parseArchiveRows(rows)
+}
+
+/**
+ * 资讯详情
+ * GET /api/cms/archives/detail?id=
+ * 接口一般只返回摘要 description，无独立 HTML 正文时用 description 作为正文
+ */
+export async function fetchArchiveDetail(id: number): Promise<CmsArchiveDetail> {
+	if (id <= 0) throw new Error('缺少资讯 id')
+	const root = await httpGetJson('/api/cms/archives/detail?id=' + id)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '加载详情失败')
+	}
+	const data = root['data'] as UTSJSONObject
+	if (data == null) throw new Error('详情为空')
+	let archives = data['archives'] as UTSJSONObject
+	if (archives == null) archives = data
+	const title = pickStr(archives, 'title')
+	if (title.length == 0) throw new Error('详情无效')
+	const description = pickStr(archives, 'description')
+	let content = pickStr(archives, 'content')
+	if (content.length == 0) content = pickStr(data, 'content')
+	if (content.length == 0) content = description
+
+	const tags: Array<string> = []
+	const tagRows = parseList(data['tags'])
+	for (let i = 0; i < tagRows.length; i++) {
+		const name = pickStr(tagRows[i], 'name')
+		if (name.length > 0) tags.push(name)
+	}
+	if (tags.length == 0) {
+		const rawTags = pickStr(archives, 'tags')
+		if (rawTags.length > 0) {
+			const parts = rawTags.split(',')
+			for (let j = 0; j < parts.length; j++) {
+				const t = parts[j].trim()
+				if (t.length > 0) tags.push(t)
+			}
+		}
+	}
+
+	let author = ''
+	const customRows = parseList(data['custom'])
+	for (let k = 0; k < customRows.length; k++) {
+		const cname = pickStr(customRows[k], 'name')
+		if (cname == 'author' || pickStr(customRows[k], 'title') == '作者') {
+			author = pickStr(customRows[k], 'value')
+			if (author.length > 0) break
+		}
+	}
+
+	let channelName = ''
+	const channel = data['channel'] as UTSJSONObject
+	if (channel != null) channelName = pickStr(channel, 'name')
+
+	let prevId = 0
+	let prevTitle = ''
+	const prev = data['prev'] as UTSJSONObject
+	if (prev != null) {
+		prevId = pickNum(prev, 'id')
+		prevTitle = pickStr(prev, 'title')
+	}
+	let nextId = 0
+	let nextTitle = ''
+	const next = data['next'] as UTSJSONObject
+	if (next != null) {
+		nextId = pickNum(next, 'id')
+		nextTitle = pickStr(next, 'title')
+	}
+
+	const detail: CmsArchiveDetail = {
+		id: pickNum(archives, 'id'),
+		channel_id: pickNum(archives, 'channel_id'),
+		channel_name: channelName,
+		title: title,
+		image: pickStr(archives, 'image'),
+		description: description,
+		content: content,
+		tags: tags,
+		author: author,
+		views: pickNum(archives, 'views'),
+		likes: pickNum(archives, 'likes'),
+		comments: pickNum(archives, 'comments'),
+		publishtime: pickNum(archives, 'publishtime'),
+		outlink: pickStr(archives, 'outlink'),
+		prev_id: prevId,
+		prev_title: prevTitle,
+		next_id: nextId,
+		next_title: nextTitle
+	}
+	return detail
+}
+
+export function openArchiveDetail(id: number): void {
+	if (id <= 0) {
+		uni.showToast({ title: '资讯无效', icon: 'none' })
+		return
+	}
+	uni.navigateTo({ url: '/pages/article/detail?id=' + id })
+}
+
+/**
+ * 搜索
+ * GET /api/cms/search
+ */
+export async function searchCmsArchives(keyword: string): Promise<Array<CmsArchiveItem>> {
+	if (keyword.length == 0) return []
+	const path = '/api/cms/search?keyword=' + encodeURIComponent(keyword)
+	const root = await httpGetJson(path)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '搜索失败')
+	}
+	const data = root['data'] as UTSJSONObject
+	if (data == null) return []
+	let rows = listFromData(data, 'list')
+	if (rows.length == 0) rows = listFromData(data, 'data')
+	return parseArchiveRows(rows)
+}
+
+export function formatPublishAgo(ts: number): string {
+	if (ts <= 0) return ''
+	let ms = ts
+	if (ts < 10000000000) ms = ts * 1000
+	const diff = Date.now() - ms
+	if (diff < 60000) return '刚刚'
+	if (diff < 3600000) return '发布于' + Math.floor(diff / 60000) + '分钟前'
+	if (diff < 86400000) return '发布于' + Math.floor(diff / 3600000) + '小时前'
+	if (diff < 86400000 * 7) return '发布于' + Math.floor(diff / 86400000) + '天前'
+	const d = new Date(ms)
+	return '发布于' + (d.getMonth() + 1) + '-' + d.getDate()
+}
+
+function httpPostForm(path: string, fields: UTSJSONObject): Promise<UTSJSONObject> {
+	const url = cmsHttpBase() + path
+	const header: UTSJSONObject = {
+		'Content-Type': 'application/x-www-form-urlencoded'
+	}
+	try {
+		const raw = uni.getStorageSync('platform_session_v1')
+		if (raw != null) {
+			const text = ('' + raw).trim()
+			if (text.length > 0 && text.charAt(0) == '{') {
+				const obj = JSON.parse(text) as UTSJSONObject
+				let t = ''
+				try {
+					const v = obj['token']
+					if (v != null) t = '' + v
+				} catch (e0) {}
+				if (t.length > 0 && t != 'null') header['token'] = t
+			}
+		}
+	} catch (e1) {}
+	return new Promise((resolve, reject) => {
+		uni.request({
+			url: url,
+			method: 'POST',
+			timeout: 20000,
+			header: header,
+			data: fields,
+			success: (res) => {
+				try {
+					const code = res.statusCode
+					if (code < 200 || code >= 300) {
+						reject(new Error('HTTP_' + code))
+						return
+					}
+					const data = res.data as UTSJSONObject
+					if (data == null) {
+						reject(new Error('empty'))
+						return
+					}
+					resolve(data)
+				} catch (e) {
+					reject(new Error('parse fail'))
+				}
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}
+
+export type CmsProjectDraft = {
+	name: string
+	category: string
+	intro: string
+	logo: string
+	cover: string
+	highlight: string
+	audience: string
+	detail: string
+	material: string
+}
+
+export async function createCmsProject(draft: CmsProjectDraft): Promise<number> {
+	const fields: UTSJSONObject = {
+		name: draft.name,
+		category: draft.category,
+		intro: draft.intro,
+		description: draft.detail.length > 0 ? draft.detail : draft.intro,
+		highlight: draft.highlight,
+		audience: draft.audience,
+		logo: draft.logo,
+		cover: draft.cover,
+		material: draft.material
+	}
+	const root = await httpPostForm('/api/v1/projects', fields)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '创建项目失败')
+	}
+	const data = root['data'] as UTSJSONObject
+	if (data == null) return 0
+	let id = pickNum(data, 'id')
+	if (id == 0) id = pickNum(data, 'project_id')
+	return id
+}
+
+export async function submitCmsProject(id: number): Promise<void> {
+	if (id <= 0) return
+	const fields: UTSJSONObject = { id: id }
+	const root = await httpPostForm('/api/v1/projects/submit', fields)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '提交审核失败')
+	}
+}
+
+export function friendCodeOf(userId: string): string {
+	const raw = userId.split(':')[0].replace('@', '').toUpperCase()
+	let out = ''
+	for (let i = 0; i < raw.length; i++) {
+		const ch = raw.charAt(i)
+		if ((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) out += ch
+	}
+	if (out.length >= 8) return out.substring(0, 8)
+	let n = userId.length * 31
+	for (let j = 0; j < userId.length; j++) {
+		n = n + userId.charCodeAt(j) * (j + 3)
+	}
+	const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+	while (out.length < 8) {
+		const idx = n < 0 ? (-n) % alphabet.length : n % alphabet.length
+		out += alphabet.charAt(idx)
+		n = n * 17 + 13
+	}
+	return out.substring(0, 8)
+}
+
+export function inviteQrUrl(userId: string): string {
+	const payload = 'itiklink://invite?u=' + encodeURIComponent(userId) + '&c=' + encodeURIComponent(friendCodeOf(userId))
+	return 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=10&data=' + encodeURIComponent(payload)
+}
+
+export function matrixIdFromFriendCode(code: string): string {
+	let raw = code.trim()
+	if (raw.indexOf('@') == 0) return raw
+	raw = raw.toLowerCase()
+	if (raw.length == 0) return ''
+	return '@' + raw + ':matrix.itiklink.com'
+}
+
+export function openCmsLink(url: string): void {
+	if (url.length == 0) return
+	if (url.indexOf('javascript:') == 0) return
+	// #ifdef H5
+	try {
+		const w = window as any
+		if (w != null && w.open != null) {
+			w.open(url, '_blank')
+			return
+		}
+	} catch (e0) {}
+	// #endif
+	// #ifdef APP-ANDROID || APP-IOS
+	try {
+		plus.runtime.openURL(url)
+		return
+	} catch (e1) {}
+	// #endif
+	uni.setClipboardData({
+		data: url,
+		success: () => {
+			uni.showToast({ title: '链接已复制', icon: 'none' })
+		}
+	})
+}

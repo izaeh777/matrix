@@ -10,7 +10,7 @@
 
 		<text class="brand">i-tiklink</text>
 		<text class="card-title">欢迎回来</text>
-		<text class="card-subtitle">使用账号密码登录 Matrix</text>
+		<text class="card-subtitle">使用账号密码登录</text>
 
 		<view class="field">
 			<text class="field-label">用户名</text>
@@ -107,7 +107,7 @@
 			uni.showToast({ title: '登录成功', icon: 'success' })
 
 			setTimeout(() => {
-				uni.reLaunch({ url: '/pages/rooms/rooms' })
+				uni.reLaunch({ url: '/pages/home/home' })
 			}, 600)
 		} catch (e: any) {
 			uni.hideLoading()
@@ -211,21 +211,25 @@
 	}
 
 	.btn-login {
-		height: 96rpx;
-		background-color: #1e6fff;
+		height: 112rpx;
+		background-color: #1861c8;
 		border-radius: 48rpx;
 		margin-top: 24rpx;
 		justify-content: center;
 		align-items: center;
 		flex-direction: row;
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #1454b0;
 	}
 	.btn-login-off {
 		background-color: #8fb4ff;
+		border-color: #7aa6f0;
 	}
 	.btn-login-text {
 		color: #ffffff;
 		font-size: 32rpx;
-		font-weight: 700;
+		font-weight: 600;
 	}
 
 	.signup-row {

@@ -1,0 +1,425 @@
+<template>
+	<view class="stats-page">
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">数据统计</text>
+			<text class="topbar-link" @click="onEarnings">收益明细</text>
+		</view>
+
+		<scroll-view class="body" direction="vertical" :show-scrollbar="false" :rebound="false">
+			<view class="overview-head">
+				<view class="overview-left">
+					<text class="overview-title">数据总览</text>
+					<text class="overview-time">数据更新时间{{ updateTime }}</text>
+				</view>
+				<view class="range-row">
+					<view
+						class="range-chip"
+						:class="rangeKey == '1d' ? 'range-on' : ''"
+						@click="setRange('1d')"
+					>
+						<text class="range-text" :class="rangeKey == '1d' ? 'range-text-on' : ''">近1天</text>
+					</view>
+					<view
+						class="range-chip"
+						:class="rangeKey == '7d' ? 'range-on' : ''"
+						@click="setRange('7d')"
+					>
+						<text class="range-text" :class="rangeKey == '7d' ? 'range-text-on' : ''">近7天</text>
+					</view>
+					<view class="range-chip" @click="onMoreRange">
+						<text class="range-text">更多</text>
+						<text class="range-caret">▾</text>
+					</view>
+				</view>
+			</view>
+
+			<view class="card-grid">
+				<view
+					v-for="item in metricList"
+					:key="item.key"
+					class="metric-card"
+					:class="selectedKey == item.key ? 'metric-on' : ''"
+					@click="selectMetric(item.key)"
+				>
+					<text class="metric-label">{{ item.label }}</text>
+					<text class="metric-value">{{ item.value }}</text>
+					<view class="metric-diff">
+						<text class="diff-prefix">较前一日 </text>
+						<text
+							v-if="item.trend == 'up'"
+							class="diff-up"
+						>↑ {{ item.diff }}</text>
+						<text
+							v-else-if="item.trend == 'down'"
+							class="diff-down"
+						>↓ {{ item.diff }}</text>
+						<text v-else class="diff-flat">-</text>
+					</view>
+				</view>
+			</view>
+
+			<view class="chart-card">
+				<view class="chart-area">
+					<view class="y-axis">
+						<text class="y-label">1</text>
+						<text class="y-label">0.75</text>
+						<text class="y-label">0.5</text>
+						<text class="y-label">0.25</text>
+						<text class="y-label">0</text>
+					</view>
+					<view class="plot">
+						<view class="grid-h grid-h0"></view>
+						<view class="grid-h grid-h1"></view>
+						<view class="grid-h grid-h2"></view>
+						<view class="grid-h grid-h3"></view>
+						<view class="grid-h grid-h4"></view>
+						<view class="grid-v grid-v0"></view>
+						<view class="grid-v grid-v1"></view>
+						<view class="grid-v grid-v2"></view>
+						<view class="grid-v grid-v3"></view>
+
+						<view
+							v-for="(seg, si) in lineSegs"
+							:key="'seg-' + si"
+							class="line-seg"
+							:style="'left:' + seg.left + '%;top:' + seg.top + '%;width:' + seg.width + '%;transform:rotate(' + seg.deg + 'deg);'"
+						></view>
+						<view
+							v-for="(pt, pi) in chartPoints"
+							:key="'pt-' + pi"
+							class="chart-dot"
+							:style="'left:' + pt.x + '%;top:' + pt.y + '%;'"
+						></view>
+					</view>
+				</view>
+				<view class="x-axis">
+					<text
+						v-for="(lab, li) in xLabels"
+						:key="'x-' + li"
+						class="x-label"
+					>{{ lab }}</text>
+				</view>
+			</view>
+
+			<view class="scroll-pad"></view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref } from 'vue'
+
+	type MetricItem = {
+		key: string
+		label: string
+		value: string
+		diff: string
+		trend: string
+	}
+
+	type ChartPt = {
+		x: number
+		y: number
+	}
+
+	type LineSeg = {
+		left: number
+		top: number
+		width: number
+		deg: number
+	}
+
+	const rangeKey = ref('1d')
+	const selectedKey = ref('total')
+	const updateTime = ref('2026.05.26 12:00')
+
+	const metricList = ref([
+		{ key: 'total', label: '总收益', value: '2,569.40', diff: '100.00%', trend: 'down' } as MetricItem,
+		{ key: 'direct', label: '直推收益', value: '8600.00', diff: '100.00%', trend: 'up' } as MetricItem,
+		{ key: 'team', label: '团队收益', value: '0', diff: '', trend: 'flat' } as MetricItem,
+		{ key: 'reward', label: '平台奖励', value: '0', diff: '', trend: 'flat' } as MetricItem,
+		{ key: 'refund_n', label: '发起退款笔数', value: '0', diff: '', trend: 'flat' } as MetricItem,
+		{ key: 'refund_m', label: '发起退款金额', value: '0', diff: '', trend: 'flat' } as MetricItem
+	] as MetricItem[])
+
+	const xLabels = ref(['20260519', '20260521', '20260523', '20260526'] as string[])
+
+	// 与效果图一致：前期为 0，末期冲高后回落（坐标已预计算线段）
+	const chartPoints = ref([
+		{ x: 0, y: 100 } as ChartPt,
+		{ x: 14, y: 100 } as ChartPt,
+		{ x: 28, y: 100 } as ChartPt,
+		{ x: 42, y: 100 } as ChartPt,
+		{ x: 56, y: 100 } as ChartPt,
+		{ x: 68, y: 88 } as ChartPt,
+		{ x: 78, y: 8 } as ChartPt,
+		{ x: 88, y: 42 } as ChartPt,
+		{ x: 100, y: 78 } as ChartPt
+	] as ChartPt[])
+
+	const lineSegs = ref([
+		{ left: 0, top: 100, width: 14, deg: 0 } as LineSeg,
+		{ left: 14, top: 100, width: 14, deg: 0 } as LineSeg,
+		{ left: 28, top: 100, width: 14, deg: 0 } as LineSeg,
+		{ left: 42, top: 100, width: 14, deg: 0 } as LineSeg,
+		{ left: 56, top: 100, width: 16.97, deg: -45 } as LineSeg,
+		{ left: 68, top: 88, width: 85.4, deg: -82.9 } as LineSeg,
+		{ left: 78, top: 8, width: 35.4, deg: 73.6 } as LineSeg,
+		{ left: 88, top: 42, width: 37.9, deg: 71.6 } as LineSeg
+	] as LineSeg[])
+
+	function goBack() {
+		uni.navigateBack({})
+	}
+
+	function onEarnings() {
+		uni.showToast({ title: '收益明细即将开放', icon: 'none' })
+	}
+
+	function setRange(key: string) {
+		rangeKey.value = key
+	}
+
+	function onMoreRange() {
+		uni.showActionSheet({
+			itemList: ['近30天', '近90天', '自定义'],
+			success: (_res) => {
+				uni.showToast({ title: '更多筛选即将开放', icon: 'none' })
+			}
+		})
+	}
+
+	function selectMetric(key: string) {
+		selectedKey.value = key
+	}
+</script>
+
+<style>
+	.stats-page {
+		flex: 1;
+		background-color: #f5f6f8;
+		flex-direction: column;
+	}
+	/* #ifdef H5 */
+	.stats-page ::-webkit-scrollbar {
+		width: 0;
+		height: 0;
+		display: none;
+	}
+	.body {
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+	}
+	/* #endif */
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 48rpx 24rpx 20rpx;
+		background-color: #ffffff;
+	}
+	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.back-text {
+		font-size: 56rpx;
+		color: #181818;
+		line-height: 56rpx;
+	}
+	.topbar-title {
+		font-size: 34rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.topbar-link {
+		font-size: 28rpx;
+		color: #3b82f6;
+		width: 120rpx;
+		text-align: right;
+	}
+	.body {
+		flex: 1;
+		height: 0;
+	}
+	.overview-head {
+		flex-direction: row;
+		align-items: flex-start;
+		justify-content: space-between;
+		padding: 28rpx 28rpx 8rpx;
+	}
+	.overview-left {
+		flex-direction: column;
+	}
+	.overview-title {
+		font-size: 36rpx;
+		font-weight: 800;
+		color: #111111;
+		margin-bottom: 10rpx;
+	}
+	.overview-time {
+		font-size: 22rpx;
+		color: #9aa3af;
+	}
+	.range-row {
+		flex-direction: row;
+		align-items: center;
+		margin-top: 4rpx;
+	}
+	.range-chip {
+		flex-direction: row;
+		align-items: center;
+		padding: 8rpx 16rpx;
+		background-color: #eef0f3;
+		border-radius: 8rpx;
+		margin-left: 10rpx;
+	}
+	.range-on {
+		background-color: #e8f0fe;
+	}
+	.range-text {
+		font-size: 22rpx;
+		color: #6b7280;
+	}
+	.range-text-on {
+		color: #3b82f6;
+	}
+	.range-caret {
+		font-size: 18rpx;
+		color: #6b7280;
+		margin-left: 2rpx;
+	}
+	.card-grid {
+		flex-direction: row;
+		flex-wrap: wrap;
+		padding: 16rpx 20rpx 8rpx;
+		justify-content: space-between;
+	}
+	.metric-card {
+		width: 48.5%;
+		background-color: #ffffff;
+		border-radius: 16rpx;
+		padding: 24rpx 22rpx 20rpx;
+		margin-bottom: 16rpx;
+		border-width: 2rpx;
+		border-color: transparent;
+		border-style: solid;
+	}
+	.metric-on {
+		border-color: #3b82f6;
+		background-color: #f7faff;
+	}
+	.metric-label {
+		font-size: 24rpx;
+		color: #6b7280;
+		margin-bottom: 12rpx;
+	}
+	.metric-value {
+		font-size: 40rpx;
+		font-weight: 700;
+		color: #111111;
+		margin-bottom: 12rpx;
+	}
+	.metric-diff {
+		flex-direction: row;
+		align-items: center;
+		flex-wrap: wrap;
+	}
+	.diff-prefix {
+		font-size: 20rpx;
+		color: #9aa3af;
+	}
+	.diff-up {
+		font-size: 20rpx;
+		color: #ef4444;
+	}
+	.diff-down {
+		font-size: 20rpx;
+		color: #3b82f6;
+	}
+	.diff-flat {
+		font-size: 20rpx;
+		color: #9aa3af;
+	}
+	.chart-card {
+		margin: 8rpx 20rpx 0;
+		background-color: #ffffff;
+		border-radius: 16rpx;
+		padding: 28rpx 20rpx 24rpx;
+	}
+	.chart-area {
+		flex-direction: row;
+		height: 360rpx;
+	}
+	.y-axis {
+		width: 64rpx;
+		justify-content: space-between;
+		padding-bottom: 8rpx;
+	}
+	.y-label {
+		font-size: 18rpx;
+		color: #9aa3af;
+		text-align: right;
+	}
+	.plot {
+		flex: 1;
+		position: relative;
+		margin-left: 8rpx;
+		margin-right: 8rpx;
+	}
+	.grid-h {
+		position: absolute;
+		left: 0;
+		right: 0;
+		height: 1rpx;
+		background-color: #eef0f3;
+	}
+	.grid-h0 { top: 0%; }
+	.grid-h1 { top: 25%; }
+	.grid-h2 { top: 50%; }
+	.grid-h3 { top: 75%; }
+	.grid-h4 { top: 100%; }
+	.grid-v {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		width: 1rpx;
+		background-color: #eef0f3;
+	}
+	.grid-v0 { left: 0%; }
+	.grid-v1 { left: 33.33%; }
+	.grid-v2 { left: 66.66%; }
+	.grid-v3 { left: 100%; }
+	.line-seg {
+		position: absolute;
+		height: 3rpx;
+		background-color: #3b82f6;
+		transform-origin: 0 50%;
+	}
+	.chart-dot {
+		position: absolute;
+		width: 10rpx;
+		height: 10rpx;
+		border-radius: 5rpx;
+		background-color: #3b82f6;
+		margin-left: -5rpx;
+		margin-top: -5rpx;
+	}
+	.x-axis {
+		flex-direction: row;
+		justify-content: space-between;
+		padding: 16rpx 0 0 72rpx;
+	}
+	.x-label {
+		font-size: 18rpx;
+		color: #9aa3af;
+	}
+	.scroll-pad {
+		height: 48rpx;
+	}
+</style>

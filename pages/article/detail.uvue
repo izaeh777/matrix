@@ -1,0 +1,372 @@
+<template>
+	<view class="detail-page">
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">资讯详情</text>
+			<view class="topbar-right"></view>
+		</view>
+
+		<scroll-view class="body" direction="vertical" :show-scrollbar="false" :rebound="false">
+			<view v-if="loading" class="state">
+				<text class="state-text">加载中…</text>
+			</view>
+			<view v-else-if="errorText.length > 0" class="state">
+				<text class="state-text">{{ errorText }}</text>
+				<view class="retry" @click="loadDetail">
+					<text class="retry-text">重试</text>
+				</view>
+			</view>
+			<view v-else-if="hasDetail" class="article">
+				<text class="title">{{ titleText }}</text>
+				<view class="meta-row">
+					<text v-if="channelText.length > 0" class="meta-chip">{{ channelText }}</text>
+					<text v-if="authorText.length > 0" class="meta-text">{{ authorText }}</text>
+					<text class="meta-text">{{ timeText }}</text>
+				</view>
+				<view class="stat-row">
+					<text class="stat">阅读 {{ viewsText }}</text>
+					<text class="stat">点赞 {{ likesText }}</text>
+					<text class="stat">评论 {{ commentsText }}</text>
+				</view>
+				<image
+					v-if="cover.length > 0"
+					class="cover"
+					:src="cover"
+					mode="aspectFill"
+				></image>
+				<view v-if="tagList.length > 0" class="tags">
+					<text v-for="tag in tagList" :key="tag" class="tag">{{ tag }}</text>
+				</view>
+				<text class="content">{{ contentText }}</text>
+				<view v-if="outlinkText.length > 0" class="outlink" @click="openOutlink">
+					<text class="outlink-text">查看原文 ›</text>
+				</view>
+
+				<view class="nav-block">
+					<view
+						v-if="prevId > 0"
+						class="nav-item"
+						@click="openSibling(prevId)"
+					>
+						<text class="nav-label">上一篇</text>
+						<text class="nav-title">{{ prevTitle }}</text>
+					</view>
+					<view
+						v-if="nextId > 0"
+						class="nav-item"
+						@click="openSibling(nextId)"
+					>
+						<text class="nav-label">下一篇</text>
+						<text class="nav-title">{{ nextTitle }}</text>
+					</view>
+				</view>
+			</view>
+			<view class="scroll-pad"></view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, computed } from 'vue'
+	import {
+		fetchArchiveDetail,
+		cmsAssetUrl,
+		formatPublishAgo,
+		openCmsLink,
+		CmsArchiveDetail
+	} from '@/common/cms.uts'
+
+	const loading = ref<boolean>(true)
+	const errorText = ref<string>('')
+	const detail = ref<CmsArchiveDetail | null>(null)
+	const articleId = ref<number>(0)
+
+	const hasDetail = computed((): boolean => {
+		return detail.value != null
+	})
+	const titleText = computed((): string => {
+		const d = detail.value
+		return d != null ? d.title : ''
+	})
+	const channelText = computed((): string => {
+		const d = detail.value
+		return d != null ? d.channel_name : ''
+	})
+	const authorText = computed((): string => {
+		const d = detail.value
+		return d != null ? d.author : ''
+	})
+	const viewsText = computed((): string => {
+		const d = detail.value
+		return d != null ? ('' + d.views) : '0'
+	})
+	const likesText = computed((): string => {
+		const d = detail.value
+		return d != null ? ('' + d.likes) : '0'
+	})
+	const commentsText = computed((): string => {
+		const d = detail.value
+		return d != null ? ('' + d.comments) : '0'
+	})
+	const contentText = computed((): string => {
+		const d = detail.value
+		return d != null ? d.content : ''
+	})
+	const outlinkText = computed((): string => {
+		const d = detail.value
+		return d != null ? d.outlink : ''
+	})
+	const tagList = computed((): Array<string> => {
+		const d = detail.value
+		return d != null ? d.tags : ([] as Array<string>)
+	})
+	const prevId = computed((): number => {
+		const d = detail.value
+		return d != null ? d.prev_id : 0
+	})
+	const prevTitle = computed((): string => {
+		const d = detail.value
+		return d != null ? d.prev_title : ''
+	})
+	const nextId = computed((): number => {
+		const d = detail.value
+		return d != null ? d.next_id : 0
+	})
+	const nextTitle = computed((): string => {
+		const d = detail.value
+		return d != null ? d.next_title : ''
+	})
+	const cover = computed((): string => {
+		const d = detail.value
+		if (d == null) return ''
+		return cmsAssetUrl(d.image)
+	})
+	const timeText = computed((): string => {
+		const d = detail.value
+		if (d == null) return ''
+		return formatPublishAgo(d.publishtime)
+	})
+
+	function goBack(): void {
+		uni.navigateBack({})
+	}
+
+	function openOutlink(): void {
+		const d = detail.value
+		if (d == null) return
+		openCmsLink(d.outlink)
+	}
+
+	function openSibling(id: number): void {
+		if (id <= 0) return
+		articleId.value = id
+		loadDetail()
+	}
+
+	async function loadDetail(): Promise<void> {
+		const id = articleId.value
+		if (id <= 0) {
+			errorText.value = '缺少资讯 id'
+			loading.value = false
+			return
+		}
+		loading.value = true
+		errorText.value = ''
+		try {
+			detail.value = await fetchArchiveDetail(id)
+		} catch (e) {
+			detail.value = null
+			errorText.value = '加载失败，请稍后重试'
+			console.warn('加载资讯详情失败', e)
+		}
+		loading.value = false
+	}
+
+	onLoad((options: UTSJSONObject) => {
+		try {
+			const raw = options['id']
+			if (raw != null) {
+				const n = parseInt('' + raw)
+				if (n == n && n > 0) articleId.value = n
+			}
+		} catch (e0) {}
+		loadDetail()
+	})
+</script>
+
+<style>
+	.detail-page {
+		flex: 1;
+		background-color: #ffffff;
+		flex-direction: column;
+	}
+	/* #ifdef H5 */
+	.detail-page ::-webkit-scrollbar {
+		width: 0;
+		height: 0;
+		display: none;
+	}
+	.body {
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+	}
+	/* #endif */
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 48rpx 20rpx 16rpx;
+		background-color: #ffffff;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f0f2f5;
+	}
+	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.back-text {
+		font-size: 56rpx;
+		color: #181818;
+		line-height: 56rpx;
+	}
+	.topbar-title {
+		font-size: 32rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.topbar-right {
+		width: 72rpx;
+	}
+	.body {
+		flex: 1;
+		height: 0;
+		background-color: #ffffff;
+	}
+	.state {
+		padding: 120rpx 40rpx;
+		align-items: center;
+	}
+	.state-text {
+		font-size: 28rpx;
+		color: #9aa3af;
+		text-align: center;
+	}
+	.retry {
+		margin-top: 24rpx;
+		padding: 14rpx 36rpx;
+		background-color: #2f6ff2;
+		border-radius: 32rpx;
+	}
+	.retry-text {
+		font-size: 26rpx;
+		color: #ffffff;
+	}
+	.article {
+		padding: 28rpx 32rpx 40rpx;
+		flex-direction: column;
+	}
+	.title {
+		font-size: 40rpx;
+		font-weight: 800;
+		color: #111111;
+		line-height: 56rpx;
+		margin-bottom: 20rpx;
+	}
+	.meta-row {
+		flex-direction: row;
+		flex-wrap: wrap;
+		align-items: center;
+		margin-bottom: 12rpx;
+	}
+	.meta-chip {
+		font-size: 22rpx;
+		color: #2f6ff2;
+		background-color: #eef4ff;
+		padding: 4rpx 14rpx;
+		border-radius: 20rpx;
+		margin-right: 12rpx;
+		margin-bottom: 8rpx;
+	}
+	.meta-text {
+		font-size: 22rpx;
+		color: #9aa3af;
+		margin-right: 16rpx;
+		margin-bottom: 8rpx;
+	}
+	.stat-row {
+		flex-direction: row;
+		margin-bottom: 24rpx;
+	}
+	.stat {
+		font-size: 22rpx;
+		color: #9aa3af;
+		margin-right: 24rpx;
+	}
+	.cover {
+		width: 100%;
+		height: 360rpx;
+		border-radius: 20rpx;
+		background-color: #e8eef8;
+		margin-bottom: 24rpx;
+	}
+	.tags {
+		flex-direction: row;
+		flex-wrap: wrap;
+		margin-bottom: 24rpx;
+	}
+	.tag {
+		font-size: 22rpx;
+		color: #2f6ff2;
+		background-color: #f3f6fb;
+		padding: 6rpx 16rpx;
+		border-radius: 20rpx;
+		margin-right: 12rpx;
+		margin-bottom: 10rpx;
+	}
+	.content {
+		font-size: 30rpx;
+		color: #333333;
+		line-height: 48rpx;
+	}
+	.outlink {
+		margin-top: 32rpx;
+		padding: 22rpx 0;
+		align-items: center;
+		border-top-width: 1rpx;
+		border-top-color: #f0f2f5;
+	}
+	.outlink-text {
+		font-size: 28rpx;
+		color: #2f6ff2;
+		font-weight: 600;
+	}
+	.nav-block {
+		margin-top: 40rpx;
+		border-top-width: 1rpx;
+		border-top-color: #f0f2f5;
+		padding-top: 16rpx;
+	}
+	.nav-item {
+		padding: 20rpx 0;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f5f6f8;
+	}
+	.nav-label {
+		font-size: 22rpx;
+		color: #9aa3af;
+		margin-bottom: 8rpx;
+	}
+	.nav-title {
+		font-size: 28rpx;
+		color: #1a1a1a;
+		lines: 2;
+		text-overflow: ellipsis;
+	}
+	.scroll-pad {
+		height: 40rpx;
+	}
+</style>

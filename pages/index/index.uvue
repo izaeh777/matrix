@@ -8,20 +8,24 @@
 <script setup lang="uts">
 	import { ref } from 'vue'
 	import { loadSession } from '@/common/storage.uts'
+	import { loadPlatformSession } from '@/common/platform.uts'
 	import { bootstrapMatrix } from '@/common/app.uts'
 
-	const title = ref('Matrix Chat')
+	const title = ref('i-tiklink')
 
 	onLoad(() => {
-		const session = loadSession()
-		if (session != null) {
-			// 已登录：重建 MatrixClient + 跳转房间列表
+		const matrix = loadSession()
+		const platform = loadPlatformSession()
+		if (matrix != null) {
 			bootstrapMatrix()
 			setTimeout(() => {
-				uni.reLaunch({ url: '/pages/rooms/rooms' })
+				uni.reLaunch({ url: '/pages/home/home' })
+			}, 200)
+		} else if (platform != null) {
+			setTimeout(() => {
+				uni.reLaunch({ url: '/pages/home/home' })
 			}, 200)
 		} else {
-			// 未登录：跳登录页
 			setTimeout(() => {
 				uni.reLaunch({ url: '/pages/login/login' })
 			}, 200)

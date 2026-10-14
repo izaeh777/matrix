@@ -1,85 +1,227 @@
 <template>
 	<view class="discover-page">
-		<view class="wx-nav">
-			<text class="wx-nav-title">发现</text>
-		</view>
-		<view class="topbar">
-			<view class="search-input-wrap">
-				<text class="search-icon">⌕</text>
-				<input
-					class="search-input"
-					v-model="searchTerm"
-					placeholder="搜索公开房间"
-					placeholder-class="search-placeholder"
-					@input="onSearchInput"
-				/>
+		<view class="search-wrap">
+			<view class="search-box" @click="onSearchBoxTap">
+				<view v-if="keyword.length == 0 && !searchFocused" class="search-placeholder">
+					<text class="search-ico">⌕</text>
+					<text class="search-ph-text">开始搜索</text>
+				</view>
+				<view v-else class="search-inner">
+					<text class="search-ico">⌕</text>
+					<input
+						class="search-input"
+						v-model="keyword"
+						placeholder="开始搜索"
+						placeholder-class="search-ph"
+						confirm-type="search"
+						:focus="searchFocused"
+						@confirm="onSearch"
+						@blur="onSearchBlur"
+					/>
+				</view>
 			</view>
 		</view>
 
-		<scroll-view class="rooms-scroll" scroll-y @scrolltolower="loadMore">
-			<!-- 房间列表 -->
-			<view v-if="loading && rooms.length === 0" class="state-row">
-				<text class="state-text">加载中…</text>
+		<!-- #ifdef H5 -->
+		<view class="tabs-h5">
+			<view class="tabs-row">
+				<view
+					v-for="tab in tabs"
+					:key="tab"
+					class="tab"
+					:class="{ 'tab-on': tab == activeTab }"
+					@click="onTab(tab)"
+				>
+					<text class="tab-text" :class="{ 'tab-text-on': tab == activeTab }">{{ tab }}</text>
+					<view v-if="tab == activeTab" class="tab-line"></view>
+				</view>
+			</view>
+		</view>
+		<!-- #endif -->
+		<!-- #ifndef H5 -->
+		<scroll-view class="tabs" direction="horizontal" :show-scrollbar="false">
+			<view class="tabs-row">
+				<view
+					v-for="tab in tabs"
+					:key="tab"
+					class="tab"
+					:class="{ 'tab-on': tab == activeTab }"
+					@click="onTab(tab)"
+				>
+					<text class="tab-text" :class="{ 'tab-text-on': tab == activeTab }">{{ tab }}</text>
+					<view v-if="tab == activeTab" class="tab-line"></view>
+				</view>
+			</view>
+		</scroll-view>
+		<!-- #endif -->
+
+		<scroll-view class="body" direction="vertical" :show-scrollbar="false">
+			<view class="banner">
+				<view class="banner-text">
+					<text class="banner-title">智聚未来 AI共生</text>
+					<text class="banner-sub">202X全球互联网AI峰会</text>
+					<view class="banner-btn" @click="goPublish">
+						<text class="banner-btn-text">对话下一代科技革命</text>
+					</view>
+				</view>
 			</view>
 
-			<view v-else-if="rooms.length === 0" class="state-row">
-				<text class="state-text-large">🌍</text>
-				<text class="state-text">未找到公开房间</text>
-				<text class="state-hint">试试换个关键词</text>
+			<view v-if="loading && hotList.length == 0" class="empty">
+				<text class="empty-text">加载中…</text>
 			</view>
 
-			<view
-				v-for="room in rooms"
-				:key="room.room_id"
-				class="room-card"
-			>
-				<view class="card-header">
-					<image class="room-avatar" :src="getAvatar(room)" fallback="/static/logo.png" />
-					<view class="card-info">
-						<text class="room-name">{{ publicRoomTitle(room) }}</text>
-						<text v-if="room.topic" class="room-topic">{{ room.topic }}</text>
-						<view class="meta-row">
-							<text class="meta-item">👥 {{ publicRoomMembers(room) }}</text>
-							<text v-if="room.world_readable" class="meta-item">🌐 公开浏览</text>
-							<text v-if="room.guest_can_join" class="meta-item">👋 访客可加入</text>
+			<view class="section">
+				<view class="section-head">
+					<text class="section-title">Web3.0的体验</text>
+					<view class="section-more" @click="onSearch">
+						<text class="section-more-ico">›</text>
+					</view>
+				</view>
+				<!-- #ifdef H5 -->
+				<view class="card-h5">
+					<view class="card-row" :style="{ width: rowWidth(hotList.length) }">
+						<view
+							v-for="(item, idx) in hotList"
+							:key="item.id"
+							class="card"
+							@click="onOpen(item)"
+						>
+							<view class="card-cover-wrap">
+								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
+								<view v-else class="card-cover card-cover-fallback"></view>
+								<view class="badge" :class="idx % 2 == 0 ? 'badge-hot' : 'badge-new'">
+									<text class="badge-text">{{ idx % 2 == 0 ? '热门' : '最新' }}</text>
+								</view>
+							</view>
+							<text class="card-title">{{ item.title }}</text>
+							<text class="card-meta">${{ tvlOf(item) }} TVL 起</text>
+							<view class="stat-row">
+								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
+								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>
+								<text class="stat">◎ {{ item.views > 0 ? item.views : 12 }}</text>
+							</view>
 						</view>
 					</view>
 				</view>
-				<view class="card-actions">
-					<button class="btn-preview" @click="onPreview(room)">
-						<text class="btn-text">预览</text>
-					</button>
-					<button class="btn-join" @click="onJoin(room)">
-						<text class="btn-text">加入</text>
-					</button>
+				<!-- #endif -->
+				<!-- #ifndef H5 -->
+				<scroll-view class="card-scroll" direction="horizontal" :show-scrollbar="false">
+					<view class="card-row" :style="{ width: rowWidth(hotList.length) }">
+						<view
+							v-for="(item, idx) in hotList"
+							:key="item.id"
+							class="card"
+							@click="onOpen(item)"
+						>
+							<view class="card-cover-wrap">
+								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
+								<view v-else class="card-cover card-cover-fallback"></view>
+								<view class="badge" :class="idx % 2 == 0 ? 'badge-hot' : 'badge-new'">
+									<text class="badge-text">{{ idx % 2 == 0 ? '热门' : '最新' }}</text>
+								</view>
+							</view>
+							<text class="card-title">{{ item.title }}</text>
+							<text class="card-meta">${{ tvlOf(item) }} TVL 起</text>
+							<view class="stat-row">
+								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
+								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>
+								<text class="stat">◎ {{ item.views > 0 ? item.views : 12 }}</text>
+							</view>
+						</view>
+					</view>
+				</scroll-view>
+				<!-- #endif -->
+			</view>
+
+			<view class="section">
+				<view class="section-head">
+					<text class="section-title">Web3.0的体验</text>
+					<view class="section-more" @click="goNotify">
+						<text class="section-more-ico">›</text>
+					</view>
 				</view>
+				<!-- #ifdef H5 -->
+				<view class="card-h5">
+					<view class="card-row" :style="{ width: rowWidth(latestList.length) }">
+						<view
+							v-for="(item, idx) in latestList"
+							:key="item.id"
+							class="card"
+							@click="onOpen(item)"
+						>
+							<view class="card-cover-wrap">
+								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
+								<view v-else class="card-cover card-cover-fallback"></view>
+								<view class="badge" :class="idx % 2 == 0 ? 'badge-new' : 'badge-hot'">
+									<text class="badge-text">{{ idx % 2 == 0 ? '最新' : '热门' }}</text>
+								</view>
+							</view>
+							<text class="card-title">{{ item.title }}</text>
+							<text class="card-meta">${{ tvlOf(item) }} TVL 起</text>
+							<view class="stat-row">
+								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
+								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>
+								<text class="stat">◎ {{ item.views > 0 ? item.views : 12 }}</text>
+							</view>
+						</view>
+					</view>
+				</view>
+				<!-- #endif -->
+				<!-- #ifndef H5 -->
+				<scroll-view class="card-scroll" direction="horizontal" :show-scrollbar="false">
+					<view class="card-row" :style="{ width: rowWidth(latestList.length) }">
+						<view
+							v-for="(item, idx) in latestList"
+							:key="item.id"
+							class="card"
+							@click="onOpen(item)"
+						>
+							<view class="card-cover-wrap">
+								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
+								<view v-else class="card-cover card-cover-fallback"></view>
+								<view class="badge" :class="idx % 2 == 0 ? 'badge-new' : 'badge-hot'">
+									<text class="badge-text">{{ idx % 2 == 0 ? '最新' : '热门' }}</text>
+								</view>
+							</view>
+							<text class="card-title">{{ item.title }}</text>
+							<text class="card-meta">${{ tvlOf(item) }} TVL 起</text>
+							<view class="stat-row">
+								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
+								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>
+								<text class="stat">◎ {{ item.views > 0 ? item.views : 12 }}</text>
+							</view>
+						</view>
+					</view>
+				</scroll-view>
+				<!-- #endif -->
 			</view>
-
-			<!-- 加载更多 -->
-			<view v-if="loading && rooms.length > 0" class="state-row">
-				<text class="state-text">加载更多…</text>
-			</view>
-
-			<view v-if="!hasMore && rooms.length > 0" class="state-row">
-				<text class="state-hint">没有更多了</text>
-			</view>
+			<view class="scroll-pad"></view>
 		</scroll-view>
+
+		<view class="fab" @click="goPublish">
+			<text class="fab-text">＋</text>
+		</view>
+
 		<view class="wx-tabbar">
-			<view class="wx-tab" @click="goRooms">
-				<text class="wx-tab-icon">💬</text>
-				<text class="wx-tab-label">微信</text>
+			<view class="wx-tab" @click="goHome">
+				<image class="wx-tab-icon" src="/static/login/s11.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">首页</text>
 			</view>
-			<view class="wx-tab" @click="goContacts">
-				<text class="wx-tab-icon">👤</text>
-				<text class="wx-tab-label">通讯录</text>
+			<view class="wx-tab" @click="goRooms">
+				<image class="wx-tab-icon" src="/static/login/s22.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">消息</text>
 			</view>
 			<view class="wx-tab wx-tab-on">
-				<text class="wx-tab-icon">◈</text>
+				<image class="wx-tab-icon" src="/static/login/s3.png" mode="aspectFit"></image>
 				<text class="wx-tab-label">发现</text>
 			</view>
+			<view class="wx-tab" @click="goNotify">
+				<image class="wx-tab-icon" src="/static/login/s44.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">通知</text>
+			</view>
 			<view class="wx-tab" @click="goProfile">
-				<text class="wx-tab-icon">◎</text>
-				<text class="wx-tab-label">我</text>
+				<image class="wx-tab-icon" src="/static/login/s55.png" mode="aspectFit"></image>
+				<text class="wx-tab-label">我的</text>
 			</view>
 		</view>
 	</view>
@@ -87,307 +229,417 @@
 
 <script setup lang="uts">
 	import { ref, onMounted } from 'vue'
-	import { getMatrix, errText, PublicRoom } from '@/common/matrix.uts'
-	import { openChat } from '@/common/app.uts'
+	import {
+		fetchCmsHome,
+		searchCmsArchives,
+		fetchChannelArchives,
+		cmsAssetUrl,
+		openArchiveDetail,
+		CmsArchiveItem
+	} from '@/common/cms.uts'
 
-	const searchTerm = ref<string>('')
-	const rooms = ref<PublicRoom[]>([])
+	const tabs: Array<string> = ['全部', '金融', '直播', 'Web3', 'Defi', '项目']
+	const activeTab = ref<string>('全部')
+	const keyword = ref<string>('')
+	const searchFocused = ref<boolean>(false)
 	const loading = ref<boolean>(false)
-	const nextBatch = ref<string>('')
-	const hasMore = ref<boolean>(true)
 
-	let searchTimer: number | null = null
+	function onSearchBoxTap(): void {
+		searchFocused.value = true
+	}
+	function onSearchBlur(): void {
+		searchFocused.value = false
+	}
+	const hotList = ref<Array<CmsArchiveItem>>([])
+	const latestList = ref<Array<CmsArchiveItem>>([])
 
-	function goRooms() {
+	function coverOf(item: CmsArchiveItem): string {
+		return cmsAssetUrl(item.image)
+	}
+
+	function tvlOf(item: CmsArchiveItem): number {
+		const n = item.views
+		if (n <= 0) return 163
+		return 100 + (n % 800)
+	}
+
+	function rowWidth(count: number): string {
+		if (count <= 0) return '100%'
+		return (count * 320 + 40) + 'rpx'
+	}
+
+	function tabDiyname(tab: string): string {
+		if (tab == '金融') return 'investment'
+		if (tab == '直播') return 'internet'
+		if (tab == 'Web3') return 'product'
+		if (tab == 'Defi') return 'smarthome'
+		if (tab == '项目') return 'download'
+		return ''
+	}
+
+	function onOpen(item: CmsArchiveItem): void {
+		openArchiveDetail(item.id)
+	}
+
+	function goHome(): void {
+		uni.redirectTo({ url: '/pages/home/home' })
+	}
+	function goRooms(): void {
 		uni.redirectTo({ url: '/pages/rooms/rooms' })
 	}
-	function goContacts() {
-		uni.redirectTo({ url: '/pages/contacts/contacts' })
+	function goNotify(): void {
+		uni.redirectTo({ url: '/pages/notify/notify' })
 	}
-	function goProfile() {
+	function goProfile(): void {
 		uni.redirectTo({ url: '/pages/profile/profile' })
 	}
-	function goBack() {
-		uni.redirectTo({ url: '/pages/rooms/rooms' })
+	function goPublish(): void {
+		uni.navigateTo({ url: '/pages/project/publish' })
 	}
 
-	function getAvatar(room: PublicRoom): string {
-		const matrix = getMatrix()
-		if (matrix == null) return '/static/logo.png'
-		const av = room.avatar_url
-		if (av != null && av.length > 0) {
-			return matrix.mxcToHttp(av, 96, 96)
+	function onTab(tab: string): void {
+		activeTab.value = tab
+		loadData()
+	}
+
+	async function onSearch(): Promise<void> {
+		const kw = keyword.value.trim()
+		if (kw.length == 0) {
+			loadData()
+			return
 		}
-		return '/static/logo.png'
-	}
-
-	function publicRoomTitle(room: PublicRoom): string {
-		const n = room.name
-		if (n != null && n.length > 0) return n
-		const a = room.canonical_alias
-		if (a != null && a.length > 0) return a
-		return room.room_id
-	}
-
-	function publicRoomMembers(room: PublicRoom): string {
-		return '' + room.num_joined_members
-	}
-
-	async function load(reset: boolean = true) {
-		if (loading.value) return
-		const matrix = getMatrix()
-		if (matrix == null) return
 		loading.value = true
-		if (reset) {
-			rooms.value = []
-			nextBatch.value = ''
-			hasMore.value = true
-		}
 		try {
-			const term = searchTerm.value.trim()
-			const res = await matrix.listPublicRooms(20, nextBatch.value, term)
-			rooms.value = rooms.value.concat(res.chunk)
-			nextBatch.value = res.next_batch
-			hasMore.value = res.next_batch.length > 0 && res.chunk.length > 0
-		} catch (e: any) {
-			console.warn('加载公开房间失败', e)
-			uni.showToast({ title: '加载失败: ' + errText(e, ''), icon: 'none' })
+			const list = await searchCmsArchives(kw)
+			hotList.value = list
+			latestList.value = list
+		} catch (e) {
+			console.warn('搜索失败', e)
 		}
 		loading.value = false
 	}
 
-	function onSearchInput() {
-		const t = searchTimer
-		searchTimer = null
-		if (t != null) {
-			clearTimeout(t)
-		}
-		searchTimer = setTimeout(() => {
-			load(true)
-		}, 400) as number | null
-	}
-
-	async function loadMore() {
-		if (hasMore.value && !loading.value) {
-			await load(false)
-		}
-	}
-
-	async function onJoin(room: PublicRoom) {
-		const matrix = getMatrix()
-		if (matrix == null) return
-		uni.showLoading({ title: '加入中…' })
+	async function loadData(): Promise<void> {
+		loading.value = true
 		try {
-			let target = room.room_id
-			if (room.canonical_alias.length > 0) {
-				target = room.canonical_alias
+			const home = await fetchCmsHome()
+			let hot = home.hot
+			let latest = home.latest
+			const tab = activeTab.value
+			if (tab != '全部') {
+				const filtered: Array<CmsArchiveItem> = []
+				const all: Array<CmsArchiveItem> = []
+				for (let i = 0; i < hot.length; i++) all.push(hot[i])
+				for (let j = 0; j < latest.length; j++) all.push(latest[j])
+				for (let k = 0; k < all.length; k++) {
+					const t = all[k].title
+					const d = all[k].description
+					if (t.indexOf(tab) >= 0 || d.indexOf(tab) >= 0) filtered.push(all[k])
+				}
+				if (filtered.length > 0) {
+					hot = filtered
+					latest = filtered
+				} else {
+					const diy = tabDiyname(tab)
+					if (diy.length > 0) {
+						try {
+							const more = await fetchChannelArchives(0, '', diy)
+							if (more.length > 0) {
+								hot = more
+								latest = more
+							}
+						} catch (e2) {}
+					}
+				}
 			}
-			const result = await matrix.joinRoom(target)
-			uni.hideLoading()
-			uni.showToast({ title: '已加入', icon: 'success' })
-			setTimeout(() => {
-				openChat(result.room_id)
-			}, 600)
-		} catch (e: any) {
-			uni.hideLoading()
-			uni.showToast({ title: '加入失败: ' + errText(e, ''), icon: 'none' })
+			hotList.value = hot
+			latestList.value = latest
+		} catch (e) {
+			console.warn('加载发现失败', e)
 		}
-	}
-
-	async function onPreview(room: PublicRoom) {
-		// 预览：跳到只读的房间页（如果支持）
-		uni.showToast({
-			title: '预览需要服务器开启 world_readable',
-			icon: 'none'
-		})
-		// 直接尝试加入（多数房间允许直接进）
-		await onJoin(room)
-	}
-
-	async function setupDiscover(): Promise<void> {
-		await load(true)
+		loading.value = false
 	}
 
 	onMounted(() => {
-		setupDiscover()
+		loadData()
 	})
 </script>
 
 <style>
 	.discover-page {
 		flex: 1;
-		background-color: #ededed;
+		background-color: #f3f7fc;
+		flex-direction: column;
+		position: relative;
 	}
-	.wx-nav {
+	.search-wrap {
+		padding: 56rpx 40rpx 20rpx;
+		background-color: #f3f7fc;
+	}
+	.search-box {
 		flex-direction: row;
 		align-items: center;
-		padding: 24rpx 28rpx 8rpx;
-		padding-top: 60rpx;
-		background-color: #ededed;
+		justify-content: center;
+		background-color: #ffffff;
+		border-radius: 999rpx;
+		height: 88rpx;
+		padding: 0 36rpx;
+		box-shadow: 0 10rpx 28rpx rgba(60, 100, 160, 0.10);
 	}
-	.wx-nav-title {
-		font-size: 34rpx;
-		font-weight: 600;
-		color: #181818;
-	}
-	.wx-tabbar {
-		flex-direction: row;
-		background-color: #f7f7f7;
-		border-top-width: 1rpx;
-		border-top-color: #d9d9d9;
-		padding-bottom: 24rpx;
-	}
-	.wx-tab { flex: 1; align-items: center; padding: 10rpx 0 12rpx; }
-	.wx-tab-icon { font-size: 40rpx; margin-bottom: 4rpx; }
-	.wx-tab-label { font-size: 20rpx; color: #181818; }
-	.wx-tab-on .wx-tab-label { color: #07c160; }
-
-	.topbar {
-		background-color: #fff;
-		padding-top: 8rpx;
-		padding-left: 16rpx;
-		padding-right: 24rpx;
-		padding-bottom: 16rpx;
+	.search-placeholder {
 		flex-direction: row;
 		align-items: center;
-		border-bottom-width: 1rpx;
-		border-bottom-color: #e8e8ec;
+		justify-content: center;
 	}
-
-	.topbar-back {
-		font-size: 40rpx;
-		color: #1f6feb;
-		padding: 0 12rpx;
-	}
-
-	.search-input-wrap {
-		flex: 1;
-		flex-direction: row;
-		align-items: center;
-		background-color: #f0f0f5;
-		border-radius: 16rpx;
-		padding: 12rpx 16rpx;
-	}
-
-	.search-icon {
+	.search-ph-text {
 		font-size: 28rpx;
-		margin-right: 8rpx;
+		color: #9aa3af;
+		line-height: 44rpx;
 	}
-
+	.search-inner {
+		flex-direction: row;
+		align-items: center;
+		flex: 1;
+	}
+	.search-ico {
+		font-size: 44rpx;
+		color: #9aa3af;
+		margin-right: 14rpx;
+		margin-top: -6rpx;
+		line-height: 44rpx;
+		height: 44rpx;
+		transform: scaleX(-1);
+	}
 	.search-input {
 		flex: 1;
 		font-size: 28rpx;
-		color: #333;
+		color: #1a1a1a;
+		height: 88rpx;
 	}
-
-	.search-placeholder {
-		color: #aaa;
-		font-size: 28rpx;
+	.search-ph { color: #9aa3af; }
+	.tabs {
+		width: 100%;
+		height: 80rpx;
+		padding: 8rpx 0 4rpx;
 	}
-
-	.rooms-scroll {
+	.tabs-h5 {
+		width: 100%;
+		height: 80rpx;
+		padding: 8rpx 0 4rpx;
+		/* #ifdef H5 */
+		overflow-x: auto;
+		overflow-y: hidden;
+		/* #endif */
+	}
+	.tabs-row {
+		flex-direction: row;
+		flex-wrap: nowrap;
+		padding: 0 16rpx;
+		align-items: center;
+		/* #ifdef H5 */
+		width: max-content;
+		/* #endif */
+	}
+	.tab {
+		padding: 12rpx 22rpx 16rpx;
+		align-items: center;
+		flex-shrink: 0;
+	}
+	.tab-text {
+		font-size: 30rpx;
+		color: #6b7280;
+	}
+	.tab-text-on {
+		color: #2f6ff2;
+		font-weight: 700;
+	}
+	.tab-line {
+		margin-top: 8rpx;
+		width: 40rpx;
+		height: 6rpx;
+		border-radius: 3rpx;
+		background-color: #2f6ff2;
+	}
+	.body {
 		flex: 1;
 		height: 0;
 	}
-
-	.state-row {
-		padding: 60rpx 40rpx;
-		align-items: center;
+	.banner {
+		margin: 12rpx 28rpx 28rpx;
+		height: 280rpx;
+		border-radius: 24rpx;
+		background-color: #1d4ed8;
+		padding: 36rpx 32rpx;
+		justify-content: center;
+		overflow: hidden;
 	}
-
-	.state-text-large {
-		font-size: 80rpx;
+	.banner-title {
+		font-size: 40rpx;
+		font-weight: 800;
+		color: #ffffff;
+		margin-bottom: 12rpx;
+	}
+	.banner-sub {
+		font-size: 24rpx;
+		color: #dbeafe;
 		margin-bottom: 24rpx;
 	}
-
-	.state-text {
-		font-size: 28rpx;
-		color: #999;
+	.banner-btn {
+		align-self: flex-start;
+		background-color: #3b82f6;
+		border-radius: 28rpx;
+		padding: 12rpx 24rpx;
 	}
-
-	.state-hint {
-		font-size: 24rpx;
-		color: #bbb;
-		margin-top: 12rpx;
+	.banner-btn-text {
+		font-size: 22rpx;
+		color: #ffffff;
 	}
-
-	.room-card {
-		background-color: #fff;
-		margin: 20rpx 24rpx;
-		border-radius: 16rpx;
-		padding: 24rpx;
+	.section {
+		padding: 0 0 28rpx;
 	}
-
-	.card-header {
+	.section-head {
 		flex-direction: row;
-		margin-bottom: 20rpx;
+		align-items: center;
+		padding: 0 28rpx 16rpx;
 	}
-
-	.room-avatar {
-		width: 96rpx;
-		height: 96rpx;
-		border-radius: 16rpx;
-		background-color: #e0e0e6;
-		margin-right: 24rpx;
-	}
-
-	.card-info {
+	.section-title {
 		flex: 1;
-		flex-direction: column;
-	}
-
-	.room-name {
 		font-size: 32rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.section-more {
+		width: 44rpx;
+		height: 44rpx;
+		border-radius: 22rpx;
+		background-color: #f3f4f6;
+		align-items: center;
+		justify-content: center;
+	}
+	.section-more-ico {
+		font-size: 28rpx;
+		color: #6b7280;
+	}
+	.card-scroll {
+		width: 750rpx;
+		height: 400rpx;
+	}
+	.card-h5 {
+		width: 100%;
+		height: 400rpx;
+		/* #ifdef H5 */
+		overflow-x: auto;
+		overflow-y: hidden;
+		-webkit-overflow-scrolling: touch;
+		/* #endif */
+	}
+	.card-row {
+		flex-direction: row;
+		flex-wrap: nowrap;
+		padding-left: 20rpx;
+		padding-right: 20rpx;
+		height: 400rpx;
+		/* #ifdef H5 */
+		width: max-content;
+		display: flex;
+		/* #endif */
+	}
+	.card {
+		width: 300rpx;
+		height: 380rpx;
+		margin-right: 20rpx;
+		flex-direction: column;
+		flex-shrink: 0;
+	}
+	.card-cover-wrap {
+		width: 300rpx;
+		height: 220rpx;
+		border-radius: 20rpx;
+		overflow: hidden;
+		margin-bottom: 12rpx;
+		position: relative;
+	}
+	.card-cover {
+		width: 300rpx;
+		height: 220rpx;
+	}
+	.card-cover-fallback {
+		background-color: #93c5fd;
+	}
+	.badge {
+		position: absolute;
+		left: 12rpx;
+		top: 12rpx;
+		border-radius: 8rpx;
+		padding: 4rpx 10rpx;
+	}
+	.badge-hot { background-color: #ef4444; }
+	.badge-new { background-color: #9ca3af; }
+	.badge-text {
+		font-size: 20rpx;
+		color: #ffffff;
+	}
+	.card-title {
+		font-size: 26rpx;
 		color: #1a1a1a;
 		font-weight: 600;
-		margin-bottom: 6rpx;
+		lines: 2;
+		text-overflow: ellipsis;
+		margin-bottom: 8rpx;
+		width: 300rpx;
 	}
-
-	.room-topic {
-		font-size: 26rpx;
-		color: #666;
-		line-height: 1.4;
+	.card-meta {
+		font-size: 22rpx;
+		color: #9aa3af;
 		margin-bottom: 8rpx;
 	}
-
-	.meta-row {
+	.stat-row {
 		flex-direction: row;
-		flex-wrap: wrap;
-		margin-top: 4rpx;
 	}
-
-	.meta-item {
-		font-size: 22rpx;
-		color: #999;
+	.stat {
+		font-size: 20rpx;
+		color: #9aa3af;
 		margin-right: 16rpx;
-		margin-top: 4rpx;
 	}
-
-	.card-actions {
-		flex-direction: row;
-		justify-content: flex-end;
+	.empty {
+		padding: 40rpx;
+		align-items: center;
 	}
-
-	.btn-preview, .btn-join {
-		border-radius: 12rpx;
-		padding: 14rpx 32rpx;
-		margin-left: 16rpx;
-	}
-
-	.btn-preview {
-		background-color: #f0f0f5;
-	}
-
-	.btn-join {
-		background-color: #1f6feb;
-	}
-
-	.btn-text {
+	.empty-text {
 		font-size: 26rpx;
-		color: #fff;
+		color: #9aa3af;
 	}
-
-	.btn-preview .btn-text {
-		color: #666;
+	.scroll-pad { height: 120rpx; }
+	.fab {
+		position: absolute;
+		right: 36rpx;
+		bottom: 160rpx;
+		width: 96rpx;
+		height: 96rpx;
+		border-radius: 48rpx;
+		background-color: #2f6ff2;
+		align-items: center;
+		justify-content: center;
+		z-index: 20;
 	}
+	.fab-text {
+		color: #ffffff;
+		font-size: 52rpx;
+		font-weight: 300;
+	}
+	.wx-tabbar {
+		flex-direction: row;
+		background-color: #ffffff;
+		border-top-width: 1rpx;
+		border-top-color: #eaeaea;
+		padding-bottom: 24rpx;
+	}
+	.wx-tab {
+		flex: 1;
+		align-items: center;
+		padding: 10rpx 0 12rpx;
+	}
+	.wx-tab-icon { width: 44rpx; height: 44rpx; margin-bottom: 4rpx; }
+	.wx-tab-label { font-size: 20rpx; color: #181818; }
+	.wx-tab-on .wx-tab-label { color: #2f6ff2; }
 </style>
