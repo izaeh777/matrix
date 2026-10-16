@@ -35,6 +35,9 @@ export type PlatformSession = {
 	email: string
 	nickname: string
 	user_id: string
+	matrix_user_id: string
+	matrix_token: string
+	matrix_homeserver: string
 }
 
 function pickStr(obj: UTSJSONObject, key: string): string {
@@ -87,7 +90,10 @@ export function loadPlatformSession(): PlatformSession | null {
 			token: token,
 			email: pickStr(obj, 'email'),
 			nickname: pickStr(obj, 'nickname'),
-			user_id: pickStr(obj, 'user_id')
+			user_id: pickStr(obj, 'user_id'),
+			matrix_user_id: pickStr(obj, 'matrix_user_id'),
+			matrix_token: pickStr(obj, 'matrix_token'),
+			matrix_homeserver: pickStr(obj, 'matrix_homeserver')
 		}
 		return s
 	} catch (e) {
@@ -198,11 +204,28 @@ function parseSession(data: UTSJSONObject, emailFallback: string): PlatformSessi
 		}
 	}
 	if (email.length == 0) email = emailFallback
+
+	// matrix 子对象：聊天（Matrix）凭证
+	let matrixUserId = ''
+	let matrixToken = ''
+	let matrixHomeserver = ''
+	const mx = data['matrix'] as UTSJSONObject
+	if (mx != null) {
+		matrixUserId = pickStr(mx, 'user_id')
+		matrixToken = pickStr(mx, 'access_token')
+		// base_url 带 https 前缀，直接可用作 homeserver
+		matrixHomeserver = pickStr(mx, 'base_url')
+		if (matrixHomeserver.length == 0) matrixHomeserver = pickStr(mx, 'home_server')
+	}
+
 	const out: PlatformSession = {
 		token: token,
 		email: email,
 		nickname: nickname,
-		user_id: userId
+		user_id: userId,
+		matrix_user_id: matrixUserId,
+		matrix_token: matrixToken,
+		matrix_homeserver: matrixHomeserver
 	}
 	return out
 }

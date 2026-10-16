@@ -51,7 +51,7 @@
 
 <script setup lang="uts">
 	function goLogin() {
-		uni.navigateTo({ url: '/pages/login/login-email' })
+		uni.navigateTo({ url: '/pages/login/login-mail' })
 	}
 
 	function goEmailLogin() {

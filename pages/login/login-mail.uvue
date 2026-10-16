@@ -84,6 +84,7 @@
 <script setup lang="uts">
 	import { ref, onUnmounted } from 'vue'
 	import { sendEmailCode, emailLogin, emailRegister } from '@/common/platform.uts'
+	import { startMatrixFromPlatform } from '@/common/app.uts'
 
 	const isRegister = ref<boolean>(false)
 	const email = ref<string>('')
@@ -197,6 +198,8 @@
 			} else {
 				await emailLogin(em, cd)
 			}
+			// 用登录返回的 matrix 凭证直接拉起聊天会话（无需再登 Matrix）
+			startMatrixFromPlatform()
 			uni.hideLoading()
 			uni.showToast({ title: '登录成功', icon: 'success' })
 			setTimeout(() => {

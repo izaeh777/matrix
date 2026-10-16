@@ -180,6 +180,7 @@
 	import { getMatrix, errText, errCode, DeviceInfo } from '@/common/matrix.uts'
 	import { loadSession, SessionInfo } from '@/common/storage.uts'
 	import { endMatrixSession } from '@/common/app.uts'
+	import { platformLogout } from '@/common/platform.uts'
 
 	type SettingsDevice = {
 		device_id: string
@@ -654,6 +655,8 @@
 	}
 
 	async function doLogout(): Promise<void> {
+		// 平台登出：服务端作废平台 token，并清本地平台会话（内含 matrix 凭证）
+		await platformLogout()
 		const matrix = getMatrix()
 		try {
 			if (matrix != null) await matrix.logout()
