@@ -1,0 +1,331 @@
+<template>
+	<view class="add-page">
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">添加好友</text>
+			<view class="topbar-right"></view>
+		</view>
+
+		<view class="search-bar">
+			<view class="search-input-wrap">
+				<text class="search-icon">⌕</text>
+				<input
+					class="search-input"
+					v-model="searchText"
+					placeholder="输入用户名精准查找"
+					placeholder-class="search-placeholder"
+					focus
+					@confirm="onSearch"
+					@input="onSearchInput"
+				/>
+				<text v-if="searchText.length > 0" class="clear-btn" @click="clearSearch">✕</text>
+			</view>
+		</view>
+
+		<scroll-view class="body" direction="vertical" :show-scrollbar="false" :rebound="false">
+			<view v-if="searchText.length == 0" class="hint-wrap">
+				<text class="hint-text">输入用户名精准查找好友</text>
+			</view>
+			<view v-else class="result-list">
+				<view v-if="searching" class="loading-row">
+					<text class="loading-text">搜索中…</text>
+				</view>
+				<view
+					v-for="user in results"
+					:key="user.user_id"
+					class="user-row"
+					@click="onStartChat(user)"
+				>
+					<image class="avatar" :src="getAvatar(user)" mode="aspectFill"></image>
+					<view class="user-info">
+						<text class="user-name">{{ userDisplayName(user) }}</text>
+						<text class="user-id">{{ user.user_id }}</text>
+					</view>
+					<text class="add-tag">添加</text>
+				</view>
+				<view v-if="!searching && results.length == 0" class="empty-row">
+					<text class="empty-text">未找到该用户名</text>
+				</view>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, onUnmounted } from 'vue'
+	import { getMatrix, errText, DirectoryUser } from '@/common/matrix.uts'
+	import { openChat } from '@/common/app.uts'
+	import { findFriendByUsername, FindFriendItem } from '@/common/platform.uts'
+
+	const searchText = ref<string>('')
+	const searching = ref<boolean>(false)
+	const results = ref<Array<DirectoryUser>>([])
+	let searchTimer: number | null = null
+	let searchSeq: number = 0
+
+	function goBack(): void {
+		uni.navigateBack({})
+	}
+
+	function clearSearch(): void {
+		searchText.value = ''
+		results.value = []
+	}
+
+	function userDisplayName(user: DirectoryUser): string {
+		if (user.display_name.length > 0) return user.display_name
+		return user.user_id
+	}
+
+	function getAvatar(user: DirectoryUser): string {
+		const matrix = getMatrix()
+		if (matrix == null) return '/static/logo.png'
+		if (user.avatar_url.length > 0) {
+			return matrix.mxcToHttp(user.avatar_url, 80, 80)
+		}
+		return '/static/logo.png'
+	}
+
+	async function enrichByImUser(imUser: string, username: string): Promise<DirectoryUser> {
+		const matrix = getMatrix()
+		let display = username
+		let avatar = ''
+		if (matrix != null && imUser.length > 0) {
+			// 用平台返回的 imUser 再去 Matrix 拉资料/头像
+			try {
+				const found = await matrix.searchUsers(imUser)
+				if (found.length > 0) {
+					const hit = found[0]
+					if (display.length == 0 && hit.display_name.length > 0) display = hit.display_name
+					avatar = hit.avatar_url
+				}
+			} catch (e0) {}
+			if (avatar.length == 0 || display.length == 0) {
+				try {
+					const profile = await matrix.getProfile(imUser)
+					if (display.length == 0 && profile.display_name.length > 0) display = profile.display_name
+					if (avatar.length == 0) avatar = profile.avatar_url
+				} catch (e1) {}
+			}
+		}
+		if (display.length == 0) display = imUser
+		const item: DirectoryUser = {
+			user_id: imUser,
+			display_name: display,
+			avatar_url: avatar
+		}
+		return item
+	}
+
+	async function onSearch(): Promise<void> {
+		const term = searchText.value.trim()
+		if (term.length == 0) {
+			results.value = []
+			return
+		}
+		searchSeq++
+		const seq = searchSeq
+		searching.value = true
+		try {
+			// 1) 平台精准查找 username → imUser
+			const friends = await findFriendByUsername(term)
+			if (seq != searchSeq) return
+			const list: Array<DirectoryUser> = [] as DirectoryUser[]
+			for (let i = 0; i < friends.length; i++) {
+				const f = friends[i] as FindFriendItem
+				if (f.imUser.length == 0) continue
+				const row = await enrichByImUser(f.imUser, f.username)
+				if (seq != searchSeq) return
+				list.push(row)
+			}
+			results.value = list
+		} catch (e) {
+			if (seq == searchSeq) results.value = []
+		}
+		if (seq == searchSeq) searching.value = false
+	}
+
+	function onSearchInput(): void {
+		const t = searchTimer
+		searchTimer = null
+		if (t != null) {
+			clearTimeout(t)
+		}
+		searchTimer = setTimeout(() => {
+			onSearch()
+		}, 400) as number | null
+	}
+
+	async function onStartChat(user: DirectoryUser): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (user.user_id == matrix.userId) {
+			uni.showToast({ title: '不能和自己聊天', icon: 'none' })
+			return
+		}
+		uni.showLoading({ title: '正在打开…' })
+		try {
+			const roomId = await matrix.startDM(user.user_id)
+			uni.hideLoading()
+			openChat(roomId)
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: '发起聊天失败: ' + errText(e, ''), icon: 'none' })
+		}
+	}
+
+	onUnmounted(() => {
+		const t = searchTimer
+		searchTimer = null
+		if (t != null) clearTimeout(t)
+	})
+</script>
+
+<style>
+	.add-page {
+		flex: 1;
+		background-color: #f5f6f8;
+		flex-direction: column;
+	}
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 48rpx 20rpx 16rpx;
+		background-color: #ffffff;
+	}
+	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.back-text {
+		font-size: 56rpx;
+		color: #181818;
+		line-height: 56rpx;
+	}
+	.topbar-title {
+		font-size: 34rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.topbar-right {
+		width: 72rpx;
+	}
+	.search-bar {
+		background-color: #ffffff;
+		padding: 8rpx 24rpx 20rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #eef0f3;
+		border-bottom-style: solid;
+	}
+	.search-input-wrap {
+		flex-direction: row;
+		align-items: center;
+		background-color: #f0f2f5;
+		border-radius: 16rpx;
+		padding: 16rpx 20rpx;
+	}
+	.search-icon {
+		font-size: 30rpx;
+		color: #9aa3af;
+		margin-right: 10rpx;
+		transform: scaleX(-1);
+	}
+	.search-input {
+		flex: 1;
+		font-size: 28rpx;
+		color: #1a1a1a;
+	}
+	.search-placeholder {
+		color: #9aa3af;
+		font-size: 28rpx;
+	}
+	.clear-btn {
+		font-size: 26rpx;
+		color: #9aa3af;
+		padding-left: 12rpx;
+	}
+	.body {
+		flex: 1;
+		height: 0;
+	}
+	.hint-wrap {
+		padding: 80rpx 48rpx;
+		align-items: center;
+	}
+	.hint-text {
+		font-size: 26rpx;
+		color: #9aa3af;
+		text-align: center;
+		line-height: 40rpx;
+	}
+	.result-list {
+		flex-direction: column;
+	}
+	.loading-row, .empty-row {
+		padding: 60rpx;
+		align-items: center;
+	}
+	.loading-text, .empty-text {
+		font-size: 28rpx;
+		color: #9aa3af;
+		text-align: center;
+	}
+	.user-row {
+		background-color: #ffffff;
+		flex-direction: row;
+		align-items: center;
+		padding: 24rpx 32rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f0f2f5;
+		border-bottom-style: solid;
+	}
+	.manual-row {
+		margin-top: 16rpx;
+		border-top-width: 1rpx;
+		border-top-color: #eef0f3;
+		border-top-style: solid;
+	}
+	.avatar {
+		width: 88rpx;
+		height: 88rpx;
+		border-radius: 44rpx;
+		background-color: #e5e7eb;
+	}
+	.manual-avatar {
+		width: 88rpx;
+		height: 88rpx;
+		border-radius: 44rpx;
+		background-color: #e8f0ff;
+		align-items: center;
+		justify-content: center;
+	}
+	.manual-avatar-text {
+		font-size: 40rpx;
+		color: #1861c8;
+	}
+	.user-info {
+		flex: 1;
+		margin-left: 24rpx;
+		flex-direction: column;
+	}
+	.user-name {
+		font-size: 30rpx;
+		color: #1a1a1a;
+		font-weight: 600;
+	}
+	.user-id {
+		font-size: 24rpx;
+		color: #9aa3af;
+		margin-top: 6rpx;
+	}
+	.add-tag {
+		font-size: 26rpx;
+		color: #1861c8;
+		font-weight: 600;
+	}
+</style>

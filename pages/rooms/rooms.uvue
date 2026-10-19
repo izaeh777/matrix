@@ -4,7 +4,7 @@
 			<view class="msg-header-row">
 				<text class="msg-title">消息中心</text>
 				<view class="header-actions">
-					<text class="header-ico" @click="onSearch">⌕</text>
+					<text class="header-ico header-search" @click="onSearch">⌕</text>
 					<text class="header-ico" @click="onJoin">＋</text>
 					<view class="lang-pill" @click="onLang">
 						<image class="lang-globe" src="/static/login/china.png" mode="aspectFit"></image>
@@ -998,11 +998,13 @@
 
 	function onJoin() {
 		uni.showActionSheet({
-			itemList: ['发起群聊', '加入已有房间'],
+			itemList: ['发起群聊', '添加好友', '加入已有房间'],
 			success: (res) => {
 				if (res.tapIndex == 0) {
 					openGroupPick('create')
 				} else if (res.tapIndex == 1) {
+					uni.navigateTo({ url: '/pages/contacts/add' })
+				} else if (res.tapIndex == 2) {
 					joinExistingRoom()
 				}
 			}
@@ -1182,6 +1184,12 @@
 		font-size: 36rpx;
 		color: #333;
 		margin-right: 18rpx;
+	}
+	.header-search {
+		font-size: 40rpx;
+		line-height: 40rpx;
+		transform: scaleX(-1);
+		margin-top: -2rpx;
 	}
 	.lang-pill {
 		flex-direction: row;

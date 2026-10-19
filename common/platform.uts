@@ -281,3 +281,78 @@ export async function platformLogout(): Promise<void> {
 	} catch (e) {}
 	clearPlatformSession()
 }
+
+/** 平台查找好友（username 精准匹配） */
+export type FindFriendItem = {
+	id: string
+	username: string
+	imUser: string
+}
+
+function parseFindFriendItem(obj: UTSJSONObject): FindFriendItem | null {
+	const imUser = pickStr(obj, 'imUser')
+	if (imUser.length == 0) return null
+	let id = pickStr(obj, 'id')
+	if (id.length == 0) {
+		const n = pickNum(obj, 'id')
+		if (n > 0) id = '' + n
+	}
+	const username = pickStr(obj, 'username')
+	const item: FindFriendItem = {
+		id: id,
+		username: username,
+		imUser: imUser
+	}
+	return item
+}
+
+function dataObjectKeys(obj: UTSJSONObject): Array<string> {
+	const out: Array<string> = [] as string[]
+	try {
+		const text = JSON.stringify(obj)
+		if (text != null && text.charAt(0) == '{') {
+			const parsed = JSON.parse(text)
+			const ks = Object.keys(parsed)
+			for (let i = 0; i < ks.length; i++) out.push(ks[i])
+		}
+	} catch (e0) {}
+	return out
+}
+
+export async function findFriendByUsername(username: string): Promise<Array<FindFriendItem>> {
+	const name = username.trim()
+	if (name.length == 0) return [] as FindFriendItem[]
+	const fields: UTSJSONObject = {
+		username: name
+	}
+	const root = await httpPostForm('/api/v1/users/friends', fields, true)
+	const data = assertOk(root, '查找好友失败')
+	const out: Array<FindFriendItem> = [] as FindFriendItem[]
+
+	// data 可能是数组 [{...}] 或对象 { "146": {...} }
+	try {
+		const text = JSON.stringify(data)
+		if (text != null && text.charAt(0) == '[') {
+			const arr = JSON.parse(text) as Array<UTSJSONObject>
+			if (arr != null) {
+				for (let i = 0; i < arr.length; i++) {
+					const row = arr[i] as UTSJSONObject
+					if (row == null) continue
+					const item = parseFindFriendItem(row)
+					if (item != null) out.push(item)
+				}
+				return out
+			}
+		}
+	} catch (eArr) {}
+
+	const keys = dataObjectKeys(data)
+	for (let ki = 0; ki < keys.length; ki++) {
+		const key = keys[ki]
+		const row = data[key] as UTSJSONObject
+		if (row == null) continue
+		const item = parseFindFriendItem(row)
+		if (item != null) out.push(item)
+	}
+	return out
+}

@@ -92,6 +92,15 @@
 			}
 		},
 		{
+			"path": "pages/contacts/add",
+			"style": {
+				"navigationBarTitleText": "添加好友",
+				"navigationStyle": "custom",
+				"backgroundColor": "#F5F6F8",
+				"backgroundColorContent": "#F5F6F8"
+			}
+		},
+		{
 			"path": "pages/search/search",
 			"style": {
 				"navigationBarTitleText": "搜索消息",
