@@ -68,7 +68,7 @@
 
 	function onOther(name: string) {
 		if (name == 'tp') {
-			uni.showToast({ title: '钱包登录暂未开放', icon: 'none' })
+			uni.navigateTo({ url: '/pages/login/login-wallet' })
 			return
 		}
 		uni.showToast({ title: '该登录方式暂未开放', icon: 'none' })

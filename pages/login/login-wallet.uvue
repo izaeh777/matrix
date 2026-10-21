@@ -1,0 +1,278 @@
+<template>
+	<view class="page">
+		<view class="top-bar">
+			<view class="back-btn" @click="onBack">
+				<text class="back-icon">‹</text>
+			</view>
+			<text class="top-title">钱包登录</text>
+			<view class="top-spacer"></view>
+		</view>
+
+		<text class="brand">i-tiklink</text>
+		<text class="card-title">DeBox 钱包授权登录</text>
+		<text class="card-subtitle">请在 DeBox App 内打开并授权（EIP-4361）</text>
+
+		<view class="status-card">
+			<view class="status-dot" :class="address.length > 0 ? 'status-on' : ''"></view>
+			<text class="status-text">{{ address.length > 0 ? shortAddr : '未连接钱包' }}</text>
+		</view>
+
+		<view class="field">
+			<text class="field-label">钱包地址</text>
+			<view class="input-box">
+				<input
+					class="input"
+					type="text"
+					:value="address"
+					disabled
+					placeholder="点击下方连接 DeBox 钱包自动读取"
+					placeholder-class="placeholder"
+				/>
+			</view>
+		</view>
+
+		<view class="field">
+			<text class="field-label">推荐人邀请码（可选）</text>
+			<view class="input-box">
+				<input
+					class="input"
+					type="text"
+					v-model="inviteCode"
+					placeholder="新钱包注册时可填写"
+					placeholder-class="placeholder"
+				/>
+			</view>
+		</view>
+
+		<view class="btn-login" :class="loading ? 'btn-login-off' : ''" @click="onConnect">
+			<text class="btn-login-text">{{ address.length > 0 ? '重新连接 DeBox' : '连接 DeBox 钱包' }}</text>
+		</view>
+
+		<view
+			class="btn-login btn-sign"
+			:class="(loading || address.length == 0) ? 'btn-login-off' : ''"
+			@click="onSignLogin"
+		>
+			<text class="btn-login-text">{{ loading ? '请稍候…' : '一键签名登录/注册' }}</text>
+		</view>
+
+		<text class="hint">流程：连接钱包 → 获取挑战 → personal_sign → 校验登录</text>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, computed } from 'vue'
+	import { walletChallenge, walletVerify } from '@/common/platform.uts'
+	import { startMatrixFromPlatform } from '@/common/app.uts'
+
+	const address = ref<string>('')
+	const inviteCode = ref<string>('')
+	const loading = ref<boolean>(false)
+
+	const shortAddr = computed((): string => {
+		const a = address.value
+		if (a.length < 12) return a
+		return a.substring(0, 6) + '...' + a.substring(a.length - 4)
+	})
+
+	function onBack(): void {
+		uni.navigateBack({})
+	}
+
+	function errMsg(e: any): string {
+		let msg = '操作失败'
+		try { msg = '' + e } catch (e2) {}
+		if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+		return msg.length > 0 ? msg : '操作失败'
+	}
+
+	function walletBridge(): any | null {
+		// #ifdef H5
+		try {
+			const w = window as any
+			if (w != null && w.__itikWallet != null) return w.__itikWallet
+		} catch (e0) {}
+		// #endif
+		return null
+	}
+
+	async function onConnect(): Promise<void> {
+		if (loading.value) return
+		const bridge = walletBridge()
+		if (bridge == null) {
+			uni.showToast({ title: '请在 DeBox App 内打开后再授权', icon: 'none' })
+			return
+		}
+		loading.value = true
+		try {
+			const addr = await bridge.connect() as string
+			address.value = addr != null ? ('' + addr) : ''
+			uni.showToast({ title: 'DeBox 钱包已连接', icon: 'none' })
+		} catch (e) {
+			uni.showToast({ title: errMsg(e), icon: 'none', duration: 3000 })
+		}
+		loading.value = false
+	}
+
+	async function onSignLogin(): Promise<void> {
+		if (loading.value) return
+		const addr = address.value.trim()
+		if (addr.length == 0) {
+			uni.showToast({ title: '请先连接 DeBox 钱包', icon: 'none' })
+			return
+		}
+		const bridge = walletBridge()
+		if (bridge == null) {
+			uni.showToast({ title: '请在 DeBox App 内打开后再授权', icon: 'none' })
+			return
+		}
+		loading.value = true
+		uni.showLoading({ title: '签名登录中…' })
+		try {
+			const challenge = await walletChallenge(addr)
+			const signature = await bridge.personalSign(challenge.message, addr) as string
+			if (signature == null || ('' + signature).length == 0) {
+				throw new Error('签名失败')
+			}
+			await walletVerify(addr, '' + signature, inviteCode.value)
+			startMatrixFromPlatform()
+			uni.hideLoading()
+			uni.showToast({ title: '登录成功', icon: 'success' })
+			setTimeout(() => {
+				uni.reLaunch({ url: '/pages/home/home' })
+			}, 500)
+		} catch (e) {
+			uni.hideLoading()
+			loading.value = false
+			uni.showToast({ title: errMsg(e), icon: 'none', duration: 3000 })
+		}
+	}
+</script>
+
+<style>
+	.page {
+		flex: 1;
+		background: linear-gradient(180deg, #eaf6ff 0%, #ffffff 40%);
+		padding: 24rpx 48rpx 48rpx;
+	}
+	.top-bar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding-top: 40rpx;
+		margin-bottom: 36rpx;
+	}
+	.back-btn {
+		width: 64rpx;
+		height: 64rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.back-icon {
+		font-size: 56rpx;
+		color: #1a1a1a;
+		line-height: 56rpx;
+	}
+	.top-title {
+		font-size: 32rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.top-spacer { width: 64rpx; }
+	.brand {
+		font-size: 40rpx;
+		font-weight: 800;
+		color: #1861c8;
+		margin-bottom: 20rpx;
+	}
+	.card-title {
+		font-size: 40rpx;
+		font-weight: 800;
+		color: #111111;
+		margin-bottom: 10rpx;
+	}
+	.card-subtitle {
+		font-size: 26rpx;
+		color: #6b7280;
+		margin-bottom: 36rpx;
+	}
+	.status-card {
+		flex-direction: row;
+		align-items: center;
+		background-color: #f3f6fb;
+		border-radius: 16rpx;
+		padding: 20rpx 24rpx;
+		margin-bottom: 28rpx;
+	}
+	.status-dot {
+		width: 16rpx;
+		height: 16rpx;
+		border-radius: 8rpx;
+		background-color: #f59e0b;
+		margin-right: 12rpx;
+	}
+	.status-on {
+		background-color: #10b981;
+	}
+	.status-text {
+		font-size: 26rpx;
+		color: #374151;
+	}
+	.field {
+		margin-bottom: 24rpx;
+	}
+	.field-label {
+		font-size: 26rpx;
+		color: #4b5563;
+		margin-bottom: 12rpx;
+		font-weight: 600;
+	}
+	.input-box {
+		background-color: #ffffff;
+		border-radius: 16rpx;
+		border-width: 1rpx;
+		border-style: solid;
+		border-color: #e5e7eb;
+		padding: 0 24rpx;
+		height: 96rpx;
+		justify-content: center;
+	}
+	.input {
+		font-size: 28rpx;
+		color: #1a1a1a;
+		height: 96rpx;
+	}
+	.placeholder {
+		color: #9aa3af;
+	}
+	.btn-login {
+		height: 112rpx;
+		background-color: #1861c8;
+		border-radius: 48rpx;
+		margin-top: 12rpx;
+		justify-content: center;
+		align-items: center;
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #1454b0;
+	}
+	.btn-sign {
+		margin-top: 20rpx;
+	}
+	.btn-login-off {
+		background-color: #8fb4ff;
+		border-color: #7aa6f0;
+	}
+	.btn-login-text {
+		color: #ffffff;
+		font-size: 32rpx;
+		font-weight: 600;
+	}
+	.hint {
+		margin-top: 28rpx;
+		font-size: 22rpx;
+		color: #9aa3af;
+		text-align: center;
+		line-height: 34rpx;
+	}
+</style>

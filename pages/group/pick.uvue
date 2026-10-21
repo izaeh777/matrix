@@ -36,7 +36,6 @@
 				<image class="avatar" :src="avatarOf(user)" mode="aspectFill"></image>
 				<view class="user-info">
 					<text class="user-name">{{ nameOf(user) }}</text>
-					<text class="user-id">{{ user.user_id }}</text>
 				</view>
 			</view>
 		</scroll-view>

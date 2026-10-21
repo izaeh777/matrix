@@ -34,14 +34,14 @@
 				</view>
 				<view
 					v-for="user in results"
-					:key="user.user_id"
+					:key="user.imUser"
 					class="user-row"
 					@click="onStartChat(user)"
 				>
 					<image class="avatar" :src="getAvatar(user)" mode="aspectFill"></image>
 					<view class="user-info">
-						<text class="user-name">{{ userDisplayName(user) }}</text>
-						<text class="user-id">{{ user.user_id }}</text>
+						<text class="user-name">{{ user.nickname.length > 0 ? user.nickname : user.username }}</text>
+						<text class="user-id">{{ user.username }}</text>
 					</view>
 					<text class="add-tag">添加</text>
 				</view>
@@ -55,13 +55,20 @@
 
 <script setup lang="uts">
 	import { ref, onUnmounted } from 'vue'
-	import { getMatrix, errText, DirectoryUser } from '@/common/matrix.uts'
+	import { getMatrix, errText } from '@/common/matrix.uts'
 	import { openChat } from '@/common/app.uts'
 	import { findFriendByUsername, FindFriendItem } from '@/common/platform.uts'
 
+	type FriendRow = {
+		nickname: string
+		username: string
+		imUser: string
+		avatar_url: string
+	}
+
 	const searchText = ref<string>('')
 	const searching = ref<boolean>(false)
-	const results = ref<Array<DirectoryUser>>([])
+	const results = ref<Array<FriendRow>>([])
 	let searchTimer: number | null = null
 	let searchSeq: number = 0
 
@@ -74,12 +81,7 @@
 		results.value = []
 	}
 
-	function userDisplayName(user: DirectoryUser): string {
-		if (user.display_name.length > 0) return user.display_name
-		return user.user_id
-	}
-
-	function getAvatar(user: DirectoryUser): string {
+	function getAvatar(user: FriendRow): string {
 		const matrix = getMatrix()
 		if (matrix == null) return '/static/logo.png'
 		if (user.avatar_url.length > 0) {
@@ -88,35 +90,18 @@
 		return '/static/logo.png'
 	}
 
-	async function enrichByImUser(imUser: string, username: string): Promise<DirectoryUser> {
+	async function loadAvatar(imUser: string): Promise<string> {
 		const matrix = getMatrix()
-		let display = username
-		let avatar = ''
-		if (matrix != null && imUser.length > 0) {
-			// 用平台返回的 imUser 再去 Matrix 拉资料/头像
-			try {
-				const found = await matrix.searchUsers(imUser)
-				if (found.length > 0) {
-					const hit = found[0]
-					if (display.length == 0 && hit.display_name.length > 0) display = hit.display_name
-					avatar = hit.avatar_url
-				}
-			} catch (e0) {}
-			if (avatar.length == 0 || display.length == 0) {
-				try {
-					const profile = await matrix.getProfile(imUser)
-					if (display.length == 0 && profile.display_name.length > 0) display = profile.display_name
-					if (avatar.length == 0) avatar = profile.avatar_url
-				} catch (e1) {}
-			}
-		}
-		if (display.length == 0) display = imUser
-		const item: DirectoryUser = {
-			user_id: imUser,
-			display_name: display,
-			avatar_url: avatar
-		}
-		return item
+		if (matrix == null || imUser.length == 0) return ''
+		try {
+			const found = await matrix.searchUsers(imUser)
+			if (found.length > 0 && found[0].avatar_url.length > 0) return found[0].avatar_url
+		} catch (e0) {}
+		try {
+			const profile = await matrix.getProfile(imUser)
+			return profile.avatar_url
+		} catch (e1) {}
+		return ''
 	}
 
 	async function onSearch(): Promise<void> {
@@ -129,16 +114,20 @@
 		const seq = searchSeq
 		searching.value = true
 		try {
-			// 1) 平台精准查找 username → imUser
 			const friends = await findFriendByUsername(term)
 			if (seq != searchSeq) return
-			const list: Array<DirectoryUser> = [] as DirectoryUser[]
+			const list: Array<FriendRow> = [] as FriendRow[]
 			for (let i = 0; i < friends.length; i++) {
 				const f = friends[i] as FindFriendItem
 				if (f.imUser.length == 0) continue
-				const row = await enrichByImUser(f.imUser, f.username)
+				const avatar = await loadAvatar(f.imUser)
 				if (seq != searchSeq) return
-				list.push(row)
+				list.push({
+					nickname: f.nickname,
+					username: f.username,
+					imUser: f.imUser,
+					avatar_url: avatar
+				} as FriendRow)
 			}
 			results.value = list
 		} catch (e) {
@@ -158,16 +147,16 @@
 		}, 400) as number | null
 	}
 
-	async function onStartChat(user: DirectoryUser): Promise<void> {
+	async function onStartChat(user: FriendRow): Promise<void> {
 		const matrix = getMatrix()
 		if (matrix == null) return
-		if (user.user_id == matrix.userId) {
+		if (user.imUser == matrix.userId) {
 			uni.showToast({ title: '不能和自己聊天', icon: 'none' })
 			return
 		}
 		uni.showLoading({ title: '正在打开…' })
 		try {
-			const roomId = await matrix.startDM(user.user_id)
+			const roomId = await matrix.startDM(user.imUser)
 			uni.hideLoading()
 			openChat(roomId)
 		} catch (e) {

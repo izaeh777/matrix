@@ -12,30 +12,6 @@
 				<text class="more-people">···</text>
 			</view>
 		</view>
-		<view v-if="headerMembers.length > 0" class="member-strip-wrap">
-			<scroll-view class="member-strip" direction="horizontal" :show-scrollbar="false" :rebound="false">
-				<view class="member-strip-row">
-					<view
-						v-for="(m, i) in headerMembers"
-						:key="m.user_id"
-						class="member-chip"
-						:class="{ 'member-chip-focus': i == focusMemberIndex }"
-					>
-						<image
-							v-if="senderAvatar(m.user_id).length > 0"
-							class="member-ava"
-							:src="senderAvatar(m.user_id)"
-							mode="aspectFill"
-						></image>
-						<view v-else class="member-ava member-ava-fallback">
-							<text class="member-ava-text">{{ senderInitial(m.user_id) }}</text>
-						</view>
-					</view>
-				</view>
-			</scroll-view>
-			<view class="member-strip-glow"></view>
-		</view>
-
 			<view v-if="roomEncrypted" class="encrypt-banner">
 				<text class="encrypt-banner-text">此对话已加密，对方消息需解密后才能完整显示</text>
 			</view>

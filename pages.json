@@ -35,6 +35,14 @@
 			}
 		},
 		{
+			"path": "pages/login/login-wallet",
+			"style": {
+				"navigationBarTitleText": "钱包登录",
+				"navigationStyle": "custom",
+				"backgroundColor": "#FFFFFF"
+			}
+		},
+		{
 			"path": "pages/rooms/rooms",
 			"style": {
 				"navigationBarTitleText": "消息中心",

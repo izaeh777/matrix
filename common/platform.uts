@@ -113,6 +113,46 @@ export function platformToken(): string {
 	return s.token
 }
 
+function httpPostJson(path: string, body: UTSJSONObject, withAuth: boolean): Promise<UTSJSONObject> {
+	const url = apiBase() + path
+	const header: UTSJSONObject = {
+		'Content-Type': 'application/json'
+	}
+	if (withAuth) {
+		const t = platformToken()
+		if (t.length > 0) header['token'] = t
+	}
+	return new Promise((resolve, reject) => {
+		uni.request({
+			url: url,
+			method: 'POST',
+			timeout: 20000,
+			header: header,
+			data: body,
+			success: (res) => {
+				try {
+					const code = res.statusCode
+					if (code < 200 || code >= 300) {
+						reject(new Error('HTTP_' + code))
+						return
+					}
+					const data = res.data as UTSJSONObject
+					if (data == null) {
+						reject(new Error('empty'))
+						return
+					}
+					resolve(data)
+				} catch (e) {
+					reject(new Error('parse fail'))
+				}
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}
+
 function httpPostForm(path: string, fields: UTSJSONObject, withAuth: boolean): Promise<UTSJSONObject> {
 	const url = apiBase() + path
 	const header: UTSJSONObject = {
@@ -282,10 +322,51 @@ export async function platformLogout(): Promise<void> {
 	clearPlatformSession()
 }
 
+export type WalletChallenge = {
+	message: string
+	nonce: string
+}
+
+/** Step1: 获取 SIWE Challenge（EIP-4361） */
+export async function walletChallenge(address: string): Promise<WalletChallenge> {
+	const body: UTSJSONObject = {
+		address: address
+	}
+	const root = await httpPostJson('/api/v1/auth/wallet/challenge', body, false)
+	const data = assertOk(root, '获取钱包挑战失败')
+	const message = pickStr(data, 'message')
+	const nonce = pickStr(data, 'nonce')
+	if (message.length == 0) throw new Error('挑战消息为空')
+	const out: WalletChallenge = {
+		message: message,
+		nonce: nonce
+	}
+	return out
+}
+
+/**
+ * Step3: 校验签名并登录/注册
+ * 对接: POST /api/v1/auth/wallet/verify
+ */
+export async function walletVerify(address: string, signature: string, inviteCode: string = ''): Promise<PlatformSession> {
+	const body: UTSJSONObject = {
+		address: address,
+		signature: signature
+	}
+	const inv = inviteCode.trim()
+	if (inv.length > 0) body['invite_code'] = inv
+	const root = await httpPostJson('/api/v1/auth/wallet/verify', body, false)
+	const data = assertOk(root, '钱包登录失败')
+	const session = parseSession(data, address)
+	savePlatformSession(session)
+	return session
+}
+
 /** 平台查找好友（username 精准匹配） */
 export type FindFriendItem = {
 	id: string
 	username: string
+	nickname: string
 	imUser: string
 }
 
@@ -298,9 +379,11 @@ function parseFindFriendItem(obj: UTSJSONObject): FindFriendItem | null {
 		if (n > 0) id = '' + n
 	}
 	const username = pickStr(obj, 'username')
+	const nickname = pickStr(obj, 'nickname')
 	const item: FindFriendItem = {
 		id: id,
 		username: username,
+		nickname: nickname,
 		imUser: imUser
 	}
 	return item
@@ -325,7 +408,7 @@ export async function findFriendByUsername(username: string): Promise<Array<Find
 	const fields: UTSJSONObject = {
 		username: name
 	}
-	const root = await httpPostForm('/api/v1/users/friends', fields, true)
+	const root = await httpPostForm('/api/v1/users/find-fri', fields, true)
 	const data = assertOk(root, '查找好友失败')
 	const out: Array<FindFriendItem> = [] as FindFriendItem[]
 
