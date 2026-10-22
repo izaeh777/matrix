@@ -9,8 +9,8 @@
 		</view>
 
 		<text class="brand">i-tiklink</text>
-		<text class="card-title">DeBox 钱包授权登录</text>
-		<text class="card-subtitle">请在 DeBox App 内打开并授权（EIP-4361）</text>
+		<text class="card-title">钱包授权登录</text>
+		<text class="card-subtitle">支持 TokenPocket / DeBox / MetaMask 等（EIP-4361）</text>
 
 		<view class="status-card">
 			<view class="status-dot" :class="address.length > 0 ? 'status-on' : ''"></view>
@@ -25,7 +25,7 @@
 					type="text"
 					:value="address"
 					disabled
-					placeholder="点击下方连接 DeBox 钱包自动读取"
+					placeholder="点击下方连接钱包自动读取"
 					placeholder-class="placeholder"
 				/>
 			</view>
@@ -45,7 +45,7 @@
 		</view>
 
 		<view class="btn-login" :class="loading ? 'btn-login-off' : ''" @click="onConnect">
-			<text class="btn-login-text">{{ address.length > 0 ? '重新连接 DeBox' : '连接 DeBox 钱包' }}</text>
+			<text class="btn-login-text">{{ address.length > 0 ? '重新连接钱包' : '连接钱包' }}</text>
 		</view>
 
 		<view
@@ -100,14 +100,14 @@
 		if (loading.value) return
 		const bridge = walletBridge()
 		if (bridge == null) {
-			uni.showToast({ title: '请在 DeBox App 内打开后再授权', icon: 'none' })
+			uni.showToast({ title: '请在 TP / DeBox 等钱包浏览器内打开', icon: 'none' })
 			return
 		}
 		loading.value = true
 		try {
 			const addr = await bridge.connect() as string
 			address.value = addr != null ? ('' + addr) : ''
-			uni.showToast({ title: 'DeBox 钱包已连接', icon: 'none' })
+			uni.showToast({ title: '钱包已连接', icon: 'none' })
 		} catch (e) {
 			uni.showToast({ title: errMsg(e), icon: 'none', duration: 3000 })
 		}
@@ -118,12 +118,12 @@
 		if (loading.value) return
 		const addr = address.value.trim()
 		if (addr.length == 0) {
-			uni.showToast({ title: '请先连接 DeBox 钱包', icon: 'none' })
+			uni.showToast({ title: '请先连接钱包', icon: 'none' })
 			return
 		}
 		const bridge = walletBridge()
 		if (bridge == null) {
-			uni.showToast({ title: '请在 DeBox App 内打开后再授权', icon: 'none' })
+			uni.showToast({ title: '请在 TP / DeBox 等钱包浏览器内打开', icon: 'none' })
 			return
 		}
 		loading.value = true
