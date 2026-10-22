@@ -31,19 +31,6 @@
 			</view>
 		</view>
 
-		<view class="field">
-			<text class="field-label">推荐人邀请码（可选）</text>
-			<view class="input-box">
-				<input
-					class="input"
-					type="text"
-					v-model="inviteCode"
-					placeholder="新钱包注册时可填写"
-					placeholder-class="placeholder"
-				/>
-			</view>
-		</view>
-
 		<view class="btn-login" :class="loading ? 'btn-login-off' : ''" @click="onConnect">
 			<text class="btn-login-text">{{ address.length > 0 ? '重新连接钱包' : '连接钱包' }}</text>
 		</view>
@@ -66,7 +53,6 @@
 	import { startMatrixFromPlatform } from '@/common/app.uts'
 
 	const address = ref<string>('')
-	const inviteCode = ref<string>('')
 	const loading = ref<boolean>(false)
 
 	const shortAddr = computed((): string => {
@@ -134,7 +120,7 @@
 			if (signature == null || ('' + signature).length == 0) {
 				throw new Error('签名失败')
 			}
-			await walletVerify(addr, '' + signature, inviteCode.value)
+			await walletVerify(addr, '' + signature, '')
 			startMatrixFromPlatform()
 			uni.hideLoading()
 			uni.showToast({ title: '登录成功', icon: 'success' })
