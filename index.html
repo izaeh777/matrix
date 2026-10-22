@@ -15,8 +15,37 @@
 	</head>
 	<body>
 		<div id="app"><!--app-html--></div>
-		<script src="/static/call-mic.js"></script>
-		<script src="/static/wallet-auth.js"></script>
+		<script src="./static/call-mic.js"></script>
+		<script src="./static/wallet-auth.js"></script>
+		<!-- 内联兜底：线上 static 路径失败时仍可检测钱包 -->
+		<script>
+			(function (w) {
+				if (w.__itikWallet != null) return
+				function provider() {
+					try { if (w.tokenpocket && w.tokenpocket.ethereum) return w.tokenpocket.ethereum } catch (e0) {}
+					try { if (w.deboxWallet) return w.deboxWallet } catch (e1) {}
+					try { if (w.ethereum) return w.ethereum } catch (e2) {}
+					return null
+				}
+				w.__itikWallet = {
+					hasEth: function () { return provider() != null },
+					walletName: function () { return provider() ? 'Web3' : '' },
+					connect: async function () {
+						var eth = provider()
+						if (!eth) throw new Error('未检测到钱包，请在 TokenPocket / DeBox / MetaMask 等钱包浏览器内打开')
+						var accounts = await eth.request({ method: 'eth_requestAccounts', params: [] })
+						if (!accounts || !accounts.length) throw new Error('未获取到钱包地址')
+						return accounts[0]
+					},
+					personalSign: async function (message, address) {
+						var eth = provider()
+						if (!eth) throw new Error('未检测到钱包，请在 TokenPocket / DeBox / MetaMask 等钱包浏览器内打开')
+						return await eth.request({ method: 'personal_sign', params: [message, address] })
+					},
+					provider: provider
+				}
+			})(window)
+		</script>
 		<script type="module" src="/main"></script>
 	</body>
 </html>

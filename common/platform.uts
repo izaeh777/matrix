@@ -113,6 +113,43 @@ export function platformToken(): string {
 	return s.token
 }
 
+function httpGet(path: string, withAuth: boolean): Promise<UTSJSONObject> {
+	const url = apiBase() + path
+	const header: UTSJSONObject = {}
+	if (withAuth) {
+		const t = platformToken()
+		if (t.length > 0) header['token'] = t
+	}
+	return new Promise((resolve, reject) => {
+		uni.request({
+			url: url,
+			method: 'GET',
+			timeout: 20000,
+			header: header,
+			success: (res) => {
+				try {
+					const code = res.statusCode
+					if (code < 200 || code >= 300) {
+						reject(new Error('HTTP_' + code))
+						return
+					}
+					const data = res.data as UTSJSONObject
+					if (data == null) {
+						reject(new Error('empty'))
+						return
+					}
+					resolve(data)
+				} catch (e) {
+					reject(new Error('parse fail'))
+				}
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}
+
 function httpPostJson(path: string, body: UTSJSONObject, withAuth: boolean): Promise<UTSJSONObject> {
 	const url = apiBase() + path
 	const header: UTSJSONObject = {
@@ -320,6 +357,36 @@ export async function platformLogout(): Promise<void> {
 		await httpPostForm('/api/v1/auth/logout', fields, true)
 	} catch (e) {}
 	clearPlatformSession()
+}
+
+/** 当前用户资料（含 money 余额） */
+export type PlatformMe = {
+	money: string
+	nickname: string
+	username: string
+	user_id: string
+}
+
+export async function fetchPlatformMe(): Promise<PlatformMe> {
+	const root = await httpGet('/api/v1/users/me', true)
+	const data = assertOk(root, '获取用户信息失败')
+	let money = pickStr(data, 'money')
+	if (money.length == 0) {
+		const n = pickNum(data, 'money')
+		money = '' + n
+	}
+	let userId = pickStr(data, 'user_id')
+	if (userId.length == 0) {
+		const idNum = pickNum(data, 'id')
+		if (idNum > 0) userId = '' + idNum
+	}
+	const me: PlatformMe = {
+		money: money,
+		nickname: pickStr(data, 'nickname'),
+		username: pickStr(data, 'username'),
+		user_id: userId
+	}
+	return me
 }
 
 export type WalletChallenge = {
