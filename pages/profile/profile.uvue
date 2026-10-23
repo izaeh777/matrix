@@ -26,6 +26,11 @@
 			<text class="user-arrow">›</text>
 		</view>
 
+		<view class="balance-row">
+			<text class="balance-label">USDT 余额</text>
+			<text class="balance-value">{{ usdtBalance }}</text>
+		</view>
+
 		<view class="member-card">
 			<view class="vip-bar">
 				<text class="vip-bar-text">有效期：2026-09-11 至 2026-10-11</text>
@@ -146,12 +151,13 @@
 	import { ref, computed, onMounted, onUnmounted } from 'vue'
 	import { getMatrix } from '@/common/matrix.uts'
 	import { loadSession, saveSession, SessionInfo } from '@/common/storage.uts'
-	import { loadPlatformSession, PlatformSession } from '@/common/platform.uts'
+	import { loadPlatformSession, PlatformSession, fetchPlatformMe } from '@/common/platform.uts'
 	import { friendCodeOf, inviteQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
 	import { openChat } from '@/common/app.uts'
 
 	const session = ref<SessionInfo | null>(loadSession())
 	const platform = ref<PlatformSession | null>(loadPlatformSession())
+	const usdtBalance = ref<string>('--')
 	const displayName = computed(() => {
 		const s = session.value
 		if (s != null) {
@@ -202,6 +208,25 @@
 		try { handler() } catch (e) {}
 	}
 
+	async function loadUsdtBalance(): Promise<void> {
+		if (platformTokenEmpty()) {
+			usdtBalance.value = '--'
+			return
+		}
+		try {
+			const me = await fetchPlatformMe()
+			usdtBalance.value = me.money.length > 0 ? me.money : '0'
+		} catch (e) {
+			console.warn('拉取余额失败', e)
+			usdtBalance.value = '--'
+		}
+	}
+
+	function platformTokenEmpty(): boolean {
+		const p = loadPlatformSession()
+		return p == null || p.token.length == 0
+	}
+
 	async function setupProfile(): Promise<void> {
 		platform.value = loadPlatformSession()
 		const matrix = getMatrix()
@@ -209,6 +234,7 @@
 			uni.reLaunch({ url: '/pages/login/login' })
 			return
 		}
+		loadUsdtBalance()
 		if (matrix == null) return
 		try {
 			const p = await matrix.getProfile(userId.value)
@@ -358,7 +384,26 @@
 	.user-row {
 		flex-direction: row;
 		align-items: center;
-		padding: 20rpx 32rpx 28rpx;
+		padding: 20rpx 32rpx 16rpx;
+	}
+	.balance-row {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin: 0 24rpx 20rpx;
+		padding: 22rpx 28rpx;
+		background-color: #ffffff;
+		border-radius: 20rpx;
+	}
+	.balance-label {
+		font-size: 28rpx;
+		color: #6b7280;
+		font-weight: 600;
+	}
+	.balance-value {
+		font-size: 34rpx;
+		color: #1861c8;
+		font-weight: 700;
 	}
 	.user-avatar {
 		width: 112rpx;

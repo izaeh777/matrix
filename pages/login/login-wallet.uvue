@@ -72,11 +72,44 @@
 		return msg.length > 0 ? msg : '操作失败'
 	}
 
-	function walletBridge(): any | null {
+	function ensureWalletBridge(): any | null {
 		// #ifdef H5
 		try {
 			const w = window as any
-			if (w != null && w.__itikWallet != null) return w.__itikWallet
+			if (w == null) return null
+			if (w.__itikWallet != null) return w.__itikWallet
+			// 线上 static 脚本未加载时，现场补一个桥接（直接读 TP/DeBox/ethereum）
+			const makeBridge = (): any => {
+				const provider = (): any | null => {
+					try {
+						if (w.tokenpocket != null && w.tokenpocket.ethereum != null) return w.tokenpocket.ethereum
+					} catch (e0) {}
+					try {
+						if (w.deboxWallet != null) return w.deboxWallet
+					} catch (e1) {}
+					try {
+						if (w.ethereum != null) return w.ethereum
+					} catch (e2) {}
+					return null
+				}
+				const bridge: any = {
+					connect: async (): Promise<string> => {
+						const eth = provider()
+						if (eth == null) throw new Error('未检测到钱包，请在 TokenPocket / DeBox / MetaMask 等钱包浏览器内打开')
+						const accounts = await eth.request({ method: 'eth_requestAccounts', params: [] }) as string[]
+						if (accounts == null || accounts.length == 0) throw new Error('未获取到钱包地址')
+						return accounts[0]
+					},
+					personalSign: async (message: string, addr: string): Promise<string> => {
+						const eth = provider()
+						if (eth == null) throw new Error('未检测到钱包，请在 TokenPocket / DeBox / MetaMask 等钱包浏览器内打开')
+						return await eth.request({ method: 'personal_sign', params: [message, addr] }) as string
+					}
+				}
+				w.__itikWallet = bridge
+				return bridge
+			}
+			return makeBridge()
 		} catch (e0) {}
 		// #endif
 		return null
@@ -84,9 +117,9 @@
 
 	async function onConnect(): Promise<void> {
 		if (loading.value) return
-		const bridge = walletBridge()
+		const bridge = ensureWalletBridge()
 		if (bridge == null) {
-			uni.showToast({ title: '请在 TP / DeBox 等钱包浏览器内打开', icon: 'none' })
+			uni.showToast({ title: '当前环境无法调用钱包，请用 H5 钱包浏览器打开', icon: 'none' })
 			return
 		}
 		loading.value = true
@@ -107,9 +140,9 @@
 			uni.showToast({ title: '请先连接钱包', icon: 'none' })
 			return
 		}
-		const bridge = walletBridge()
+		const bridge = ensureWalletBridge()
 		if (bridge == null) {
-			uni.showToast({ title: '请在 TP / DeBox 等钱包浏览器内打开', icon: 'none' })
+			uni.showToast({ title: '当前环境无法调用钱包，请用 H5 钱包浏览器打开', icon: 'none' })
 			return
 		}
 		loading.value = true

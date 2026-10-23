@@ -1,15 +1,18 @@
 /**
  * Web3 钱包桥接（TokenPocket / DeBox / MetaMask / OKX 等）
- * - TP / MetaMask / OKX：通常注入 window.ethereum
- * - DeBox：注入 window.deboxWallet（也可走 ethereum 别名）
- * 对接示例: https://m.itiklink.com/wallet-demo.html
+ * 线上若 index 未带上本文件，login-wallet 会再尝试直接读 ethereum。
  */
 (function (w) {
 	function provider() {
-		// TokenPocket 常见注入
-		if (w.tokenpocket != null && w.tokenpocket.ethereum != null) return w.tokenpocket.ethereum
-		if (w.deboxWallet != null) return w.deboxWallet
-		if (w.ethereum != null) return w.ethereum
+		try {
+			if (w.tokenpocket != null && w.tokenpocket.ethereum != null) return w.tokenpocket.ethereum
+		} catch (e0) {}
+		try {
+			if (w.deboxWallet != null) return w.deboxWallet
+		} catch (e1) {}
+		try {
+			if (w.ethereum != null) return w.ethereum
+		} catch (e2) {}
 		return null
 	}
 
@@ -18,11 +21,13 @@
 	}
 
 	function walletName() {
-		if (w.tokenpocket != null) return 'TokenPocket'
-		if (w.deboxWallet != null) return 'DeBox'
-		if (w.ethereum != null && w.ethereum.isMetaMask) return 'MetaMask'
-		if (w.ethereum != null && w.ethereum.isOkxWallet) return 'OKX'
-		if (w.ethereum != null) return 'Web3'
+		try {
+			if (w.tokenpocket != null) return 'TokenPocket'
+			if (w.deboxWallet != null) return 'DeBox'
+			if (w.ethereum != null && w.ethereum.isMetaMask) return 'MetaMask'
+			if (w.ethereum != null && w.ethereum.isOkxWallet) return 'OKX'
+			if (w.ethereum != null) return 'Web3'
+		} catch (e) {}
 		return ''
 	}
 
@@ -59,6 +64,7 @@
 		hasEth: hasEth,
 		walletName: walletName,
 		connect: connect,
-		personalSign: personalSign
+		personalSign: personalSign,
+		provider: provider
 	}
-})(window)
+})(typeof window !== 'undefined' ? window : globalThis)
