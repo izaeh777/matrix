@@ -128,50 +128,48 @@
 				@click="onOpenRoom(room.room_id)"
 				@longpress="onLongPressRoom(room)"
 			>
-				<view class="avatar-wrap">
-					<image
-						class="room-avatar"
-						:src="roomAvatarSrc(room)"
-						mode="aspectFill"
-					></image>
-					<view v-if="roomHasUnread(room) && roomMuted(room)" class="mute-dot"></view>
-					<view v-else-if="roomHasUnread(room)" class="avatar-badge">
-						<text class="avatar-badge-text">{{ roomUnreadText(room) }}</text>
+				<view class="room-row">
+					<view class="avatar-wrap">
+						<image
+							class="room-avatar"
+							:src="roomAvatarSrc(room)"
+							mode="aspectFill"
+						></image>
+						<view v-if="roomHasUnread(room) && roomMuted(room)" class="mute-dot"></view>
+						<view v-else-if="roomHasUnread(room)" class="avatar-badge">
+							<text class="avatar-badge-text">{{ roomUnreadText(room) }}</text>
+						</view>
+					</view>
+					<view class="room-body">
+						<view class="room-line1">
+							<text class="room-name">{{ roomTitle(room) }}</text>
+							<text class="room-time">{{ roomTimeText(room) }}</text>
+						</view>
+						<view class="room-line2">
+							<text class="room-preview">{{ roomPreviewText(room) }}</text>
+							<text v-if="roomMuted(room)" class="mute-mark">🔕</text>
+						</view>
 					</view>
 				</view>
-				<view class="room-body">
-					<view class="room-line1">
-						<text class="room-name">{{ roomTitle(room) }}</text>
-						<text class="room-time">{{ roomTimeText(room) }}</text>
-					</view>
-					<view class="room-line2">
-						<text class="room-preview">{{ roomPreviewText(room) }}</text>
-						<text v-if="roomMuted(room)" class="mute-mark">🔕</text>
-					</view>
-				</view>
+				<view class="room-divider"></view>
 			</view>
 		</scroll-view>
 
 		<view class="wx-tabbar">
 			<view class="wx-tab" @click="onHome">
 				<image class="wx-tab-icon" src="/static/login/s11.png" mode="aspectFit"></image>
-				<text class="wx-tab-label">首页</text>
 			</view>
 			<view class="wx-tab wx-tab-on">
 				<image class="wx-tab-icon" src="/static/login/s2.png" mode="aspectFit"></image>
-				<text class="wx-tab-label">消息</text>
 			</view>
 			<view class="wx-tab" @click="onDiscover">
 				<image class="wx-tab-icon" src="/static/login/s33.png" mode="aspectFit"></image>
-				<text class="wx-tab-label">发现</text>
 			</view>
 			<view class="wx-tab" @click="onNotify">
 				<image class="wx-tab-icon" src="/static/login/s44.png" mode="aspectFit"></image>
-				<text class="wx-tab-label">通知</text>
 			</view>
 			<view class="wx-tab" @click="onProfile">
 				<image class="wx-tab-icon" src="/static/login/s55.png" mode="aspectFit"></image>
-				<text class="wx-tab-label">我的</text>
 			</view>
 		</view>
 
@@ -269,7 +267,7 @@
 	const stripWidth = computed((): string => {
 		const n = stripRooms.value.length
 		if (n <= 0) return '100%'
-		return (n * 140 + 40) + 'rpx'
+		return (n * 148 + 48) + 'rpx'
 	})
 
 	function formatTime(ts: number = 0): string {
@@ -292,8 +290,8 @@
 
 	function roomTitleShort(room: MatrixRoom): string {
 		const t = roomTitle(room)
-		if (t.length <= 6) return t
-		return t.substring(0, 5) + '…'
+		if (t.length <= 5) return t
+		return t.substring(0, 4) + '…'
 	}
 
 	function onLang(): void {
@@ -325,9 +323,18 @@
 		return '' + c
 	}
 	function roomAvatarSrc(room: MatrixRoom): string {
-		const a = room.avatar_url
-		if (a != null && a.length > 0) return a
-		return '/static/logo.png'
+		let a = room.avatar_url
+		if (a == null || a.length == 0) {
+			const other = room.other_avatar
+			if (other != null && other.length > 0) a = other
+		}
+		if (a == null || a.length == 0) return '/static/logo.png'
+		if (a.indexOf('http://') == 0 || a.indexOf('https://') == 0) return a
+		const matrix = getMatrix()
+		if (matrix == null) return '/static/logo.png'
+		const http = matrix.mxcToHttp(a, 96, 96)
+		if (http.length == 0) return '/static/logo.png'
+		return http
 	}
 	function roomTitle(room: MatrixRoom): string {
 		const n = room.name
@@ -1145,6 +1152,7 @@
 	.rooms-page {
 		flex: 1;
 		background-color: #ffffff;
+		background-image: linear-gradient(180deg, #F3F8FE 0%, #FFFFFF 100%);
 		display: flex;
 		flex-direction: column;
 	}
@@ -1162,8 +1170,8 @@
 	}
 	/* #endif */
 	.msg-header {
-		padding: 56rpx 28rpx 8rpx;
-		background-color: #ffffff;
+		padding: 52rpx 28rpx 12rpx;
+		background-color: transparent;
 	}
 	.msg-header-row {
 		flex-direction: row;
@@ -1182,14 +1190,13 @@
 	}
 	.header-ico {
 		font-size: 36rpx;
-		color: #333;
+		color: #333333;
 		margin-right: 18rpx;
+		line-height: 40rpx;
 	}
 	.header-search {
-		font-size: 40rpx;
-		line-height: 40rpx;
+		font-size: 38rpx;
 		transform: scaleX(-1);
-		margin-top: -2rpx;
 	}
 	.lang-pill {
 		flex-direction: row;
@@ -1207,12 +1214,11 @@
 	.filter-row {
 		flex-direction: row;
 		align-items: center;
-		padding-bottom: 8rpx;
 	}
 	.filter-pill {
-		padding: 10rpx 28rpx;
-		border-radius: 32rpx;
-		margin-right: 16rpx;
+		padding: 12rpx 30rpx;
+		border-radius: 999rpx;
+		margin-right: 18rpx;
 		background-color: transparent;
 	}
 	.filter-on {
@@ -1220,7 +1226,8 @@
 	}
 	.filter-text {
 		font-size: 28rpx;
-		color: #6b7280;
+		color: #555555;
+		font-weight: 500;
 	}
 	.filter-text-on {
 		color: #ffffff;
@@ -1228,8 +1235,8 @@
 	}
 	.strip-h5 {
 		width: 100%;
-		height: 180rpx;
-		background-color: #ffffff;
+		height: 200rpx;
+		background-color: transparent;
 		/* #ifdef H5 */
 		overflow-x: auto;
 		overflow-y: hidden;
@@ -1237,52 +1244,59 @@
 		scrollbar-width: none;
 		-ms-overflow-style: none;
 		/* #endif */
-		padding-bottom: 8rpx;
+		padding-top: 8rpx;
+		padding-bottom: 4rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #eaeaea;
+		border-bottom-style: solid;
 	}
 	.strip-scroll {
 		width: 100%;
-		height: 180rpx;
-		background-color: #ffffff;
+		height: 200rpx;
+		background-color: transparent;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #eaeaea;
+		border-bottom-style: solid;
 	}
 	.strip-row {
 		flex-direction: row;
 		flex-wrap: nowrap;
-		padding: 8rpx 20rpx 0;
+		padding: 12rpx 28rpx 0;
 		align-items: flex-start;
 		/* #ifdef H5 */
 		display: flex;
 		/* #endif */
 	}
 	.strip-item {
-		width: 120rpx;
-		margin-right: 20rpx;
+		width: 124rpx;
+		margin-right: 24rpx;
 		align-items: center;
 		flex-shrink: 0;
 	}
 	.strip-ava-wrap {
 		position: relative;
-		width: 96rpx;
-		height: 96rpx;
-		margin-bottom: 10rpx;
+		width: 108rpx;
+		height: 108rpx;
+		margin-bottom: 12rpx;
 	}
 	.strip-ava {
-		width: 96rpx;
-		height: 96rpx;
-		border-radius: 48rpx;
+		width: 108rpx;
+		height: 108rpx;
+		border-radius: 54rpx;
 		background-color: #e8eef8;
 	}
 	.strip-badge {
 		position: absolute;
-		top: -4rpx;
-		right: -8rpx;
-		min-width: 32rpx;
-		height: 32rpx;
-		border-radius: 16rpx;
-		background-color: #ff8a3d;
+		top: -2rpx;
+		right: -4rpx;
+		min-width: 34rpx;
+		height: 34rpx;
+		border-radius: 17rpx;
+		background-color: #ff7a2f;
 		align-items: center;
 		justify-content: center;
 		padding: 0 8rpx;
-		border-width: 3rpx;
+		border-width: 4rpx;
 		border-color: #ffffff;
 		border-style: solid;
 	}
@@ -1293,9 +1307,9 @@
 	}
 	.strip-name {
 		font-size: 22rpx;
-		color: #9aa3af;
+		color: #999999;
 		text-align: center;
-		width: 120rpx;
+		width: 124rpx;
 		lines: 1;
 		text-overflow: ellipsis;
 	}
@@ -1345,19 +1359,12 @@
 	.wx-tab {
 		flex: 1;
 		align-items: center;
-		padding: 10rpx 0 12rpx;
+		justify-content: center;
+		padding: 18rpx 0 12rpx;
 	}
 	.wx-tab-icon {
-		width: 44rpx;
-		height: 44rpx;
-		margin-bottom: 4rpx;
-	}
-	.wx-tab-label {
-		font-size: 20rpx;
-		color: #181818;
-	}
-	.wx-tab-on .wx-tab-label {
-		color: #2f6ff2;
+		width: 48rpx;
+		height: 48rpx;
 	}
 
 	.topbar {
@@ -1534,7 +1541,7 @@
 		flex: 1;
 		height: 0;
 		padding-top: 4rpx;
-		background-color: #ffffff;
+		background-color: transparent;
 	}
 
 	.loading, .empty {
@@ -1568,28 +1575,31 @@
 	}
 
 	.room-item {
-		flex-direction: row;
-		padding: 28rpx 32rpx;
-		background-color: #ffffff;
-		border-bottom-width: 1rpx;
-		border-bottom-color: #f0f2f5;
-		align-items: center;
+		flex-direction: column;
+		background-color: transparent;
 	}
 
 	.room-item.room-pin {
-		background-color: #ffffff;
+		background-color: transparent;
+	}
+
+	.room-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 28rpx 32rpx;
 	}
 
 	.mute-dot {
 		position: absolute;
-		top: -4rpx;
-		right: -4rpx;
+		top: -2rpx;
+		right: -2rpx;
 		width: 20rpx;
 		height: 20rpx;
 		border-radius: 10rpx;
 		background-color: #c8c8c8;
 		border-width: 4rpx;
 		border-color: #fff;
+		border-style: solid;
 	}
 
 	.mute-mark {
@@ -1600,42 +1610,49 @@
 
 	.avatar-wrap {
 		position: relative;
+		margin-right: 24rpx;
 	}
 
 	.room-avatar {
-		width: 96rpx;
-		height: 96rpx;
-		border-radius: 48rpx;
-		background-color: #e0e0e6;
+		width: 108rpx;
+		height: 108rpx;
+		border-radius: 54rpx;
+		background-color: #e8eef8;
 	}
 
 	.avatar-badge {
 		position: absolute;
-		top: -6rpx;
-		right: -6rpx;
+		top: -4rpx;
+		right: -4rpx;
 		min-width: 36rpx;
 		height: 36rpx;
 		padding: 0 10rpx;
-		background-color: #ff8a3d;
+		background-color: #ff7a2f;
 		border-radius: 18rpx;
-		display: flex;
 		align-items: center;
 		justify-content: center;
 		border-width: 4rpx;
-		border-color: #fff;
+		border-color: #ffffff;
 		border-style: solid;
 	}
 
 	.avatar-badge-text {
 		font-size: 20rpx;
-		color: #fff;
+		color: #ffffff;
 		font-weight: 700;
 	}
 
 	.room-body {
 		flex: 1;
-		margin-left: 24rpx;
 		overflow: hidden;
+		justify-content: center;
+	}
+
+	.room-divider {
+		height: 1rpx;
+		background-color: #eaeaea;
+		width: 100%;
+		margin-left: 0;
 	}
 
 	.room-line1 {
@@ -1646,11 +1663,12 @@
 
 	.room-name {
 		font-size: 32rpx;
-		color: #1a1a1a;
+		color: #222222;
 		font-weight: 700;
 		flex: 1;
 		lines: 1;
 		text-overflow: ellipsis;
+		margin-right: 16rpx;
 	}
 
 	.room-name-bold {
@@ -1658,9 +1676,9 @@
 	}
 
 	.room-time {
-		font-size: 22rpx;
-		color: #999;
-		margin-left: 12rpx;
+		font-size: 24rpx;
+		color: #bbbbbb;
+		flex-shrink: 0;
 	}
 
 	.room-time-active {
@@ -1671,16 +1689,17 @@
 	.room-line2 {
 		flex-direction: row;
 		justify-content: space-between;
-		align-items: center;
-		margin-top: 10rpx;
+		align-items: flex-start;
+		margin-top: 12rpx;
 	}
 
 	.room-preview {
 		font-size: 26rpx;
-		color: #999;
+		color: #999999;
 		flex: 1;
-		lines: 1;
+		lines: 2;
 		text-overflow: ellipsis;
+		line-height: 36rpx;
 	}
 
 	.room-preview-active {

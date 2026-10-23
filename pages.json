@@ -47,8 +47,11 @@
 			"style": {
 				"navigationBarTitleText": "消息中心",
 				"navigationStyle": "custom",
-				"backgroundColor": "#FFFFFF",
-				"backgroundColorContent": "#FFFFFF"
+				"navigationBarBackgroundColor": "#F3F8FE",
+				"backgroundColor": "#F3F8FE",
+				"backgroundColorContent": "#F3F8FE",
+				"backgroundColorTop": "#F3F8FE",
+				"backgroundColorBottom": "#FFFFFF"
 			}
 		},
 		{
@@ -56,8 +59,11 @@
 			"style": {
 				"navigationBarTitleText": "聊天",
 				"navigationStyle": "custom",
-				"backgroundColor": "#FFFFFF",
-				"backgroundColorContent": "#FFFFFF"
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"backgroundColor": "#F3F8FE",
+				"backgroundColorContent": "#F3F8FE",
+				"backgroundColorTop": "#FFFFFF",
+				"backgroundColorBottom": "#FFFFFF"
 			}
 		},
 		{

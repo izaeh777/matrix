@@ -1663,7 +1663,10 @@ export class MatrixClient {
 			} else if (type == 'm.room.canonical_alias') {
 				room.canonical_alias = jsonStr(content, 'alias')
 			} else if (type == 'm.room.avatar') {
-				room.avatar_url = jsonStr(content, 'avatar_url')
+				// Matrix 房间头像字段是 url；兼容错误写入的 avatar_url
+				let roomAv = jsonStr(content, 'url')
+				if (roomAv.length == 0) roomAv = jsonStr(content, 'avatar_url')
+				if (roomAv.length > 0) room.avatar_url = roomAv
 			} else if (type == 'm.room.encryption') {
 				room.encrypted = true
 			} else if (type == 'm.room.member') {

@@ -1,20 +1,66 @@
 <template>
-	<view class="chat-page">
-		<!-- 顶部标题栏 -->
-		<view class="topbar">
-			<view class="back-btn" @click="goBack">
-				<text class="back-text">‹</text>
+	<view class="chat-page" :style="chatPageStyle">
+		<!-- 效果图：顶栏白色 + 底部弧形，下方聊天区浅蓝 -->
+		<view class="chat-header" :style="chatHeaderStyle">
+			<view class="topbar">
+				<view class="back-btn" @click="goBack">
+					<text class="back-text">‹</text>
+				</view>
+				<view class="topbar-center">
+					<text class="topbar-title">{{ roomName }}</text>
+				</view>
+				<view class="topbar-right" @click="openInfo">
+					<view class="more-icon">
+						<view class="more-dot"></view>
+						<view class="more-dot"></view>
+						<view class="more-dot"></view>
+					</view>
+				</view>
 			</view>
-			<view class="topbar-center">
-				<text class="topbar-title">{{ roomName }}</text>
+
+			<view
+				v-if="stripSlots.length > 0"
+				class="member-strip-wrap"
+				@touchstart="onStripTouchStart"
+				@touchmove="onStripTouchMove"
+				@touchend="onStripTouchEnd"
+				@touchcancel="onStripTouchEnd"
+				@mousedown="onStripMouseDown"
+				@mousemove="onStripMouseMove"
+				@mouseup="onStripMouseUp"
+				@mouseleave="onStripMouseUp"
+			>
+				<view class="member-strip-row" :style="stripTrackStyle">
+					<view
+						v-for="(slot, si) in stripSlots"
+						:key="slot.key"
+						class="member-chip"
+						:class="slot.focused ? 'member-chip-focus' : ''"
+					>
+						<view class="member-ava-wrap">
+							<image
+								v-if="slot.avatar.length > 0"
+								class="member-ava"
+								:src="slot.avatar"
+								mode="aspectFill"
+							></image>
+							<view v-else class="member-ava member-ava-fallback">
+								<text class="member-ava-text">{{ slot.initial }}</text>
+							</view>
+							<view v-if="slot.unread && !slot.focused" class="member-dot"></view>
+						</view>
+					</view>
+				</view>
 			</view>
-			<view class="topbar-right" @click="openInfo">
-				<text class="more-people">···</text>
+			<!-- 效果图：头像落入中间下凹弧 -->
+			<view class="header-wave-wrap">
+				<image class="header-wave-img" src="/static/chat/header-wave.png" mode="scaleToFill"></image>
 			</view>
 		</view>
-			<view v-if="roomEncrypted" class="encrypt-banner">
-				<text class="encrypt-banner-text">此对话已加密，对方消息需解密后才能完整显示</text>
-			</view>
+
+		<view v-if="roomEncrypted" class="encrypt-banner">
+			<text class="encrypt-banner-text">此对话已加密，对方消息需解密后才能完整显示</text>
+		</view>
 		<view v-if="incomingCall" class="incoming-call-bar">
 			<view class="incoming-call-info">
 				<text class="incoming-call-title">{{ incomingCallTitle }}</text>
@@ -146,7 +192,13 @@
 		<!-- 输入栏 -->
 		<view class="input-bar">
 			<view class="input-tool" @click="toggleVoiceMode">
-				<text class="input-tool-text">{{ voiceMode ? '⌨' : '🎙' }}</text>
+				<image
+					v-if="!voiceMode"
+					class="input-tool-img"
+					src="/static/login/yuying.png"
+					mode="aspectFit"
+				></image>
+				<text v-else class="input-tool-text">⌨</text>
 			</view>
 			<view
 				v-if="voiceMode && inputText.trim().length == 0"
@@ -171,9 +223,11 @@
 					@confirm="onSend"
 				/>
 			</view>
-			<text class="input-tool-text" @click="toggleEmojiPanel">☺</text>
-			<view v-if="inputText.trim().length == 0" class="plus-circle" @click="toggleMorePanel">
-				<text class="plus-circle-text">＋</text>
+			<view class="input-tool" @click="toggleEmojiPanel">
+				<image class="input-tool-img" src="/static/login/b1.png" mode="aspectFit"></image>
+			</view>
+			<view v-if="inputText.trim().length == 0" class="input-tool" @click="toggleMorePanel">
+				<image class="input-tool-img" src="/static/login/b2.png" mode="aspectFit"></image>
 			</view>
 			<view v-else class="btn-send" @click="onSend">
 				<text class="btn-send-text">发送</text>
@@ -185,25 +239,25 @@
 			<view class="more-grid">
 				<view class="more-item" @click="onPickImage">
 					<view class="more-icon-bg">
-						<text class="more-icon-text">📷</text>
+						<image class="more-icon-img" src="/static/login/t1.png" mode="aspectFit"></image>
 					</view>
 					<text class="more-label">图片</text>
 				</view>
 				<view class="more-item" @click="onPickFile">
 					<view class="more-icon-bg">
-						<text class="more-icon-text">📎</text>
+						<image class="more-icon-img" src="/static/login/t2.png" mode="aspectFit"></image>
 					</view>
 					<text class="more-label">文件</text>
 				</view>
 				<view class="more-item" @click.stop="startCallVoice">
 					<view class="more-icon-bg">
-						<text class="more-icon-text">☎</text>
+						<image class="more-icon-img" src="/static/login/t3.png" mode="aspectFit"></image>
 					</view>
 					<text class="more-label">{{ isGroup ? '群语音' : '语音通话' }}</text>
 				</view>
 				<view v-if="!isGroup" class="more-item" @click.stop="startCallVideo">
 					<view class="more-icon-bg">
-						<text class="more-icon-text">📹</text>
+						<image class="more-icon-img" src="/static/login/t4.png" mode="aspectFit"></image>
 					</view>
 					<text class="more-label">视频通话</text>
 				</view>
@@ -329,7 +383,7 @@
 
 <script setup lang="uts">
 	import { ref, onUnmounted, onMounted, computed, nextTick } from 'vue'
-	import { getMatrix, MatrixClient, MatrixMessage, MatrixEvent, errText, RoomMember, roomIsGroup, memberDisplayName } from '@/common/matrix.uts'
+	import { getMatrix, MatrixClient, MatrixMessage, MatrixEvent, errText, RoomMember, MatrixRoom, roomIsGroup, memberDisplayName } from '@/common/matrix.uts'
 	import { bootstrapMatrix, openGroupInfo, ensureMatrixClient, hasPlatformLogin } from '@/common/app.uts'
 	import { getCallManager, CallSnapshot, h5TapRunAnswer, unlockH5CallMedia } from '@/common/call.uts'
 	import { loadRoomChat, saveRoomChat } from '@/common/storage.uts'
@@ -419,6 +473,9 @@
 	const memberCount = ref<number>(0)
 	const groupMembers = ref<Array<RoomMember>>([])
 	const showAtPicker = ref<boolean>(false)
+	// 效果图：顶栏白；聊天区浅蓝
+	const chatPageStyle = 'background-color:#F3F8FE;'
+	const chatHeaderStyle = 'background-color:#F3F8FE;'
 	const roomTitleBar = computed((): string => {
 		const n = roomName.value
 		const title = n.length > 0 ? n : '聊天'
@@ -437,25 +494,381 @@
 	const scrollTop = ref<number>(999999)
 	const scrollInto = ref<string>('')
 	const currentUserId = ref<string>('')
-	const headerMembers = computed((): Array<RoomMember> => {
-		const list = groupMembers.value
-		const out: Array<RoomMember> = []
+	type StripSlot = {
+		key: string
+		room_id: string
+		index: number
+		focused: boolean
+		avatar: string
+		initial: string
+		unread: boolean
+	}
+
+	const stripRoomList = ref<Array<MatrixRoom>>([])
+	const roomAlertMap = ref<Map<string, boolean>>(new Map())
+	const alertTick = ref<number>(0)
+	let switchingRoom: boolean = false
+
+	function sameRoomId(a: string, b: string): boolean {
+		if (a == b) return true
+		if (a.length == 0 || b.length == 0) return false
+		return safeDecode(a) == safeDecode(b)
+	}
+
+	// 焦点严格跟当前 roomId，避免头像焦点和会话不同步
+	const focusRoomIdx = computed((): number => {
+		const list = stripRoomList.value
+		const cur = roomId.value
 		for (let i = 0; i < list.length; i++) {
-			const mem = list[i].membership
-			if (mem == 'join' || mem == 'invite') out.push(list[i])
-			if (out.length >= 8) break
+			if (sameRoomId(list[i].room_id, cur)) return i
+		}
+		return 0
+	})
+
+	function stripRoomAvatarUrl(room: MatrixRoom): string {
+		let a = room.avatar_url
+		if (a == null || a.length == 0) a = room.other_avatar
+		if (a == null || a.length == 0) return ''
+		if (a.indexOf('http://') == 0 || a.indexOf('https://') == 0) return a
+		return getMxcUrl(a, 96, 96)
+	}
+
+	function stripRoomInitialOf(room: MatrixRoom): string {
+		const n = room.name
+		if (n != null && n.length > 0) return n.substring(0, 1)
+		const oid = room.other_user_id
+		if (oid != null && oid.length > 0) {
+			const local = oid.split(':')[0].replace('@', '')
+			if (local.length > 0) return local.substring(0, 1).toUpperCase()
+		}
+		return '?'
+	}
+
+	function roomHasStripAlert(rid: string): boolean {
+		const _tick = alertTick.value
+		if (rid.length == 0) return false
+		if (roomAlertMap.value.get(rid) == true) return _tick >= 0
+		return false
+	}
+
+	function markRoomAlert(rid: string): void {
+		if (rid.length == 0) return
+		if (rid == roomId.value) return
+		roomAlertMap.value.set(rid, true)
+		alertTick.value = alertTick.value + 1
+	}
+
+	function clearRoomAlert(rid: string): void {
+		if (roomAlertMap.value.get(rid) == true) {
+			roomAlertMap.value.set(rid, false)
+			alertTick.value = alertTick.value + 1
+		}
+	}
+
+	function buildStripSlot(room: MatrixRoom, index: number, focused: boolean): StripSlot {
+		const rid = room.room_id
+		const uc = room.unread_count != null ? room.unread_count : 0
+		const unread = !focused && (uc > 0 || roomHasStripAlert(rid))
+		return {
+			key: rid + '-' + index,
+			room_id: rid,
+			index: index,
+			focused: focused,
+			avatar: stripRoomAvatarUrl(room),
+			initial: stripRoomInitialOf(room),
+			unread: unread
+		} as StripSlot
+	}
+
+	const stripSlots = computed((): Array<StripSlot> => {
+		const list = stripRoomList.value
+		const n = list.length
+		const out: Array<StripSlot> = []
+		if (n == 0) return out
+		const cur = roomId.value
+		for (let i = 0; i < n; i++) {
+			out.push(buildStripSlot(list[i], i, sameRoomId(list[i].room_id, cur)))
 		}
 		return out
 	})
-	const focusMemberIndex = computed((): number => {
-		const list = headerMembers.value
-		if (list.length == 0) return -1
-		const me = currentUserId.value
-		for (let i = 0; i < list.length; i++) {
-			if (list[i].user_id != me) return i
+
+	const STRIP_CHIP_RPX = 100
+	const stripDragX = ref<number>(0)
+	const stripDragging = ref<boolean>(false)
+
+	function stripChipPx(): number {
+		try {
+			return uni.upx2px(STRIP_CHIP_RPX)
+		} catch (e) {
+			return 48
 		}
-		return Math.floor(list.length / 2)
+	}
+
+	function stripBaseTranslate(): number {
+		const n = stripRoomList.value.length
+		if (n == 0) return 0
+		let W = 375
+		try {
+			const sys = uni.getSystemInfoSync()
+			W = sys.windowWidth
+		} catch (e) {}
+		const I = stripChipPx()
+		const f = focusRoomIdx.value
+		return W / 2 - I / 2 - f * I
+	}
+
+	const stripTrackStyle = computed((): string => {
+		const x = stripBaseTranslate() + stripDragX.value
+		if (stripDragging.value) {
+			return 'transform:translateX(' + x + 'px);transition-duration:0ms;'
+		}
+		return 'transform:translateX(' + x + 'px);transition-property:transform;transition-duration:280ms;'
 	})
+
+	async function loadStripRooms(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const list = await matrix.listRooms()
+			const out: Array<MatrixRoom> = []
+			for (let i = 0; i < list.length; i++) {
+				out.push(list[i])
+				if (out.length >= 12) break
+			}
+			let found = false
+			for (let j = 0; j < out.length; j++) {
+				if (sameRoomId(out[j].room_id, roomId.value)) {
+					found = true
+					break
+				}
+			}
+			if (!found && roomId.value.length > 0) {
+				try {
+					const s = await matrix.getRoomSummary(roomId.value)
+					out.unshift(s)
+				} catch (e0) {}
+			}
+			stripRoomList.value = out
+			for (let k = 0; k < out.length; k++) {
+				const uc = out[k].unread_count != null ? out[k].unread_count! : 0
+				if (uc > 0 && !sameRoomId(out[k].room_id, roomId.value)) {
+					roomAlertMap.value.set(out[k].room_id, true)
+				}
+			}
+			alertTick.value = alertTick.value + 1
+		} catch (e) {}
+	}
+
+	async function switchToStripRoom(nextId: string): Promise<void> {
+		if (nextId.length == 0) return
+		if (sameRoomId(nextId, roomId.value)) return
+		if (switchingRoom) return
+		switchingRoom = true
+		console.log('[strip] switch ->', nextId)
+		try {
+			persistRoomChatNow()
+			const pt = persistTimer
+			persistTimer = null
+			if (pt != null) clearTimeout(pt)
+			// 作废进行中的旧房间 messages 请求，防止旧内容写回
+			chatLoadGen = chatLoadGen + 1
+			const gen = chatLoadGen
+			roomId.value = nextId
+			uni.setStorageSync('last_chat_room', nextId)
+			messages.value = []
+			prevBatch = ''
+			lastBufCount = 0
+			replyTo.value = null
+			showAtPicker.value = false
+			inputText.value = ''
+			typingUsers.value = []
+			highlightEventId.value = ''
+			clearRoomAlert(nextId)
+			stripDragX.value = 0
+
+			const list = stripRoomList.value
+			for (let i = 0; i < list.length; i++) {
+				if (sameRoomId(list[i].room_id, nextId)) {
+					list[i].unread_count = 0
+					const n = list[i].name
+					if (n != null && n.length > 0) roomName.value = n
+					break
+				}
+			}
+			stripRoomList.value = list.slice()
+
+			const matrix = getMatrix()
+			if (matrix == null) return
+			if (gen != chatLoadGen) return
+			applyLocalCache()
+			if (gen != chatLoadGen) return
+			loadingHistory.value = messages.value.length == 0
+			await loadRoomMeta(matrix)
+			if (gen != chatLoadGen) return
+			checkRoomEncrypted(matrix)
+			await loadHistory()
+			if (gen != chatLoadGen) return
+			mergeRoomBuffer()
+			refreshMsgTimes()
+			hydrateImages()
+			nextTick(() => scrollToBottom())
+			if (messages.value.length > 0) {
+				const last = messages.value[messages.value.length - 1]
+				matrix.readReceipt(nextId, last.event_id)
+			}
+			getCallManager().replayRoom(nextId)
+		} catch (e) {
+			console.warn('[strip] switch fail', e)
+		} finally {
+			switchingRoom = false
+		}
+	}
+
+	function shiftStrip(dir: number): void {
+		const n = stripRoomList.value.length
+		if (n <= 1) return
+		let next = focusRoomIdx.value + dir
+		if (n >= 5) {
+			next = next % n
+			if (next < 0) next = next + n
+		} else {
+			if (next < 0) next = 0
+			if (next >= n) next = n - 1
+		}
+		const room = stripRoomList.value[next]
+		if (room != null) switchToStripRoom(room.room_id)
+	}
+
+	function stripIndexAtX(clientX: number, dragX: number): number {
+		const n = stripRoomList.value.length
+		if (n == 0) return -1
+		const I = stripChipPx()
+		const base = stripBaseTranslate() + dragX
+		let best = 0
+		let bestDist = 999999
+		for (let i = 0; i < n; i++) {
+			const cx = base + i * I + I / 2
+			const d = clientX - cx
+			const ad = d > 0 ? d : -d
+			if (ad < bestDist) {
+				bestDist = ad
+				best = i
+			}
+		}
+		return best
+	}
+
+	let stripTouchX: number = 0
+	let stripTouchY: number = 0
+	let stripMoved: boolean = false
+	let stripActive: boolean = false
+
+	function onStripTouchStart(e: UniTouchEvent): void {
+		if (e.touches.length == 0) return
+		stripTouchX = e.touches[0].clientX
+		stripTouchY = e.touches[0].clientY
+		stripMoved = false
+		stripActive = true
+		stripDragging.value = true
+		stripDragX.value = 0
+	}
+
+	function onStripTouchMove(e: UniTouchEvent): void {
+		if (!stripActive) return
+		if (e.touches.length == 0) return
+		const dx = e.touches[0].clientX - stripTouchX
+		const dy = e.touches[0].clientY - stripTouchY
+		const adx = dx > 0 ? dx : -dx
+		const ady = dy > 0 ? dy : -dy
+		if (adx < 6 && ady < 6) return
+		if (ady > adx * 1.2 && !stripMoved) {
+			stripActive = false
+			stripDragging.value = false
+			stripDragX.value = 0
+			return
+		}
+		stripMoved = true
+		stripDragging.value = true
+		stripDragX.value = dx
+	}
+
+	function onStripTouchEnd(e: UniTouchEvent): void {
+		if (!stripActive) {
+			stripDragX.value = 0
+			stripDragging.value = false
+			return
+		}
+		stripActive = false
+		stripDragging.value = false
+		let endX = stripTouchX
+		if (e.changedTouches.length > 0) {
+			endX = e.changedTouches[0].clientX
+		}
+		const dx = endX - stripTouchX
+		const dragSnap = stripDragX.value
+		const th = stripChipPx() * 0.2
+		const adx = dx > 0 ? dx : -dx
+		stripDragX.value = 0
+		if (stripMoved && adx >= th) {
+			if (dx < 0) shiftStrip(1)
+			else shiftStrip(-1)
+		} else {
+			// 点击：命中哪个头像就切到哪个会话
+			const idx = stripIndexAtX(endX, dragSnap)
+			if (idx >= 0 && idx < stripRoomList.value.length) {
+				const room = stripRoomList.value[idx]
+				if (room != null) switchToStripRoom(room.room_id)
+			}
+		}
+		stripMoved = false
+	}
+
+	// H5 鼠标拖拽（桌面调试）
+	function onStripMouseDown(e: any): void {
+		const x: number = e.clientX as number
+		const y: number = e.clientY as number
+		stripTouchX = x
+		stripTouchY = y
+		stripMoved = false
+		stripActive = true
+		stripDragging.value = true
+		stripDragX.value = 0
+	}
+	function onStripMouseMove(e: any): void {
+		if (!stripActive) return
+		const x: number = e.clientX as number
+		const y: number = e.clientY as number
+		const dx = x - stripTouchX
+		const dy = y - stripTouchY
+		const adx = dx > 0 ? dx : -dx
+		const ady = dy > 0 ? dy : -dy
+		if (adx < 4 && ady < 4) return
+		stripMoved = true
+		stripDragX.value = dx
+	}
+	function onStripMouseUp(e: any): void {
+		if (!stripActive) return
+		stripActive = false
+		stripDragging.value = false
+		const x: number = e.clientX as number
+		const dx = x - stripTouchX
+		const dragSnap = stripDragX.value
+		const th = stripChipPx() * 0.2
+		const adx = dx > 0 ? dx : -dx
+		stripDragX.value = 0
+		if (stripMoved && adx >= th) {
+			if (dx < 0) shiftStrip(1)
+			else shiftStrip(-1)
+		} else {
+			const idx = stripIndexAtX(x, dragSnap)
+			if (idx >= 0 && idx < stripRoomList.value.length) {
+				const room = stripRoomList.value[idx]
+				if (room != null) switchToStripRoom(room.room_id)
+			}
+		}
+		stripMoved = false
+	}
+
 	const atMembers = computed((): Array<RoomMember> => {
 		const out: Array<RoomMember> = []
 		const me = currentUserId.value
@@ -491,6 +904,8 @@
 	let bufPollTimer: number | null = null
 	let lastBufCount: number = 0
 	let livePulling: boolean = false
+	// 每次切换会话递增，用于丢弃过期的 messages 请求结果
+	let chatLoadGen: number = 0
 	let prevRoomTimeline: ((event: MatrixEvent, roomId: string) => void) | null = null
 	let persistTimer: number | null = null
 	function stopOff(handler: (() => void) | null): void {
@@ -622,12 +1037,61 @@
 		if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
 		return (bytes / 1024 / 1024).toFixed(1) + ' MB'
 	}
-	function senderAvatar(sender: string): string {
+	function resolveMemberMxc(uid: string): string {
+		if (uid.length == 0) return ''
+		const list = groupMembers.value
+		for (let i = 0; i < list.length; i++) {
+			if (list[i].user_id != uid) continue
+			const av = list[i].avatar_url
+			if (av != null && av.length > 0) return av
+			break
+		}
 		const matrix = getMatrix()
 		if (matrix == null) return ''
-		const mxc = matrix.userAvatars.get(sender) ?? ''
-		if (mxc.length == 0) return ''
+		const cached = matrix.userAvatars.get(uid)
+		if (cached != null && cached.length > 0) return cached
+		return ''
+	}
+
+	function senderAvatar(sender: string): string {
+		if (sender.length == 0) return ''
+		if (sender == currentUserId.value && myAvatarSrc.value.length > 0) {
+			return myAvatarSrc.value
+		}
+		const mxc = resolveMemberMxc(sender)
+		if (mxc.length == 0) {
+			ensureMemberAvatar(sender)
+			return ''
+		}
 		return getMxcUrl(mxc, 96, 96)
+	}
+
+	const avatarFetching: Array<string> = []
+	async function ensureMemberAvatar(uid: string): Promise<void> {
+		if (uid.length == 0) return
+		if (avatarFetching.indexOf(uid) >= 0) return
+		if (resolveMemberMxc(uid).length > 0) return
+		avatarFetching.push(uid)
+		try {
+			const matrix = getMatrix()
+			if (matrix == null) return
+			const p = await matrix.getProfile(uid)
+			const mxc = p.avatar_url
+			if (mxc.length == 0) return
+			matrix.userAvatars.set(uid, mxc)
+			const list = groupMembers.value
+			for (let i = 0; i < list.length; i++) {
+				if (list[i].user_id == uid) {
+					list[i].avatar_url = mxc
+					break
+				}
+			}
+			groupMembers.value = list.slice()
+			if (uid == currentUserId.value) {
+				myAvatarSrc.value = getMxcUrl(mxc, 96, 96)
+			}
+		} catch (e) {
+		}
 	}
 	function senderInitial(sender: string): string {
 		const local = sender.split(':')[0].replace('@', '')
@@ -1775,6 +2239,11 @@
 		try {
 			const list = await matrix.getRoomMembers(roomId.value)
 			groupMembers.value = list
+			for (let ai = 0; ai < list.length; ai++) {
+				const mem = list[ai]
+				const av = mem.avatar_url
+				if (av == null || av.length == 0) ensureMemberAvatar(mem.user_id)
+			}
 			if (isGroup.value) {
 				let n = 0
 				for (let i = 0; i < list.length; i++) {
@@ -1911,25 +2380,45 @@
 	async function loadHistory() {
 		const matrix = await getMatrix2()
 		if (matrix == null) return
+		const rid = roomId.value
+		const gen = chatLoadGen
+		const from = prevBatch
 		loadingHistory.value = messages.value.length == 0
 		try {
-			const page = await matrix.getMessagesPage(roomId.value, 30, prevBatch)
+			const page = await matrix.getMessagesPage(rid, 30, from)
+			// 已切换到别的会话，丢弃本次结果
+			if (gen != chatLoadGen || !sameRoomId(roomId.value, rid)) return
 			const history = page.messages
 			prevBatch = page.end
-			const merged: Array<ChatMsg> = messages.value.slice()
-			for (const m of history) {
-				if (merged.findIndex(x => x.event_id == m.event_id) >= 0) continue
-				merged.push(fromMatrixMessage(m))
+			const merged: Array<ChatMsg> = []
+			if (from.length == 0) {
+				// 首次进入/切换房间：整表替换，避免旧房间消息残留
+				for (let hi = 0; hi < history.length; hi++) {
+					merged.push(fromMatrixMessage(history[hi]))
+				}
+			} else {
+				for (let mi = 0; mi < messages.value.length; mi++) {
+					merged.push(messages.value[mi])
+				}
+				for (let hi = 0; hi < history.length; hi++) {
+					const m = history[hi]
+					if (merged.findIndex(x => x.event_id == m.event_id) >= 0) continue
+					merged.push(fromMatrixMessage(m))
+				}
 			}
 			merged.sort((a, b) => a.ts - b.ts)
+			if (gen != chatLoadGen || !sameRoomId(roomId.value, rid)) return
 			messages.value = merged
 			hydrateImages()
 			schedulePersist()
 		} catch (e: any) {
-			uni.showToast({ title: errText(e, '加载历史失败'), icon: 'none' })
+			if (gen == chatLoadGen && sameRoomId(roomId.value, rid)) {
+				uni.showToast({ title: errText(e, '加载历史失败'), icon: 'none' })
+			}
 		}
-		loadingHistory.value = false
+		if (gen == chatLoadGen) loadingHistory.value = false
 		setTimeout(() => {
+			if (gen != chatLoadGen) return
 			try {
 				scrollToHighlight()
 				scrollToBottom()
@@ -1944,10 +2433,13 @@
 		if (prevBatch.length == 0) return
 		const matrix = await getMatrix2()
 		if (matrix == null) return
+		const rid = roomId.value
+		const gen = chatLoadGen
 		loadingHistory.value = true
 		const oldFirst = messages.value.length > 0 ? messages.value[0].event_id : ''
 		try {
-			const page = await matrix.getMessagesPage(roomId.value, 30, prevBatch)
+			const page = await matrix.getMessagesPage(rid, 30, prevBatch)
+			if (gen != chatLoadGen || !sameRoomId(roomId.value, rid)) return
 			const history = page.messages
 			if (page.end == prevBatch || history.length == 0) {
 				prevBatch = ''
@@ -1971,7 +2463,7 @@
 		} catch (e: any) {
 			console.warn('加载更多失败', e)
 		}
-		loadingHistory.value = false
+		if (gen == chatLoadGen) loadingHistory.value = false
 	}
 
 	async function finishSend(tempId: string, text: string, replyRef: ReplyTarget | null, matrix: MatrixClient): Promise<void> {
@@ -2311,6 +2803,18 @@
 			if (matrix == null) return
 			const p = await matrix.getProfile(sender)
 			applySenderName(sender, p.display_name)
+			const mxc = p.avatar_url
+			if (mxc.length > 0) {
+				matrix.userAvatars.set(sender, mxc)
+				const list = groupMembers.value
+				for (let i = 0; i < list.length; i++) {
+					if (list[i].user_id == sender) {
+						list[i].avatar_url = mxc
+						break
+					}
+				}
+				groupMembers.value = list.slice()
+			}
 		} catch (e) {
 			applySenderName(sender, sender.split(':')[0].replace('@', ''))
 		}
@@ -2596,19 +3100,22 @@
 		const matrix = matrixRef
 		if (matrix == null) return
 		if (roomId.value.length == 0) return
+		const rid = roomId.value
+		const gen = chatLoadGen
 		livePulling = true
 		try {
-			const page = await matrix.getMessagesPage(roomId.value, 10, '')
+			const page = await matrix.getMessagesPage(rid, 10, '')
+			if (gen != chatLoadGen || !sameRoomId(roomId.value, rid)) return
 			const history = page.messages
 			let added = false
 			for (let hi = 0; hi < history.length; hi++) {
 				const row = history[hi]
-				const rid = row.event_id
+				const eid = row.event_id
 				let exists = false
 				const list = messages.value
-				if (rid.length > 0) {
+				if (eid.length > 0) {
 					for (let di = 0; di < list.length; di++) {
-						if (list[di].event_id == rid) {
+						if (list[di].event_id == eid) {
 							exists = true
 							break
 						}
@@ -2621,7 +3128,7 @@
 					let sameCall = false
 					for (let ci = 0; ci < list.length; ci++) {
 						if (pickStr(list[ci].info, 'call_id') == rowCall) {
-							if (rid.length > 0) list[ci].event_id = rid
+							if (eid.length > 0) list[ci].event_id = eid
 							sameCall = true
 							break
 						}
@@ -2633,11 +3140,11 @@
 				if (row.sender == currentUserId.value && mt == 'm.audio') {
 					for (let pi = 0; pi < list.length; pi++) {
 						if (list[pi]._pending && list[pi].msgtype == 'm.audio' && list[pi].sender == row.sender) {
-							if (rid.length > 0) list[pi].event_id = rid
-							const mx = row.mxc != null ? row.mxc : ''
-							if (mx.length > 0) {
-								list[pi].mxc = mx
-								list[pi].url = mx
+							if (eid.length > 0) list[pi].event_id = eid
+							const mxu = row.mxc != null ? row.mxc : ''
+							if (mxu.length > 0) {
+								list[pi].mxc = mxu
+								list[pi].url = mxu
 							}
 							list[pi]._pending = false
 							mergedPending = true
@@ -2650,6 +3157,7 @@
 				messages.value.push(fromMatrixMessage(row))
 				added = true
 			}
+			if (gen != chatLoadGen || !sameRoomId(roomId.value, rid)) return
 			if (added) {
 				const merged: Array<ChatMsg> = messages.value.slice()
 				merged.sort((a, b) => a.ts - b.ts)
@@ -2819,10 +3327,23 @@
 		}
 
 		const unreadHandler = (rid: string, count: number) => {
-			if (rid != roomId.value) return
-			if (count > 0 && messages.value.length > 0) {
-				const last = messages.value[messages.value.length - 1]
-				matrix.readReceipt(rid, last.event_id)
+			if (rid == roomId.value) {
+				if (count > 0 && messages.value.length > 0) {
+					const last = messages.value[messages.value.length - 1]
+					matrix.readReceipt(rid, last.event_id)
+				}
+				return
+			}
+			if (count > 0) {
+				markRoomAlert(rid)
+				const sl = stripRoomList.value
+				for (let si = 0; si < sl.length; si++) {
+					if (sl[si].room_id == rid) {
+						sl[si].unread_count = count
+						stripRoomList.value = sl.slice()
+						break
+					}
+				}
 			}
 		}
 		matrix.unreadHandlers.push(unreadHandler)
@@ -2863,6 +3384,7 @@
 			const last = messages.value[messages.value.length - 1]
 			matrix.readReceipt(roomId.value, last.event_id)
 		}
+		loadStripRooms()
 	}
 
 	async function setupChat(): Promise<void> {
@@ -2944,12 +3466,40 @@
 </script>
 
 <style>
+	page {
+		background-color: #F3F8FE;
+	}
 	.chat-page {
 		flex: 1;
-		background-color: #ffffff;
+		width: 100%;
+		min-height: 100%;
+		background-color: #F3F8FE;
+		background-image: linear-gradient(180deg, #F3F8FE 0%, #FFFFFF 100%);
 		display: flex;
 		flex-direction: column;
 		position: relative;
+	}
+	.chat-header {
+		width: 100%;
+		/* 与聊天区同色，避免弧线下透出白边 */
+		background-color: #F3F8FE;
+		flex-direction: column;
+		position: relative;
+		z-index: 2;
+		padding-bottom: 0;
+		overflow: visible;
+	}
+	.header-wave-wrap {
+		position: relative;
+		width: 100%;
+		height: 100rpx;
+		margin-top: -44rpx;
+		z-index: 1;
+		overflow: visible;
+	}
+	.header-wave-img {
+		width: 100%;
+		height: 100rpx;
 	}
 	/* #ifdef H5 */
 	.chat-page ::-webkit-scrollbar {
@@ -2965,17 +3515,25 @@
 	/* #endif */
 
 	.topbar {
+		position: relative;
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
-		padding: 48rpx 20rpx 8rpx 20rpx;
+		padding: 40rpx 20rpx 0 20rpx;
 		background-color: #ffffff;
+		width: 100%;
+		height: 88rpx;
 	}
 
 	.topbar-center {
-		flex: 1;
+		position: absolute;
+		left: 120rpx;
+		right: 120rpx;
+		top: 40rpx;
+		bottom: 0;
 		align-items: center;
 		justify-content: center;
+		z-index: 1;
 	}
 
 	.topbar-title {
@@ -2984,17 +3542,23 @@
 		color: #1a1a1a;
 		lines: 1;
 		text-overflow: ellipsis;
+		text-align: center;
+		width: 100%;
 	}
 
 	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
 		flex-direction: row;
 		align-items: center;
+		justify-content: flex-start;
+		z-index: 2;
 	}
 
 	.back-text {
-		font-size: 34rpx;
 		color: #181818;
 		font-size: 56rpx;
+		line-height: 72rpx;
 	}
 
 	.topbar-right {
@@ -3003,10 +3567,11 @@
 		flex-direction: row;
 		align-items: center;
 		justify-content: flex-end;
+		z-index: 2;
 	}
 	.more-icon {
-		width: 48rpx;
-		height: 48rpx;
+		width: 56rpx;
+		height: 56rpx;
 		flex-direction: row;
 		align-items: center;
 		justify-content: center;
@@ -3016,8 +3581,8 @@
 		height: 8rpx;
 		border-radius: 4rpx;
 		background-color: #181818;
-		margin-left: 5rpx;
-		margin-right: 5rpx;
+		margin-left: 4rpx;
+		margin-right: 4rpx;
 	}
 
 	.portrait-circle {
@@ -3048,56 +3613,74 @@
 	.member-strip-wrap {
 		position: relative;
 		background-color: #ffffff;
-		padding-bottom: 8rpx;
-	}
-	.member-strip {
-		width: 100%;
-		height: 160rpx;
-		background-color: #ffffff;
-		/* #ifdef H5 */
-		overflow-x: auto;
-		overflow-y: hidden;
-		scrollbar-width: none;
-		-ms-overflow-style: none;
-		/* #endif */
+		padding-top: 8rpx;
+		padding-bottom: 0;
+		height: 128rpx;
+		/* 必须可见：焦点头像要落入下方弧线 */
+		overflow: visible;
+		z-index: 4;
 	}
 	.member-strip-row {
 		flex-direction: row;
 		flex-wrap: nowrap;
-		align-items: center;
-		padding: 12rpx 28rpx 20rpx;
+		align-items: flex-end;
+		justify-content: flex-start;
+		height: 120rpx;
+		padding-bottom: 4rpx;
 	}
 	.member-chip {
-		margin-right: 22rpx;
+		width: 100rpx;
+		height: 100rpx;
+		align-items: center;
+		justify-content: flex-end;
+		flex-shrink: 0;
+		padding-bottom: 4rpx;
+	}
+	.member-chip-focus {
+		height: 118rpx;
+		padding-bottom: 0;
+		z-index: 5;
+	}
+	.member-ava-wrap {
+		position: relative;
+		width: 80rpx;
+		height: 80rpx;
 		align-items: center;
 		justify-content: center;
-		flex-shrink: 0;
+	}
+	.member-chip-focus .member-ava-wrap {
+		width: 104rpx;
+		height: 104rpx;
 	}
 	.member-ava {
-		width: 88rpx;
-		height: 88rpx;
-		border-radius: 44rpx;
+		width: 72rpx;
+		height: 72rpx;
+		border-radius: 36rpx;
 		background-color: #e8eef8;
-		border-width: 4rpx;
+		border-width: 3rpx;
 		border-color: #ffffff;
 		border-style: solid;
 	}
 	.member-chip-focus .member-ava {
-		width: 112rpx;
-		height: 112rpx;
-		border-radius: 56rpx;
-		border-width: 6rpx;
+		width: 100rpx;
+		height: 100rpx;
+		border-radius: 50rpx;
+		border-width: 5rpx;
 		border-color: #ffffff;
-		box-shadow: 0 12rpx 28rpx rgba(47, 111, 242, 0.28);
+		box-shadow: 0 10rpx 22rpx rgba(47, 111, 242, 0.2);
 	}
-	.member-strip-glow {
+	.member-dot {
 		position: absolute;
-		left: 20%;
-		right: 20%;
-		bottom: 0;
-		height: 36rpx;
-		border-radius: 50%;
-		background-color: rgba(120, 170, 255, 0.18);
+		top: 4rpx;
+		right: 8rpx;
+		width: 18rpx;
+		height: 18rpx;
+		border-radius: 9rpx;
+		background-color: #ffd400;
+		border-width: 3rpx;
+		border-color: #ffffff;
+		border-style: solid;
+		z-index: 2;
 	}
 	.member-ava-fallback {
 		align-items: center;
@@ -3189,8 +3772,8 @@
 	.messages {
 		flex: 1;
 		height: 0;
-		padding: 20rpx 20rpx;
-		background-color: #ffffff;
+		padding: 28rpx 20rpx 20rpx;
+		background-color: transparent;
 	}
 	.chat-bottom-anchor {
 		width: 100%;
@@ -3389,6 +3972,10 @@
 		align-items: center;
 		justify-content: center;
 	}
+	.input-tool-img {
+		width: 48rpx;
+		height: 48rpx;
+	}
 	.input-tool-text {
 		font-size: 40rpx;
 		color: #333333;
@@ -3403,12 +3990,18 @@
 		border-style: solid;
 		align-items: center;
 		justify-content: center;
-		margin-left: 4rpx;
+		margin-left: 8rpx;
+		flex-shrink: 0;
 	}
 	.plus-circle-text {
 		font-size: 34rpx;
 		color: #333333;
 		line-height: 1;
+		text-align: center;
+	}
+	.emoji-face {
+		font-size: 36rpx;
+		margin-top: -2rpx;
 	}
 	.voice-hold {
 		flex: 1;
@@ -3593,6 +4186,10 @@
 
 	.more-icon-text {
 		font-size: 50rpx;
+	}
+	.more-icon-img {
+		width: 56rpx;
+		height: 56rpx;
 	}
 
 	.more-label {

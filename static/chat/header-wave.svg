@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 750 120" width="750" height="120" preserveAspectRatio="none">
+  <defs>
+    <filter id="edgeGlow" x="-5%" y="-50%" width="110%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3" result="blur"/>
+      <feOffset dy="1.5" result="off"/>
+      <feFlood flood-color="#9EC4E8" flood-opacity="0.4" result="color"/>
+      <feComposite in="color" in2="off" operator="in" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="waveFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#D0E4F6" stop-opacity="0.65"/>
+      <stop offset="35%" stop-color="#E8F1FA" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#F3F8FE" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+  <!-- below curve: opaque page blue, no transparent gap -->
+  <path
+    d="M0,52 L220,52 C280,52 320,92 375,92 C430,92 470,52 530,52 L750,52 L750,120 L0,120 Z"
+    fill="url(#waveFill)"/>
+  <!-- above curve: white header + soft shadow along full edge -->
+  <path
+    d="M0,0 L750,0 L750,52 L530,52 C470,52 430,92 375,92 C320,92 280,52 220,52 L0,52 Z"
+    fill="#FFFFFF"
+    filter="url(#edgeGlow)"/>
+</svg>

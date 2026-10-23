@@ -205,23 +205,18 @@
 		<view class="wx-tabbar">
 			<view class="wx-tab" @click="goHome">
 				<image class="wx-tab-icon" src="/static/login/s11.png" mode="aspectFit"></image>
-				<text class="wx-tab-label">首页</text>
 			</view>
 			<view class="wx-tab" @click="goRooms">
 				<image class="wx-tab-icon" src="/static/login/s22.png" mode="aspectFit"></image>
-				<text class="wx-tab-label">消息</text>
 			</view>
 			<view class="wx-tab wx-tab-on">
 				<image class="wx-tab-icon" src="/static/login/s3.png" mode="aspectFit"></image>
-				<text class="wx-tab-label">发现</text>
 			</view>
 			<view class="wx-tab" @click="goNotify">
 				<image class="wx-tab-icon" src="/static/login/s44.png" mode="aspectFit"></image>
-				<text class="wx-tab-label">通知</text>
 			</view>
 			<view class="wx-tab" @click="goProfile">
 				<image class="wx-tab-icon" src="/static/login/s55.png" mode="aspectFit"></image>
-				<text class="wx-tab-label">我的</text>
 			</view>
 		</view>
 	</view>
@@ -637,9 +632,8 @@
 	.wx-tab {
 		flex: 1;
 		align-items: center;
-		padding: 10rpx 0 12rpx;
+		justify-content: center;
+		padding: 18rpx 0 12rpx;
 	}
-	.wx-tab-icon { width: 44rpx; height: 44rpx; margin-bottom: 4rpx; }
-	.wx-tab-label { font-size: 20rpx; color: #181818; }
-	.wx-tab-on .wx-tab-label { color: #2f6ff2; }
+	.wx-tab-icon { width: 48rpx; height: 48rpx; }
 </style>
