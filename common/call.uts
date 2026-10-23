@@ -1606,11 +1606,35 @@ export class CallManager {
 		return uris
 	}
 
+	applyFallbackTurn(): void {
+		// homeserver 未配置 TURN 时的公共中继兜底（仅保连通；生产请在 Synapse 配 coturn）
+		const list: Array<UTSJSONObject> = []
+		const stun1: UTSJSONObject = {}
+		stun1['urls'] = 'stun:stun.l.google.com:19302'
+		list.push(stun1)
+		const stun2: UTSJSONObject = {}
+		stun2['urls'] = 'stun:stun1.l.google.com:19302'
+		list.push(stun2)
+		const turnUdp: UTSJSONObject = {}
+		turnUdp['urls'] = 'turn:openrelay.metered.ca:80'
+		turnUdp['username'] = 'openrelayproject'
+		turnUdp['credential'] = 'openrelayproject'
+		list.push(turnUdp)
+		const turnTcp: UTSJSONObject = {}
+		turnTcp['urls'] = 'turn:openrelay.metered.ca:443?transport=tcp'
+		turnTcp['username'] = 'openrelayproject'
+		turnTcp['credential'] = 'openrelayproject'
+		list.push(turnTcp)
+		this.turnIce = JSON.stringify(list)
+		console.warn('[call] using fallback public TURN (homeserver turnServer empty)')
+	}
+
 	applyTurn(turn: UTSJSONObject): boolean {
 		const uris = this.parseTurnUris(turn)
 		if (uris.length == 0) {
 			console.warn('[call] TURN empty uris', JSON.stringify(turn))
-			return false
+			this.applyFallbackTurn()
+			return this.turnIce.indexOf('turn:') >= 0
 		}
 		const username = fieldStr(turn, 'username')
 		const credential = fieldStr(turn, 'password')
@@ -1629,7 +1653,8 @@ export class CallManager {
 			console.log('[call] TURN cached', uris.length, username.length > 0 ? 'auth' : 'no-auth')
 			return true
 		}
-		return false
+		this.applyFallbackTurn()
+		return this.turnIce.indexOf('turn:') >= 0
 	}
 
 	kickTurn(): void {
@@ -1715,13 +1740,14 @@ export class CallManager {
 		// #endif
 		if (this.offerStarted) return
 		this.offerStarted = true
-		const hasTurn = await this.waitTurn()
+		let hasTurn = await this.waitTurn()
 		if (this.phase != 'outgoing') return
 		if (!hasTurn) {
-			console.warn('[call] startOffer without TURN, STUN only')
-		} else {
-			console.log('[call] startOffer ice has TURN')
+			this.applyFallbackTurn()
+			hasTurn = this.turnIce.indexOf('turn:') >= 0
+			uni.showToast({ title: '服务器未配 TURN，已用公共中继', icon: 'none', duration: 2500 })
 		}
+		console.log('[call] startOffer ice', hasTurn ? 'has TURN' : 'STUN only')
 		if (this.isGroupCall && this.groupPeerIds.length > 0) {
 			const msg = this.buildHtmlStart('startGroupOffer', '')
 			this.fillHtmlIce(msg)

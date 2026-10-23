@@ -2766,7 +2766,16 @@ export class MatrixClient {
 	 * 返回 { uris, username, password, ttl }
 	 */
 	async getTurnServer(): Promise<UTSJSONObject> {
-		return await this.request('GET', '/_matrix/client/v3/voip/turnServer', null)
+		const data = (await this.request('GET', '/_matrix/client/v3/voip/turnServer', null)) as UTSJSONObject
+		try {
+			const uris = jsonStrArr(data, 'uris')
+			const user = jsonStr(data, 'username')
+			console.log('[matrix] turnServer uris=', uris.length, 'user=', user.length > 0)
+			if (uris.length == 0) console.log('[matrix] turnServer raw', JSON.stringify(data))
+		} catch (eLog) {
+			console.log('[matrix] turnServer raw', JSON.stringify(data))
+		}
+		return data
 	}
 
 	// ============================================================
