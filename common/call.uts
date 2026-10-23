@@ -1578,6 +1578,60 @@ export class CallManager {
 		return this.packHtmlMsg(msg)
 	}
 
+	parseTurnUris(turn: UTSJSONObject): Array<string> {
+		const uris: Array<string> = []
+		try {
+			const raw = turn['uris']
+			if (raw == null) return uris
+			const arr = raw as Array<any>
+			if (arr != null && arr.length != null) {
+				for (let i = 0; i < arr.length; i++) {
+					const s = '' + arr[i]
+					if (s.length > 0 && s != 'null' && s != 'undefined') uris.push(s)
+				}
+				return uris
+			}
+		} catch (e0) {}
+		try {
+			const raw2 = turn.getArray('uris')
+			if (raw2 != null) {
+				for (let j = 0; j < raw2.length; j++) {
+					const one = raw2[j]
+					if (one == null) continue
+					const s2 = '' + one
+					if (s2.length > 0 && s2 != 'null') uris.push(s2)
+				}
+			}
+		} catch (e1) {}
+		return uris
+	}
+
+	applyTurn(turn: UTSJSONObject): boolean {
+		const uris = this.parseTurnUris(turn)
+		if (uris.length == 0) {
+			console.warn('[call] TURN empty uris', JSON.stringify(turn))
+			return false
+		}
+		const username = fieldStr(turn, 'username')
+		const credential = fieldStr(turn, 'password')
+		const stun: UTSJSONObject = {}
+		stun['urls'] = 'stun:stun.l.google.com:19302'
+		const item: UTSJSONObject = {}
+		item['urls'] = uris
+		item['username'] = username
+		item['credential'] = credential
+		const list: Array<UTSJSONObject> = []
+		list.push(stun)
+		list.push(item)
+		const encoded = JSON.stringify(list)
+		if (encoded.length > 8) {
+			this.turnIce = encoded
+			console.log('[call] TURN cached', uris.length, username.length > 0 ? 'auth' : 'no-auth')
+			return true
+		}
+		return false
+	}
+
 	kickTurn(): void {
 		if (this.turnBusy) return
 		const matrix = getMatrix()
@@ -1586,34 +1640,10 @@ export class CallManager {
 		matrix.getTurnServer().then((turn: UTSJSONObject) => {
 			this.turnBusy = false
 			try {
-				const uris: Array<string> = []
-				const urisRaw = turn.getArray('uris')
-				if (urisRaw != null) {
-					for (let i = 0; i < urisRaw.length; i++) {
-						const one = urisRaw[i]
-						if (one == null) continue
-						const s = '' + one
-						if (s.length > 0 && s != 'null') uris.push(s)
-					}
-				}
-				if (uris.length == 0) return
-				const usernameVal = turn.getString('username')
-				const credentialVal = turn.getString('password')
-				const username = (usernameVal != null) ? usernameVal : ''
-				const credential = (credentialVal != null) ? credentialVal : ''
-				const item: UTSJSONObject = {}
-				item['urls'] = uris
-				item['username'] = username
-				item['credential'] = credential
-				const stun: UTSJSONObject = {}
-				stun['urls'] = 'stun:stun.l.google.com:19302'
-				const list: Array<UTSJSONObject> = []
-				list.push(stun)
-				list.push(item)
-				const encoded = JSON.stringify(list)
-				if (encoded.length > 8) this.turnIce = encoded
-				console.log('[call] TURN cached', uris.length)
-			} catch (e) {}
+				this.applyTurn(turn)
+			} catch (e) {
+				console.warn('[call] TURN parse fail', e)
+			}
 		}).catch((e) => {
 			this.turnBusy = false
 			console.warn('[call] TURN fail', e)
@@ -1621,8 +1651,10 @@ export class CallManager {
 	}
 
 	fillHtmlIce(msg: UTSJSONObject): void {
-		if (this.turnIce.length < 8) {
-			this.turnIce = '[{"urls":"stun:stun.l.google.com:19302"},{"urls":"stun:stun1.l.google.com:19302"}]'
+		if (this.turnIce.length < 8 || this.turnIce.indexOf('turn:') < 0) {
+			if (this.turnIce.length < 8) {
+				this.turnIce = '[{"urls":"stun:stun.l.google.com:19302"},{"urls":"stun:stun1.l.google.com:19302"}]'
+			}
 		}
 		msg['ice'] = this.turnIce
 		this.kickTurn()
@@ -1637,14 +1669,24 @@ export class CallManager {
 
 	waitTurn(): Promise<boolean> {
 		return new Promise((resolve: (ok: boolean) => void) => {
-			this.kickTurn()
 			if (this.turnIce.indexOf('turn:') >= 0 || this.turnIce.indexOf('turns:') >= 0) {
 				resolve(true)
 				return
 			}
-			setTimeout(() => {
-				resolve(true)
-			}, 2500)
+			const matrix = getMatrix()
+			if (matrix == null) {
+				resolve(false)
+				return
+			}
+			matrix.getTurnServer().then((turn: UTSJSONObject) => {
+				try { this.applyTurn(turn) } catch (e0) {}
+				resolve(this.turnIce.indexOf('turn:') >= 0 || this.turnIce.indexOf('turns:') >= 0)
+			}).catch((_e) => {
+				this.kickTurn()
+				setTimeout(() => {
+					resolve(this.turnIce.indexOf('turn:') >= 0 || this.turnIce.indexOf('turns:') >= 0)
+				}, 2000)
+			})
 		})
 	}
 
@@ -1673,8 +1715,13 @@ export class CallManager {
 		// #endif
 		if (this.offerStarted) return
 		this.offerStarted = true
-		await this.waitTurn()
+		const hasTurn = await this.waitTurn()
 		if (this.phase != 'outgoing') return
+		if (!hasTurn) {
+			console.warn('[call] startOffer without TURN, STUN only')
+		} else {
+			console.log('[call] startOffer ice has TURN')
+		}
 		if (this.isGroupCall && this.groupPeerIds.length > 0) {
 			const msg = this.buildHtmlStart('startGroupOffer', '')
 			this.fillHtmlIce(msg)
@@ -1699,7 +1746,7 @@ export class CallManager {
 		this.pushUi()
 		this.htmlPollN = 0
 		this.scheduleHtmlPoll()
-		console.log('[call] startOffer sent to engine')
+		console.log('[call] startOffer sent to engine', this.turnIce.indexOf('turn:') >= 0 ? 'turn' : 'stun-only')
 	}
 
 	async appAnswer(): Promise<void> {
