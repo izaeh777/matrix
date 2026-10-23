@@ -204,6 +204,22 @@ function isRequestTimeout(msg: string): boolean {
 	return msg.indexOf('timeout') >= 0 || msg.indexOf('TIMEOUT') >= 0
 }
 
+/** 瞬时网络错误：断网、代理闪断、长轮询被掐断等，应自动重试而非当致命错误 */
+function isTransientNetwork(msg: string): boolean {
+	if (isRequestTimeout(msg)) return true
+	const m = msg.toLowerCase()
+	if (m.indexOf('failed to fetch') >= 0) return true
+	if (m.indexOf('networkerror') >= 0) return true
+	if (m.indexOf('network request failed') >= 0) return true
+	if (m.indexOf('load failed') >= 0) return true
+	if (m.indexOf('net::err_') >= 0) return true
+	if (m.indexOf('econnreset') >= 0) return true
+	if (m.indexOf('econnrefused') >= 0) return true
+	if (m.indexOf('socket hang up') >= 0) return true
+	if (m.indexOf('request:fail') >= 0) return true
+	return false
+}
+
 function httpRawUpload(url: string, token: string, filePath: string): Promise<string> {
 	return new Promise((resolve, reject) => {
 		let path = filePath
@@ -1083,23 +1099,31 @@ export class MatrixClient {
 			} catch (e) {
 				if (!this.isSyncing || this.syncEpoch != epoch) break
 				const msg = `${e}`
-				if (isRequestTimeout(msg)) {
+				if (msg.indexOf('M_UNKNOWN_TOKEN') >= 0) {
+					console.error(TAG, 'sync error:', msg)
+					fireState('ERROR', msg)
+					this.stopSync()
+					break
+				}
+				// 长轮询超时 / Failed to fetch：常见瞬时问题，静默退避重试
+				if (isTransientNetwork(msg)) {
 					timeoutHits = timeoutHits + 1
-					if (timeoutHits == 1 || timeoutHits % 10 == 0) {
-						console.warn(TAG, 'sync idle timeout, retry', timeoutHits)
+					failCount = failCount + 1
+					if (timeoutHits == 1 || timeoutHits % 8 == 0) {
+						console.warn(TAG, 'sync network glitch, retry', timeoutHits, msg)
 					}
+					let wait = isRequestTimeout(msg) ? 300 : (1000 * failCount)
+					if (wait > 12000) wait = 12000
+					if (!isRequestTimeout(msg)) fireState('SYNCING', '')
+					await this.sleep(wait)
 					continue
 				}
 				console.error(TAG, 'sync error:', msg)
 				fireState('ERROR', msg)
-				if (msg.indexOf('M_UNKNOWN_TOKEN') >= 0) {
-					this.stopSync()
-					break
-				}
 				failCount = failCount + 1
-				let wait = 2000 * failCount
-				if (wait > 15000) wait = 15000
-				await this.sleep(wait)
+				let wait2 = 2000 * failCount
+				if (wait2 > 15000) wait2 = 15000
+				await this.sleep(wait2)
 			}
 		}
 	}
