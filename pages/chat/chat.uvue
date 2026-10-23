@@ -353,28 +353,34 @@
 			</view>
 		</view>
 
-		<!-- 操作面板（长按弹出） -->
+		<!-- 操作面板（长按弹出，底部抽屉） -->
 		<view v-if="actionSheet.show" class="action-sheet" @click="hideActionSheet">
 			<view class="action-panel" @click.stop="noop">
-				<text v-if="actionSheet.replyTo == null" class="action-title">对消息操作</text>
-				<text v-if="actionSheet.replyTo != null" class="action-title">回复: {{ actionSheet.replyTo.body }}</text>
-				<view v-if="!actionSheet.mine" class="action-item" @click="doAction('react', '👍')">
-					<text>👍 表情回应</text>
-				</view>
-				<view v-if="!actionSheet.mine" class="action-item" @click="doAction('react', '❤️')">
-					<text>❤️ 表情回应</text>
-				</view>
-				<view class="action-item" @click="doAction('reply', '')">
-					<text>↩ 回复</text>
-				</view>
-				<view v-if="actionSheet.mine" class="action-item" @click="doAction('edit', '')">
-					<text>✏ 编辑</text>
-				</view>
-				<view v-if="actionSheet.mine" class="action-item" @click="doAction('redact', '')">
-					<text>🗑 撤回</text>
+				<view class="action-handle"></view>
+				<view class="action-list">
+					<view v-if="!actionSheet.mine" class="action-item" @click="doAction('react', '👍')">
+						<text class="action-icon">👍</text>
+						<text class="action-label">表情回应</text>
+					</view>
+					<view v-if="!actionSheet.mine" class="action-item" @click="doAction('react', '❤️')">
+						<text class="action-icon">❤️</text>
+						<text class="action-label">表情回应</text>
+					</view>
+					<view class="action-item" @click="doAction('reply', '')">
+						<text class="action-icon">↩</text>
+						<text class="action-label">回复</text>
+					</view>
+					<view v-if="actionSheet.mine" class="action-item" @click="doAction('edit', '')">
+						<text class="action-icon">✏</text>
+						<text class="action-label">编辑</text>
+					</view>
+					<view v-if="actionSheet.mine" class="action-item action-item-danger" @click="doAction('redact', '')">
+						<text class="action-icon">🗑</text>
+						<text class="action-label">撤回</text>
+					</view>
 				</view>
 				<view class="action-cancel" @click="hideActionSheet">
-					<text>取消</text>
+					<text class="action-cancel-text">取消</text>
 				</view>
 			</view>
 		</view>
@@ -2596,6 +2602,8 @@
 	}
 
 	function onLongPress(msg: ChatMsg) {
+		showMorePanel.value = false
+		showEmojiPanel.value = false
 		actionSheet.value.target = msg
 		actionSheet.value.mine = msg.sender == currentUserId.value
 		actionSheet.value.show = true
@@ -4593,43 +4601,81 @@
 		color: #111111;
 	}
 
-	/* ---- 长按操作面板 ---- */
+	/* ---- 长按操作面板（贴底抽屉） ---- */
 	.action-sheet {
 		position: fixed;
-		left: 0; right: 0; top: 0; bottom: 0;
-		background-color: rgba(0,0,0,0.35);
-		display: flex;
-		align-items: flex-end;
-		justify-content: center;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba(0, 0, 0, 0.45);
+		flex-direction: column;
+		justify-content: flex-end;
+		align-items: stretch;
+		z-index: 1000;
 	}
 
 	.action-panel {
 		width: 100%;
-		background-color: #ffffff;
-		border-top-left-radius: 24rpx;
-		border-top-right-radius: 24rpx;
-		padding: 20rpx 0;
+		background-color: #f7f7fa;
+		border-top-left-radius: 28rpx;
+		border-top-right-radius: 28rpx;
+		padding: 16rpx 0 40rpx;
 	}
 
-	.action-title {
-		text-align: center;
-		font-size: 24rpx;
-		color: #888;
-		padding: 16rpx 0;
+	.action-handle {
+		width: 60rpx;
+		height: 6rpx;
+		background-color: #d0d0d6;
+		border-radius: 3rpx;
+		margin: 0 auto 16rpx;
+	}
+
+	.action-list {
+		margin: 0 20rpx;
+		background-color: #ffffff;
+		border-radius: 20rpx;
+		overflow: hidden;
 	}
 
 	.action-item {
+		flex-direction: row;
+		align-items: center;
+		padding: 28rpx 30rpx;
 		background-color: #ffffff;
-		padding: 32rpx;
 		border-bottom-width: 1rpx;
-		border-bottom-color: #e5e5e5;
+		border-bottom-color: #f0f0f4;
+	}
+
+	.action-icon {
+		width: 56rpx;
+		font-size: 32rpx;
+		color: #1a1a1a;
+	}
+
+	.action-label {
+		flex: 1;
+		font-size: 30rpx;
+		color: #1a1a1a;
+	}
+
+	.action-item-danger .action-icon,
+	.action-item-danger .action-label {
+		color: #ff3b30;
 	}
 
 	.action-cancel {
 		background-color: #ffffff;
-		padding: 32rpx;
-		text-align: center;
-		margin-top: 14rpx;
-		color: #888;
+		padding: 28rpx;
+		margin: 12rpx 20rpx 0;
+		border-radius: 20rpx;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.action-cancel-text {
+		font-size: 30rpx;
+		color: #1a1a1a;
+		font-weight: 500;
 	}
 </style>

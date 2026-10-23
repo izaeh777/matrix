@@ -65,6 +65,7 @@
 	let closing: boolean = false
 	let httpsTried: boolean = false
 	let httpsReady: boolean = false
+	let httpsFallbackArmed: boolean = false
 	let engineH = 520
 	try {
 		const info = uni.getSystemInfoSync()
@@ -452,6 +453,20 @@
 	}
 
 	let lastKickKey = ''
+	function armHttpsFallback(): void {
+		// #ifndef H5
+		if (httpsFallbackArmed) return
+		httpsFallbackArmed = true
+		setTimeout(() => {
+			if (httpsTried && httpsReady && getCallManager().htmlLoaded) return
+			console.warn('[call] https/engine fallback force')
+			httpsTried = true
+			httpsReady = true
+			try { pageEnsureEngine() } catch (e0) {}
+			kickEngine()
+		}, 2500)
+		// #endif
+	}
 	function kickEngine(): void {
 		const mgr = getCallManager()
 		if (mgr.phase == 'idle') return
@@ -463,11 +478,20 @@
 		}
 		// #endif
 		const ok = bindWeb()
-		console.log('[call] kickEngine', mgr.phase, 'bind', ok, 'loaded', mgr.htmlLoaded, 'https', httpsTried)
+		console.log('[call] kickEngine', mgr.phase, 'bind', ok, 'loaded', mgr.htmlLoaded, 'https', httpsTried, httpsReady)
 		try { tuneCallWebView() } catch (e1) {}
-		if (!httpsTried) return
-		if (!httpsReady) return
-		if (!ok) return
+		// #ifndef H5
+		if (!httpsTried || !httpsReady) {
+			armHttpsFallback()
+			if (!httpsTried || !httpsReady) return
+		}
+		// #endif
+		if (!ok) {
+			// #ifndef H5
+			try { pageEnsureEngine() } catch (ePe) {}
+			// #endif
+			return
+		}
 		const key = mgr.callId + '|' + mgr.phase + (mgr.htmlLoaded ? '|1' : '|0')
 		if (mgr.htmlLoaded && lastKickKey == key) return
 		if (mgr.htmlLoaded) lastKickKey = key
@@ -482,6 +506,8 @@
 					lastKickKey = mgr.callId + '|' + mgr.phase + '|1'
 					console.log('[call] engine ping ready', mgr.phase)
 					runEngineCmd()
+				} else {
+					armHttpsFallback()
 				}
 			})
 		} catch (e2) {
@@ -730,10 +756,16 @@
 		httpsReady = true
 		nextTick(() => { bindH5IFrame() })
 		// #endif
+		// #ifndef H5
+		armHttpsFallback()
+		// #endif
 		setupCall()
 	})
 	onReady(() => {
 		kickEngine()
+		// #ifndef H5
+		armHttpsFallback()
+		// #endif
 	})
 
 	onBackPress(() => {
@@ -756,6 +788,7 @@
 		}
 		httpsTried = false
 		httpsReady = false
+		httpsFallbackArmed = false
 		if (getCallManager().phase == 'idle') pageDestroyEngine()
 		// #ifdef H5
 		try {

@@ -190,6 +190,14 @@ function waitH5Mic(ms: number): Promise<boolean> {
 				resolve(true)
 				return
 			}
+			// 解锁 Promise 还在飞：继续等，不要提前判定失败
+			try {
+				const g = h5Global()
+				if (g != null && g['__callMediaPromise'] != null && Date.now() - t0 < ms + 4000) {
+					setTimeout(tick, 250)
+					return
+				}
+			} catch (eP) {}
 			if (Date.now() - t0 >= ms) {
 				resolve(false)
 				return
@@ -1271,8 +1279,15 @@ export class CallManager {
 			} else {
 				console.log('[call] room members', members.length, 'peers 0')
 				uni.showToast({ title: '对方不在房间内，无法呼叫', icon: 'none' })
+				this.hangup(false)
+				return false
 			}
-		} catch (e) {}
+		} catch (e) {
+			console.warn('[call] resolve peers fail', e)
+			uni.showToast({ title: '无法获取对方信息', icon: 'none' })
+			this.hangup(false)
+			return false
+		}
 		this.outgoingReady = true
 		this.htmlBoot = 'out'
 		this.openPage()
@@ -1577,13 +1592,12 @@ export class CallManager {
 		if (!h5HasLocalStream()) {
 			unlockH5CallMedia(this.isVideo)
 			console.log('[call] startOffer wait mic')
-			const got = await waitH5Mic(8000)
+			const got = await waitH5Mic(12000)
 			if (this.phase != 'outgoing') return
 			if (!got && !h5HasLocalStream()) {
-				console.warn('[call] startOffer mic timeout')
-				uni.showToast({ title: '无法打开麦克风', icon: 'none' })
-				this.hangup(false)
-				return
+				// 仍尝试发 offer：部分环境引擎内会再申请一次麦克风，避免卡死导致对方完全无邀请
+				console.warn('[call] startOffer mic not ready, still try offer')
+				uni.showToast({ title: '麦克风未就绪，仍尝试呼叫…', icon: 'none' })
 			}
 		}
 		// #endif
@@ -1744,7 +1758,9 @@ export class CallManager {
 		try {
 			await this.sendInvite(sdp)
 		} catch (e) {
-			uni.showToast({ title: '发起通话失败', icon: 'none' })
+			console.error('[call] trySendInvite fail', e)
+			uni.showToast({ title: '发起通话失败，对方可能收不到', icon: 'none', duration: 3500 })
+			this.hangup(false)
 		}
 	}
 
@@ -2543,9 +2559,13 @@ export class CallManager {
 				return
 			}
 			const invitee = fieldStr(content, 'invitee')
-			if (invitee.length > 0 && invitee.indexOf('@') == 0 && myId.length > 0 && invitee != myId) {
-				console.log('[call] invitee mismatch', invitee, myId)
-				return
+			if (invitee.length > 0 && invitee.indexOf('@') == 0 && myId.length > 0) {
+				const a = invitee.toLowerCase()
+				const b = myId.toLowerCase()
+				if (a != b) {
+					console.log('[call] invitee mismatch', invitee, myId)
+					return
+				}
 			}
 			const groupId = fieldStr(content, 'group_id')
 			const isGroupInvite = fieldStr(content, 'group_call') == '1' || groupId.length > 0
@@ -2839,13 +2859,6 @@ export function bindCallToMatrix(): void {
 	attachVoipSink()
 	mgr.bindMatrix()
 }
-
-}
-
-
-
-
-
 
 
 
