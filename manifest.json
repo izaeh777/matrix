@@ -38,12 +38,17 @@
 				"/_matrix": {
 					"target": "https://matrix.itiklink.com",
 					"changeOrigin": true,
-					"secure": false
+					"secure": false,
+					"timeout": 120000,
+					"proxyTimeout": 120000,
+					"ws": true
 				},
 				"/.well-known": {
 					"target": "https://matrix.itiklink.com",
 					"changeOrigin": true,
-					"secure": false
+					"secure": false,
+					"timeout": 60000,
+					"proxyTimeout": 60000
 				},
 				"/api/cms": {
 					"target": "https://m.itiklink.com",

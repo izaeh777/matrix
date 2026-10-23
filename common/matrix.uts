@@ -1071,8 +1071,13 @@ export class MatrixClient {
 			try {
 				fireState('SYNCING', '')
 				const first = this.since.length == 0
-				// 服务端长轮询最多等 20s；HTTP 必须更长，且不能超过 App 端 60s 上限
-				const query: UTSJSONObject = { timeout: first ? '0' : '20000' }
+				// H5 开发代理常在 ~15–30s 掐断长连接，timeout 过大就会 Failed to fetch，
+				// 对方收不到 invite/answer，表现为一直「等待对方接听」。
+				let syncWait = '15000'
+				// #ifdef H5
+				syncWait = '8000'
+				// #endif
+				const query: UTSJSONObject = { timeout: first ? '0' : syncWait }
 				if (this.since.length > 0) query['since'] = this.since
 				query['filter'] = '{"presence":{"not_types":["*"]},"room":{"state":{"lazy_load_members":true},"timeline":{"limit":100,"lazy_load_members":true}}}'
 				const httpMs = 60000

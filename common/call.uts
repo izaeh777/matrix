@@ -715,9 +715,35 @@ export class CallManager {
 			matrix.callPollOn = true
 		}
 		if (this.signalTimer != null) return
+		// 呼叫/振铃中加快轮询，避免 sync 闪断时一直「等待对方接听」
 		this.signalTimer = setInterval(() => {
 			this.tickSignalPoll()
-		}, 4000)
+		}, 2000)
+	}
+
+	collectPollRooms(): Array<string> {
+		const rooms: Array<string> = []
+		const push = (id: string): void => {
+			if (id.length == 0 || id == 'null') return
+			if (rooms.indexOf(id) >= 0) return
+			rooms.push(id)
+		}
+		push(this.roomId)
+		try {
+			const last = uni.getStorageSync('last_chat_room')
+			push((last != null) ? ('' + last) : '')
+		} catch (e0) {}
+		try {
+			const matrix = getMatrix()
+			if (matrix != null && matrix.listRoomsCache != null) {
+				const list = matrix.listRoomsCache.rooms
+				const max = list.length < 12 ? list.length : 12
+				for (let i = 0; i < max; i++) {
+					push(list[i].room_id)
+				}
+			}
+		} catch (e1) {}
+		return rooms
 	}
 
 	async tickSignalPoll(): Promise<void> {
@@ -726,13 +752,7 @@ export class CallManager {
 		if (matrix == null) return
 		this.signalBusy = true
 		try {
-			const rooms: Array<string> = []
-			if (this.roomId.length > 0) rooms.push(this.roomId)
-			try {
-				const last = uni.getStorageSync('last_chat_room')
-				const s = (last != null) ? ('' + last) : ''
-				if (s.length > 0 && s != 'null' && rooms.indexOf(s) < 0) rooms.push(s)
-			} catch (e0) {}
+			const rooms = this.collectPollRooms()
 			for (let i = 0; i < rooms.length; i++) {
 				const evs = await matrix.getCallEvents(rooms[i])
 				for (let j = 0; j < evs.length; j++) {
@@ -837,9 +857,12 @@ export class CallManager {
 		} catch (e0) {}
 		payload['room_id'] = rid
 		const peer = this.peerUserId.length > 0 ? this.peerUserId : this.inviteeId
-		if (peer.length > 0 && (type == 'm.call.hangup' || type == 'm.call.reject' || type == 'm.call.invite' || type == 'm.call.answer' || type == 'm.call.candidates' || type == 'm.call.negotiate')) {
+		const isSignal = type == 'm.call.hangup' || type == 'm.call.reject' || type == 'm.call.invite' || type == 'm.call.answer' || type == 'm.call.candidates' || type == 'm.call.negotiate'
+		let toDeviceOk = false
+		if (peer.length > 0 && isSignal) {
 			try {
 				await matrix.sendToDeviceUser(peer, type, payload)
+				toDeviceOk = true
 				console.log('[call] to-device', type, '->', peer)
 			} catch (e2) {
 				console.warn('[call] to-device fail', type, e2)
@@ -851,8 +874,14 @@ export class CallManager {
 			await matrix.sendRawEvent(rid, type, payload, matrix.genTxnId())
 			console.log('[call] sent', type)
 		} catch (e) {
-			console.error('[call] send fail', type, e)
-			if (type != 'm.call.candidates') throw e
+			console.error('[call] room send fail', type, e)
+			// 通话信令：to-device 已成功则房间事件失败不阻断（SDP 过大等）
+			if (type == 'm.call.candidates') return
+			if (isSignal && toDeviceOk) {
+				console.warn('[call] room signal failed but to-device ok, continue', type)
+				return
+			}
+			throw e
 		}
 	}
 
