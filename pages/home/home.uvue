@@ -365,7 +365,8 @@
 		margin: 8rpx 24rpx 28rpx;
 		background-color: #eaf3ff;
 		border-radius: 28rpx;
-		padding: 28rpx 20rpx 24rpx 28rpx;
+		padding: 44rpx 20rpx 40rpx 28rpx;
+		min-height: 280rpx;
 		flex-direction: row;
 		align-items: center;
 		overflow: hidden;
@@ -382,8 +383,8 @@
 	.banner-sub {
 		font-size: 20rpx;
 		color: #6b8fc4;
-		margin-top: 12rpx;
-		margin-bottom: 22rpx;
+		margin-top: 16rpx;
+		margin-bottom: 28rpx;
 	}
 	.banner-actions {
 		flex-direction: row;
@@ -414,9 +415,9 @@
 		font-weight: 600;
 	}
 	.banner-mascot {
-		width: 180rpx;
-		height: 220rpx;
-		margin-left: 8rpx;
+		width: 260rpx;
+		height: 320rpx;
+		margin-left: 4rpx;
 	}
 	.section {
 		padding: 0 24rpx 28rpx;

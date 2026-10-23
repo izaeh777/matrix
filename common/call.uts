@@ -230,27 +230,68 @@ function preloadH5EngineJs(): void {
 		if (g['__callJson'] != null) return
 		if (g['__callEngineFetching'] == true) return
 		g['__callEngineFetching'] = true
-		uni.request({
-			url: '/static/call-engine.js',
-			method: 'GET',
-			dataType: 'text',
-			success: (res) => {
-				try {
-					if (g['__callJson'] != null) return
-					const code = '' + res.data
-					const ev = g['eval']
-					if (ev != null) ev(code)
-					console.log('[call] preload engine', code.length)
-				} catch (eEval) {
-					g['__callEngineFetching'] = false
-					console.warn('[call] preload engine fail', eEval)
-				}
-			},
-			fail: () => {
-				g['__callEngineFetching'] = false
-				console.warn('[call] preload engine fetch fail')
+		const urls: Array<string> = ['/static/call-engine.js', './static/call-engine.js', 'static/call-engine.js']
+		try {
+			const loc = g['location']
+			if (loc != null && loc.origin != null) {
+				urls.push('' + loc.origin + '/static/call-engine.js')
 			}
-		})
+		} catch (eLoc) {}
+		let idx = 0
+		const tryUrl = (): void => {
+			if (g['__callJson'] != null) return
+			if (idx >= urls.length) {
+				g['__callEngineFetching'] = false
+				console.warn('[call] preload engine all failed')
+				return
+			}
+			const url = urls[idx]
+			idx = idx + 1
+			uni.request({
+				url: url,
+				method: 'GET',
+				dataType: 'text',
+				success: (res) => {
+					try {
+						if (g['__callJson'] != null) return
+						const code = '' + res.data
+						const trim = code.replace(/^\s+/, '')
+						if (trim.length < 20 || trim.charAt(0) == '<') {
+							console.warn('[call] preload got html, try next', url)
+							tryUrl()
+							return
+						}
+						const ev = g['eval']
+						if (ev != null) ev(code)
+						console.log('[call] preload engine', code.length, url)
+					} catch (eEval) {
+						console.warn('[call] preload engine fail', eEval)
+						tryUrl()
+					}
+				},
+				fail: () => {
+					tryUrl()
+				}
+			})
+		}
+		// 优先用 script 标签，避免 eval 到 SPA 的 HTML
+		try {
+			const doc = g['document']
+			if (doc != null && doc.getElementById('callEngineScript') == null) {
+				const s = doc.createElement('script')
+				s.id = 'callEngineScript'
+				s.src = urls[0]
+				s.onload = (): void => {
+					console.log('[call] preload engine script ok')
+				}
+				s.onerror = (): void => {
+					tryUrl()
+				}
+				doc.head.appendChild(s)
+				return
+			}
+		} catch (eScript) {}
+		tryUrl()
 	} catch (e) {}
 	// #endif
 }

@@ -98,51 +98,101 @@
 		// #endif
 		return false
 	}
+	function h5EngineUrls(): Array<string> {
+		const out: Array<string> = []
+		const push = (u: string): void => {
+			if (u.length == 0) return
+			if (out.indexOf(u) >= 0) return
+			out.push(u)
+		}
+		push('/static/call-engine.js')
+		push('./static/call-engine.js')
+		push('static/call-engine.js')
+		try {
+			const loc = (window as any).location
+			if (loc != null && loc.origin != null) {
+				push('' + loc.origin + '/static/call-engine.js')
+			}
+		} catch (e0) {}
+		return out
+	}
+	function injectH5EngineScript(src: string, onDone: (ok: boolean) => void): void {
+		// #ifdef H5
+		try {
+			const doc = (window as any).document
+			const old = doc.getElementById('callEngineScript')
+			if (old != null) {
+				try { old.parentNode.removeChild(old) } catch (eR) {}
+			}
+			const s = doc.createElement('script')
+			s.id = 'callEngineScript'
+			s.src = src
+			s.onload = (): void => { onDone(true) }
+			s.onerror = (): void => { onDone(false) }
+			doc.head.appendChild(s)
+		} catch (e) {
+			onDone(false)
+		}
+		// #endif
+	}
 	function fetchH5Engine(): void {
 		// #ifdef H5
 		if (h5EngineFetch) return
 		if (noteH5Ready()) return
 		h5EngineFetch = true
-		uni.request({
-			url: '/static/call-engine.js',
-			method: 'GET',
-			dataType: 'text',
-			success: (res) => {
-				try {
-					const win = window as any
-					if (win.__callJson != null) {
-						noteH5Ready()
-						kickEngine()
-						return
-					}
-					const code = '' + res.data
-					win.eval(code)
-					console.log('[call] h5 engine eval', code.length)
-					noteH5Ready()
-					kickEngine()
-				} catch (eEval) {
-					h5EngineFetch = false
-					console.warn('[call] engine eval fail', eEval)
-				}
-			},
-			fail: () => {
+		const urls = h5EngineUrls()
+		let idx = 0
+		const tryNext = (): void => {
+			if (noteH5Ready()) return
+			if (idx >= urls.length) {
 				h5EngineFetch = false
-				console.warn('[call] engine fetch fail')
-				try {
-					const doc2 = (window as any).document
-					if (doc2.getElementById('callEngineScript') == null) {
-						const s = doc2.createElement('script')
-						s.id = 'callEngineScript'
-						s.src = '/static/call-engine.js'
-						s.onload = (): void => {
+				console.warn('[call] engine script all urls failed')
+				return
+			}
+			const url = urls[idx]
+			idx = idx + 1
+			console.log('[call] load engine script', url)
+			injectH5EngineScript(url, (ok: boolean): void => {
+				if (ok && noteH5Ready()) {
+					kickEngine()
+					return
+				}
+				// request 文本兜底：必须是 JS，不能是 HTML（SPA 回退页）
+				uni.request({
+					url: url,
+					method: 'GET',
+					dataType: 'text',
+					success: (res) => {
+						try {
+							const win = window as any
+							if (win.__callJson != null) {
+								noteH5Ready()
+								kickEngine()
+								return
+							}
+							const code = '' + res.data
+							const trim = code.replace(/^\s+/, '')
+							if (trim.length < 20 || trim.charAt(0) == '<') {
+								console.warn('[call] engine url returned html, skip', url)
+								tryNext()
+								return
+							}
+							win.eval(code)
+							console.log('[call] h5 engine eval', code.length)
 							noteH5Ready()
 							kickEngine()
+						} catch (eEval) {
+							console.warn('[call] engine eval fail', eEval)
+							tryNext()
 						}
-						doc2.head.appendChild(s)
+					},
+					fail: () => {
+						tryNext()
 					}
-				} catch (eScript) {}
-			}
-		})
+				})
+			})
+		}
+		tryNext()
 		// #endif
 	}
 	function bindH5IFrame(): boolean {
