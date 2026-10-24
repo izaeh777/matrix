@@ -1,7 +1,7 @@
 <template>
 	<view class="home-page">
 		<view class="home-top">
-			<text class="brand">i-tiklink</text>
+			<image class="brand-logo" src="/static/login/logo.png" mode="aspectFit"></image>
 			<view class="user-pill">
 				<view class="pill-user" @click="goProfile">
 					<image class="pill-avatar" :src="avatarUrl" mode="aspectFill"></image>
@@ -18,8 +18,9 @@
 			<view class="banner">
 				<view class="banner-left">
 					<text class="banner-title">发现优质项目</text>
-					<text class="banner-title">链接无限商机</text>
-					<text class="banner-sub">Web3 项目提示·交流·合作·共赢平台</text>
+					<text class="banner-title banner-title-2">链接无限商机</text>
+					<text class="banner-sub">Web3 项目提示·交流·合作·共赢</text>
+					<text class="banner-sub banner-sub-2">平台</text>
 					<view class="banner-actions">
 						<view class="btn-solid" @click="goPublish">
 							<text class="btn-solid-text">发布项目</text>
@@ -29,7 +30,9 @@
 						</view>
 					</view>
 				</view>
-				<image class="banner-mascot" src="/static/login/tiki.png" mode="aspectFit"></image>
+				<view class="banner-mascot-wrap">
+					<image class="banner-mascot" src="/static/login/jux.png" mode="aspectFit"></image>
+				</view>
 			</view>
 
 			<view class="section">
@@ -309,10 +312,9 @@
 		justify-content: space-between;
 		padding: 60rpx 28rpx 16rpx;
 	}
-	.brand {
-		font-size: 40rpx;
-		font-weight: 800;
-		color: #1d6ef5;
+	.brand-logo {
+		width: 220rpx;
+		height: 52rpx;
 	}
 	.user-pill {
 		flex-direction: row;
@@ -362,28 +364,38 @@
 		height: 0;
 	}
 	.banner {
-		margin: 8rpx 24rpx 28rpx;
-		background-color: #eaf3ff;
-		border-radius: 28rpx;
-		padding: 44rpx 20rpx 40rpx 28rpx;
-		min-height: 280rpx;
+		margin: 8rpx 28rpx 32rpx;
+		background-color: #e8f3ff;
+		border-radius: 24rpx;
+		padding: 40rpx 8rpx 36rpx 32rpx;
+		min-height: 320rpx;
 		flex-direction: row;
 		align-items: center;
 		overflow: hidden;
+		position: relative;
 	}
 	.banner-left {
 		flex: 1;
+		z-index: 2;
+		padding-right: 280rpx;
 	}
 	.banner-title {
-		font-size: 36rpx;
+		font-size: 44rpx;
 		font-weight: 800;
-		color: #1a4fb8;
-		line-height: 48rpx;
+		color: #1e5ad7;
+		line-height: 58rpx;
+	}
+	.banner-title-2 {
+		margin-top: 2rpx;
 	}
 	.banner-sub {
-		font-size: 20rpx;
-		color: #6b8fc4;
-		margin-top: 16rpx;
+		font-size: 22rpx;
+		color: #1a1a1a;
+		line-height: 34rpx;
+		margin-top: 18rpx;
+	}
+	.banner-sub-2 {
+		margin-top: 0;
 		margin-bottom: 28rpx;
 	}
 	.banner-actions {
@@ -392,32 +404,49 @@
 	}
 	.btn-solid {
 		background-color: #2f6ff2;
-		border-radius: 28rpx;
-		padding: 12rpx 26rpx;
-		margin-right: 14rpx;
+		border-radius: 12rpx;
+		height: 56rpx;
+		padding: 0 28rpx;
+		margin-right: 16rpx;
+		justify-content: center;
+		align-items: center;
 	}
 	.btn-solid-text {
 		font-size: 24rpx;
 		color: #ffffff;
 		font-weight: 600;
+		line-height: 24rpx;
 	}
 	.btn-outline {
 		background-color: #ffffff;
-		border-radius: 28rpx;
-		padding: 12rpx 26rpx;
-		border-width: 1rpx;
+		border-radius: 12rpx;
+		height: 56rpx;
+		padding: 0 28rpx;
+		border-width: 2rpx;
 		border-color: #2f6ff2;
 		border-style: solid;
+		justify-content: center;
+		align-items: center;
 	}
 	.btn-outline-text {
 		font-size: 24rpx;
 		color: #2f6ff2;
 		font-weight: 600;
+		line-height: 24rpx;
+	}
+	.banner-mascot-wrap {
+		position: absolute;
+		right: -24rpx;
+		bottom: -56rpx;
+		width: 380rpx;
+		height: 420rpx;
+		z-index: 1;
+		align-items: center;
+		justify-content: flex-end;
 	}
 	.banner-mascot {
-		width: 260rpx;
-		height: 320rpx;
-		margin-left: 4rpx;
+		width: 380rpx;
+		height: 420rpx;
 	}
 	.section {
 		padding: 0 24rpx 28rpx;
@@ -514,9 +543,9 @@
 		position: absolute;
 		left: 0;
 		right: 0;
-		bottom: 0;
+		top: 0;
 		padding: 24rpx;
-		background-color: rgba(15, 40, 100, 0.35);
+		background-color: transparent;
 	}
 	.project-name {
 		font-size: 34rpx;

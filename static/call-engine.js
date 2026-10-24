@@ -82,12 +82,9 @@ function runAnswer() {
   safePlay(document.getElementById('remoteAudio'))
   if (started) return
   var sdp = pendingSdp
-  if (!sdp) {
-    console.log('[engine] runAnswer wait sdp')
-    media(pendingVideo).then(function (stream) {
-      localStream = stream
-      console.log('[engine] media unlocked, wait sdp')
-    }).catch(function (e) { failMedia(e) })
+  // LiveKit 占位 SDP，不走旧 WebRTC answer
+  if (!sdp || sdp === 'livekit' || (sdp.length < 20 && sdp.indexOf('v=0') < 0)) {
+    console.log('[engine] runAnswer skip webrtc, sdp=', (sdp || '').length)
     return
   }
   started = true
@@ -766,6 +763,27 @@ window.__callJson = function (msg) {
     try { msg = JSON.parse(msg) } catch (e0) { return }
   }
   var cmd = msg.cmd
+  // LiveKit 命令：转给 livekit-engine（避免后加载的 call-engine 盖掉 __callJson 后丢指令）
+  if (cmd === 'lkConnect' || cmd === 'lkHang' || cmd === 'lkMute' || cmd === 'lkCamera') {
+    try {
+      if (typeof window.__lkHandle === 'function') {
+        window.__lkHandle(msg)
+        return
+      }
+      if (cmd === 'lkConnect' && typeof window.__lkConnect === 'function') {
+        window.__lkConnect(msg)
+        return
+      }
+      if (cmd === 'lkHang' && typeof window.__lkHang === 'function') {
+        window.__lkHang()
+        return
+      }
+    } catch (eLk) {
+      console.warn('[engine] lk forward fail', eLk)
+    }
+    console.warn('[engine] livekit engine not ready for', cmd)
+    return
+  }
   saveAuth(msg)
   if (cmd === 'ui') {
     setUi(msg)

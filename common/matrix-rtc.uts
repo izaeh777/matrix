@@ -1,0 +1,302 @@
+/**
+ * MatrixRTC / LiveKit（兼容 Element Call）
+ * Matrix API 一律走 matrix.request（已验证可用）；
+ * 仅 /livekit/jwt/sfu/get 用 fetch（CORS *）。
+ */
+import { getMatrix, jsonStr, jsonArr, jsonNum, errText } from './matrix.uts'
+
+export const RTC_MEMBER_TYPE = 'org.matrix.msc3401.call.member'
+export const RTC_NOTIFY_TYPE = 'org.matrix.msc4075.rtc.notification'
+
+let cachedFociUrl: string = ''
+let cachedFociAt: number = 0
+
+export function rtcMemberStateKey(userId: string, deviceId: string): string {
+	return '_' + userId + '_' + deviceId
+}
+
+/** 手写 JSON → 经 matrix.request 发送（避免裸 fetch 的 CORS/失败，也避免 UTS 嵌套序列化损坏） */
+async function putJsonViaMatrix(path: string, bodyText: string): Promise<UTSJSONObject> {
+	const matrix = getMatrix()
+	if (matrix == null) throw new Error('未登录')
+	let obj: UTSJSONObject = {}
+	try {
+		obj = JSON.parse(bodyText) as UTSJSONObject
+	} catch (e) {
+		throw new Error('body JSON 无效')
+	}
+	return (await matrix.request('PUT', path, obj)) as UTSJSONObject
+}
+
+export async function discoverLivekitServiceUrl(): Promise<string> {
+	if (cachedFociUrl.length > 0 && Date.now() - cachedFociAt < 10 * 60 * 1000) {
+		return cachedFociUrl
+	}
+	const matrix = getMatrix()
+	if (matrix == null) return ''
+	const hs = matrix.homeserver.replace(/\/$/, '')
+	if (hs.length == 0) return ''
+
+	// itiklink：.well-known 常无 CORS，直接用已知路径
+	if (hs.indexOf('itiklink.com') >= 0) {
+		cachedFociUrl = hs + '/livekit/jwt'
+		cachedFociAt = Date.now()
+		console.log('[rtc] foci', cachedFociUrl)
+		return cachedFociUrl
+	}
+
+	try {
+		const data = (await matrix.request('GET', '/.well-known/matrix/client', null)) as UTSJSONObject
+		const foci = jsonArr(data, 'org.matrix.msc4143.rtc_foci')
+		for (let i = 0; i < foci.length; i++) {
+			const f = foci[i]
+			if (jsonStr(f, 'type') != 'livekit') continue
+			const url = jsonStr(f, 'livekit_service_url')
+			if (url.length > 0) {
+				cachedFociUrl = url.replace(/\/$/, '')
+				cachedFociAt = Date.now()
+				console.log('[rtc] foci', cachedFociUrl)
+				return cachedFociUrl
+			}
+		}
+	} catch (e) {
+		console.warn('[rtc] well-known fail', errText(e, 'fail'))
+	}
+	return ''
+}
+
+function withTimeout(p: Promise<UTSJSONObject>, ms: number, label: string): Promise<UTSJSONObject> {
+	return new Promise((resolve, reject) => {
+		let done = false
+		const timer = setTimeout(() => {
+			if (done) return
+			done = true
+			reject(new Error(label + ' 超时(' + ms + 'ms)'))
+		}, ms)
+		p.then((v: UTSJSONObject) => {
+			if (done) return
+			done = true
+			clearTimeout(timer)
+			resolve(v)
+		}).catch((e: any | null) => {
+			if (done) return
+			done = true
+			clearTimeout(timer)
+			reject(e)
+		})
+	})
+}
+
+export async function requestOpenIdToken(): Promise<UTSJSONObject> {
+	const matrix = getMatrix()
+	if (matrix == null) throw new Error('未登录')
+	const uid = matrix.userId
+	if (uid.length == 0) throw new Error('无用户')
+	const path = '/_matrix/client/v3/user/' + encodeURIComponent(uid) + '/openid/request_token'
+	console.log('[rtc] openid request start')
+	const empty: UTSJSONObject = {}
+	const data = await withTimeout(
+		matrix.request('POST', path, empty, null, 12000) as Promise<UTSJSONObject>,
+		14000,
+		'OpenID'
+	)
+	const tok = jsonStr(data, 'access_token')
+	console.log('[rtc] openid ok tokenLen=', tok.length, 'server=', jsonStr(data, 'matrix_server_name'))
+	if (tok.length == 0) throw new Error('OpenID 无 access_token')
+	return data
+}
+
+export type LivekitSfuConfig = {
+	url: string
+	jwt: string
+}
+
+function fetchWithTimeout(url: string, init: any, ms: number): Promise<any> {
+	return new Promise((resolve, reject) => {
+		let done = false
+		const timer = setTimeout(() => {
+			if (done) return
+			done = true
+			reject(new Error('timeout ' + ms + 'ms'))
+		}, ms)
+		fetch(url, init).then((res: any) => {
+			if (done) return
+			done = true
+			clearTimeout(timer)
+			resolve(res)
+		}).catch((err: any) => {
+			if (done) return
+			done = true
+			clearTimeout(timer)
+			reject(err)
+		})
+	})
+}
+
+export async function fetchLivekitJwt(roomId: string, serviceUrl: string): Promise<LivekitSfuConfig> {
+	const matrix = getMatrix()
+	if (matrix == null) throw new Error('未登录')
+	const openid = await requestOpenIdToken()
+	const oidToken = jsonStr(openid, 'access_token')
+	const oidType = jsonStr(openid, 'token_type')
+	const oidServer = jsonStr(openid, 'matrix_server_name')
+	const oidExp = jsonNum(openid, 'expires_in')
+	let serverName = oidServer
+	if (serverName.length == 0) {
+		const uid = matrix.userId
+		const colon = uid.lastIndexOf(':')
+		if (colon > 0) serverName = uid.substring(colon + 1)
+	}
+	let bodyText = '{"room":' + JSON.stringify(roomId)
+	bodyText += ',"device_id":' + JSON.stringify(matrix.deviceId)
+	bodyText += ',"openid_token":{'
+	bodyText += '"access_token":' + JSON.stringify(oidToken)
+	bodyText += ',"token_type":' + JSON.stringify(oidType.length > 0 ? oidType : 'Bearer')
+	bodyText += ',"matrix_server_name":' + JSON.stringify(serverName)
+	bodyText += ',"expires_in":' + (oidExp > 0 ? ('' + Math.floor(oidExp)) : '3600')
+	bodyText += '}}'
+	const base = serviceUrl.replace(/\/$/, '')
+	const endpoint = base + '/sfu/get'
+	console.log('[rtc] sfu/get', endpoint, 'server=', serverName)
+
+	// #ifdef H5
+	const res = await fetchWithTimeout(endpoint, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: bodyText,
+		mode: 'cors',
+		credentials: 'omit'
+	}, 15000)
+	const text = await res.text()
+	console.log('[rtc] sfu/get status', res.status, 'len', text.length)
+	if (!res.ok) {
+		throw new Error('SFU JWT HTTP' + res.status + ' ' + text.substring(0, 120))
+	}
+	let data: UTSJSONObject = {}
+	try {
+		data = JSON.parse(text) as UTSJSONObject
+	} catch (eParse) {
+		throw new Error('SFU JWT 非 JSON')
+	}
+	const url = jsonStr(data, 'url')
+	const jwt = jsonStr(data, 'jwt')
+	if (url.length == 0 || jwt.length == 0) {
+		throw new Error('SFU JWT 缺 url/jwt')
+	}
+	console.log('[rtc] sfu ok', url.substring(0, 64))
+	return { url: url, jwt: jwt }
+	// #endif
+	// #ifndef H5
+	throw new Error('当前平台暂不支持 LiveKit')
+	// #endif
+}
+
+export function buildMembershipBody(serviceUrl: string, roomId: string, isVideo: boolean, membershipId: string): string {
+	const matrix = getMatrix()
+	const deviceId = matrix != null ? matrix.deviceId : ''
+	let text = '{'
+	text += '"application":"m.call"'
+	text += ',"call_id":""'
+	text += ',"scope":"m.room"'
+	text += ',"device_id":' + JSON.stringify(deviceId)
+	text += ',"membershipID":' + JSON.stringify(membershipId)
+	text += ',"created_ts":' + Date.now().toString()
+	text += ',"expires":3600000'
+	text += ',"foci_preferred":[{'
+	text += '"type":"livekit"'
+	text += ',"livekit_service_url":' + JSON.stringify(serviceUrl)
+	text += ',"livekit_alias":' + JSON.stringify(roomId)
+	text += '}]'
+	text += ',"focus_active":{"type":"livekit","focus_selection":"oldest_membership"}'
+	text += ',"m.call.intent":' + JSON.stringify(isVideo ? 'video' : 'audio')
+	text += '}'
+	return text
+}
+
+export async function putCallMembership(roomId: string, serviceUrl: string, isVideo: boolean, membershipId: string): Promise<string> {
+	const matrix = getMatrix()
+	if (matrix == null) throw new Error('未登录')
+	const key = rtcMemberStateKey(matrix.userId, matrix.deviceId)
+	const path = '/_matrix/client/v3/rooms/' + encodeURIComponent(roomId) + '/state/' + encodeURIComponent(RTC_MEMBER_TYPE) + '/' + encodeURIComponent(key)
+	const body = buildMembershipBody(serviceUrl, roomId, isVideo, membershipId)
+	console.log('[rtc] membership put')
+	const data = await putJsonViaMatrix(path, body)
+	const eid = jsonStr(data, 'event_id')
+	console.log('[rtc] membership put ok', eid.length > 0 ? eid : '(no id)')
+	return eid
+}
+
+export async function clearCallMembership(roomId: string): Promise<void> {
+	const matrix = getMatrix()
+	if (matrix == null) return
+	if (roomId.length == 0) return
+	try {
+		const key = rtcMemberStateKey(matrix.userId, matrix.deviceId)
+		const path = '/_matrix/client/v3/rooms/' + encodeURIComponent(roomId) + '/state/' + encodeURIComponent(RTC_MEMBER_TYPE) + '/' + encodeURIComponent(key)
+		await putJsonViaMatrix(path, '{}')
+		console.log('[rtc] membership cleared')
+	} catch (e) {
+		console.warn('[rtc] clear membership fail', errText(e, 'fail'))
+	}
+}
+
+export async function sendRtcNotification(roomId: string, membershipEventId: string, peerUserId: string, isVideo: boolean): Promise<void> {
+	const matrix = getMatrix()
+	if (matrix == null) return
+	let text = '{'
+	text += '"notification_type":"ring"'
+	text += ',"sender_ts":' + Date.now().toString()
+	text += ',"lifetime":90000'
+	text += ',"slot_id":"m.call#ROOM"'
+	text += ',"m.call.intent":' + JSON.stringify(isVideo ? 'video' : 'audio')
+	if (peerUserId.length > 0) {
+		text += ',"m.mentions":{"user_ids":[' + JSON.stringify(peerUserId) + '],"room":false}'
+	} else {
+		text += ',"m.mentions":{"room":true}'
+	}
+	if (membershipEventId.length > 0) {
+		text += ',"m.relates_to":{"rel_type":"m.reference","event_id":' + JSON.stringify(membershipEventId) + '}'
+	}
+	text += '}'
+	const txn = matrix.genTxnId()
+	const path = '/_matrix/client/v3/rooms/' + encodeURIComponent(roomId) + '/send/' + encodeURIComponent(RTC_NOTIFY_TYPE) + '/' + encodeURIComponent(txn)
+	await putJsonViaMatrix(path, text)
+	console.log('[rtc] notification sent')
+}
+
+export function membershipHasLivekit(content: UTSJSONObject): boolean {
+	const foci = jsonArr(content, 'foci_preferred')
+	for (let i = 0; i < foci.length; i++) {
+		if (jsonStr(foci[i], 'type') == 'livekit') return true
+	}
+	const app = jsonStr(content, 'application')
+	if (app == 'm.call' && jsonStr(content, 'device_id').length > 0) return true
+	return false
+}
+
+export function membershipServiceUrl(content: UTSJSONObject, fallback: string): string {
+	const foci = jsonArr(content, 'foci_preferred')
+	for (let i = 0; i < foci.length; i++) {
+		const f = foci[i]
+		if (jsonStr(f, 'type') != 'livekit') continue
+		const u = jsonStr(f, 'livekit_service_url')
+		if (u.length > 0) return u.replace(/\/$/, '')
+	}
+	return fallback
+}
+
+export function isRtcNotifyEvent(type: string): boolean {
+	return type == RTC_NOTIFY_TYPE || type == 'org.matrix.msc4075.call.notify' || type == 'm.rtc.notification'
+}
+
+export function isRtcMemberEvent(type: string): boolean {
+	return type == RTC_MEMBER_TYPE || type == 'm.call.member' || type == 'm.rtc.member'
+}
+
+export function rtcErrShort(e: any | null): string {
+	let s = errText(e, '未知错误')
+	if (s.length > 60) s = s.substring(0, 60) + '…'
+	return s
+}

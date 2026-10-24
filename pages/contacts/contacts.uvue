@@ -36,7 +36,7 @@
 					<image
 						class="avatar"
 						:src="getAvatar(user)"
-						fallback="/static/logo.png"
+						fallback="/static/login/tiki.png"
 					></image>
 					<view class="presence-dot" :class="getPresenceClass(user.user_id)"></view>
 				</view>
@@ -142,11 +142,12 @@
 
 	function getAvatar(user: DirectoryUser): string {
 		const matrix = getMatrix()
-		if (matrix == null) return '/static/logo.png'
+		if (matrix == null) return '/static/login/tiki.png'
 		if (user.avatar_url.length > 0) {
-			return matrix.mxcToHttp(user.avatar_url, 80, 80)
+			const http = matrix.mxcToHttp(user.avatar_url, 80, 80)
+			if (http.length > 0) return http
 		}
-		return '/static/logo.png'
+		return '/static/login/tiki.png'
 	}
 
 	function getPresenceClass(userId: string): string {

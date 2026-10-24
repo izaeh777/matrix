@@ -58,7 +58,7 @@
 					<view class="upload-box" @click="pickImage('logo')">
 						<image v-if="logo.length > 0" class="upload-img" :src="logo" mode="aspectFill"></image>
 						<view v-else class="upload-empty">
-							<text class="upload-ico">↑</text>
+							<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
 							<text class="upload-txt">上传logo</text>
 						</view>
 					</view>
@@ -70,7 +70,7 @@
 					<view class="upload-box" @click="pickImage('cover')">
 						<image v-if="cover.length > 0" class="upload-img" :src="cover" mode="aspectFill"></image>
 						<view v-else class="upload-empty">
-							<text class="upload-ico">↑</text>
+							<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
 							<text class="upload-txt">上传封面</text>
 						</view>
 					</view>
@@ -98,7 +98,7 @@
 					<view class="upload-box" @click="pickImage('material')">
 						<image v-if="material.length > 0" class="upload-img" :src="material" mode="aspectFill"></image>
 						<view v-else class="upload-empty">
-							<text class="upload-ico">↑</text>
+							<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
 							<text class="upload-txt">上传资料</text>
 						</view>
 					</view>
@@ -109,7 +109,7 @@
 					<view class="upload-box" @click="pickImage('cover')">
 						<image v-if="cover.length > 0" class="upload-img" :src="cover" mode="aspectFill"></image>
 						<view v-else class="upload-empty">
-							<text class="upload-ico">↑</text>
+							<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
 							<text class="upload-txt">上传封面</text>
 						</view>
 					</view>
@@ -477,9 +477,9 @@
 	.upload-empty {
 		align-items: center;
 	}
-	.upload-ico {
-		font-size: 36rpx;
-		color: #9aa3af;
+	.upload-ico-img {
+		width: 48rpx;
+		height: 48rpx;
 		margin-bottom: 8rpx;
 	}
 	.upload-txt {

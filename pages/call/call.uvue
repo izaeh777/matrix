@@ -116,6 +116,46 @@
 		} catch (e0) {}
 		return out
 	}
+	function injectScriptOnce(id: string, src: string, onDone: (ok: boolean) => void): void {
+		// #ifdef H5
+		try {
+			const doc = (window as any).document
+			const exist = doc.getElementById(id)
+			if (exist != null) {
+				onDone(true)
+				return
+			}
+			const s = doc.createElement('script')
+			s.id = id
+			s.src = src
+			s.onload = (): void => { onDone(true) }
+			s.onerror = (): void => { onDone(false) }
+			doc.head.appendChild(s)
+		} catch (e) {
+			onDone(false)
+		}
+		// #endif
+	}
+	function ensureLivekitScripts(done: () => void): void {
+		// #ifdef H5
+		// 必须在 call-engine 之后加载，以便包装 __callJson
+		injectScriptOnce('livekitClientScript', '/static/livekit-client.umd.js', (_ok0: boolean): void => {
+			// 允许重复注入 engine 以重新 wrap
+			try {
+				const doc = (window as any).document
+				const old = doc.getElementById('livekitEngineScript')
+				if (old != null) {
+					try { old.parentNode.removeChild(old) } catch (eR) {}
+				}
+			} catch (e0) {}
+			injectScriptOnce('livekitEngineScript', '/static/livekit-engine.js?t=' + Date.now(), (_ok1: boolean): void => {
+				done()
+			})
+		})
+		return
+		// #endif
+		done()
+	}
 	function injectH5EngineScript(src: string, onDone: (ok: boolean) => void): void {
 		// #ifdef H5
 		try {
@@ -127,7 +167,10 @@
 			const s = doc.createElement('script')
 			s.id = 'callEngineScript'
 			s.src = src
-			s.onload = (): void => { onDone(true) }
+			s.onload = (): void => {
+				// call-engine 覆盖 __callJson 后再挂 LiveKit
+				ensureLivekitScripts((): void => { onDone(true) })
+			}
 			s.onerror = (): void => { onDone(false) }
 			doc.head.appendChild(s)
 		} catch (e) {
@@ -210,8 +253,9 @@
 				remote.setAttribute('autoplay', 'true')
 				remote.setAttribute('playsinline', 'true')
 				remote.setAttribute('webkit-playsinline', 'true')
+				// muted 便于自动播放；画面仍可显示
 				remote.muted = true
-				remote.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;background:#111;pointer-events:none;'
+				remote.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;background:#111;pointer-events:none;z-index:1;opacity:1;visibility:visible;'
 				const local = doc.createElement('video')
 				local.id = 'local'
 				local.setAttribute('autoplay', 'true')
@@ -260,6 +304,7 @@
 						let payload = ''
 						if (d.sdp != null) payload = '' + d.sdp
 						else if (d.message != null) payload = '' + d.message
+						else if (d.reason != null) payload = '' + d.reason
 						else if (d.action != null) payload = '' + d.action
 						else if (d.candidate != null) payload = '' + d.candidate
 						const cand: UTSJSONObject = {}
@@ -287,7 +332,7 @@
 	function avatarSrc(): string {
 		const a = ui.value.peerAvatar
 		if (a.length > 0) return a
-		return '/static/logo.png'
+		return '/static/login/tiki.png'
 	}
 
 	function tickDur(): void {
@@ -491,6 +536,11 @@
 
 	function runEngineCmd(): void {
 		const mgr = getCallManager()
+		if (mgr.useLivekit) {
+			if (mgr.phase == 'outgoing') mgr.placeOutgoing()
+			else mgr.pushUi()
+			return
+		}
 		if (mgr.phase == 'outgoing') {
 			mgr.placeOutgoing()
 		} else if (mgr.phase == 'connecting') {
@@ -688,8 +738,9 @@
 			const cand: UTSJSONObject = {}
 			if (kind == 'offer' || kind == 'answer') {
 				payload = takeWebStr(o, 'sdp')
-			} else if (kind == 'error') {
+			} else if (kind == 'error' || kind == 'failed') {
 				payload = takeWebStr(o, 'message')
+				if (payload.length == 0) payload = takeWebStr(o, 'reason')
 			} else if (kind == 'ice') {
 				payload = takeWebStr(o, 'candidate')
 				cand['sdpMid'] = takeWebStr(o, 'sdpMid')
@@ -949,17 +1000,21 @@
 		flex-wrap: wrap;
 	}
 	.call-btn {
-		padding: 20rpx 36rpx;
+		padding: 0 36rpx;
+		height: 72rpx;
 		border-radius: 48rpx;
 		margin: 0 12rpx 16rpx;
 		min-width: 140rpx;
+		flex-direction: row;
+		justify-content: center;
 		align-items: center;
 	}
 	.call-btn-accept { background-color: #07c160; }
 	.call-btn-hang {
 		background-color: #fa5151;
 		min-width: 240rpx;
-		padding: 28rpx 48rpx;
+		height: 88rpx;
+		padding: 0 48rpx;
 	}
 	.call-btn-mute { background-color: #4a4a4a; }
 	.call-btn-cam { background-color: #4a4a4a; }
@@ -967,5 +1022,7 @@
 		color: #ffffff;
 		font-size: 28rpx;
 		font-weight: 600;
+		line-height: 28rpx;
+		text-align: center;
 	}
 </style>

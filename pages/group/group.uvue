@@ -133,13 +133,13 @@
 
 	function memberAvatar(m: RoomMember): string {
 		const matrix = getMatrix()
-		if (matrix == null) return '/static/logo.png'
+		if (matrix == null) return '/static/login/tiki.png'
 		const av = m.avatar_url
 		if (av != null && av.length > 0) {
 			const http = matrix.mxcToHttp(av, 80, 80)
 			if (http.length > 0) return http
 		}
-		return '/static/logo.png'
+		return '/static/login/tiki.png'
 	}
 
 	async function loadInfo(): Promise<void> {

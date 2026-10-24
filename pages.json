@@ -45,7 +45,7 @@
 		{
 			"path": "pages/rooms/rooms",
 			"style": {
-				"navigationBarTitleText": "消息中心",
+				"navigationBarTitleText": "聊天",
 				"navigationStyle": "custom",
 				"navigationBarBackgroundColor": "#F3F8FE",
 				"backgroundColor": "#F3F8FE",

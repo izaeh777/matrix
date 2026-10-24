@@ -2,7 +2,7 @@
 	<view class="rooms-page">
 		<view class="msg-header">
 			<view class="msg-header-row">
-				<text class="msg-title">消息中心</text>
+				<text class="msg-title">聊天</text>
 				<view class="header-actions">
 					<text class="header-ico header-search" @click="onSearch">⌕</text>
 					<text class="header-ico" @click="onJoin">＋</text>
@@ -328,12 +328,12 @@
 			const other = room.other_avatar
 			if (other != null && other.length > 0) a = other
 		}
-		if (a == null || a.length == 0) return '/static/logo.png'
+		if (a == null || a.length == 0) return '/static/login/tiki.png'
 		if (a.indexOf('http://') == 0 || a.indexOf('https://') == 0) return a
 		const matrix = getMatrix()
-		if (matrix == null) return '/static/logo.png'
+		if (matrix == null) return '/static/login/tiki.png'
 		const http = matrix.mxcToHttp(a, 96, 96)
-		if (http.length == 0) return '/static/logo.png'
+		if (http.length == 0) return '/static/login/tiki.png'
 		return http
 	}
 	function roomTitle(room: MatrixRoom): string {
@@ -409,9 +409,11 @@
 	const avatarUrl = computed(() => {
 		const m = getMatrix()
 		const s = session.value
-		if (s == null || s.avatar_url == null || s.avatar_url.length == 0) return '/static/logo.png'
-		if (m == null) return '/static/logo.png'
-		return m.mxcToHttp(s.avatar_url, 96, 96)
+		if (s == null || s.avatar_url == null || s.avatar_url.length == 0) return '/static/login/tiki.png'
+		if (m == null) return '/static/login/tiki.png'
+		const http = m.mxcToHttp(s.avatar_url, 96, 96)
+		if (http.length == 0) return '/static/login/tiki.png'
+		return http
 	})
 	const syncClass = computed(() => {
 		const s = syncState.value

@@ -452,7 +452,7 @@ function jsonKeys(obj: UTSJSONObject): Array<string> {
 	return out
 }
 
-function jsonStr(obj: UTSJSONObject, key: string): string {
+export function jsonStr(obj: UTSJSONObject, key: string): string {
 	try {
 		const v = obj[key]
 		if (v != null) {
@@ -467,7 +467,7 @@ function jsonStr(obj: UTSJSONObject, key: string): string {
 	return ''
 }
 
-function jsonNum(obj: UTSJSONObject, key: string): number {
+export function jsonNum(obj: UTSJSONObject, key: string): number {
 	try {
 		const v = obj.getNumber(key)
 		if (v != null) return v
@@ -1170,7 +1170,12 @@ export class MatrixClient {
 						const ev = events[ei]
 						const parsed = this.parseEvent(ev)
 						const evType = jsonStr(ev, 'type')
-						if (evType.indexOf('m.call.') == 0) {
+						if (evType.indexOf('m.call.') == 0
+							|| evType == 'org.matrix.msc3401.call.member'
+							|| evType == 'org.matrix.msc4075.rtc.notification'
+							|| evType == 'org.matrix.msc4075.call.notify'
+							|| evType == 'm.rtc.notification'
+							|| evType == 'm.rtc.member') {
 							const cc = jsonObj(ev, 'content')
 							console.log('[sync] voip', evType, 'call_id=', jsonStr(cc, 'call_id'), 'from=', jsonStr(ev, 'sender'), 'room=', roomId)
 							this.fireVoip(parsed, roomId)

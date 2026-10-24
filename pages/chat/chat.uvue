@@ -39,14 +39,11 @@
 					>
 						<view class="member-ava-wrap">
 							<image
-								v-if="slot.avatar.length > 0"
 								class="member-ava"
-								:src="slot.avatar"
+								:src="stripAvaSrc(slot)"
 								mode="aspectFill"
+								@error="onStripAvaError(slot)"
 							></image>
-							<view v-else class="member-ava member-ava-fallback">
-								<text class="member-ava-text">{{ slot.initial }}</text>
-							</view>
 							<view v-if="slot.unread && !slot.focused" class="member-dot"></view>
 						</view>
 					</view>
@@ -107,8 +104,7 @@
 					@longpress="onLongPress(msg)"
 				>
 				<view v-if="msg.sender != currentUserId" class="msg-avatar">
-					<image v-if="senderAvatar(msg.sender).length > 0" class="msg-avatar-img" :src="senderAvatar(msg.sender)" mode="aspectFill"></image>
-					<text v-else class="avatar-letter">{{ senderInitial(msg.sender) }}</text>
+					<image class="msg-avatar-img" :src="senderAvatar(msg.sender)" mode="aspectFill"></image>
 				</view>
 				<view v-if="msg.sender == currentUserId && msg._failed" class="msg-fail">
 					<text class="msg-fail-bang">!</text>
@@ -153,7 +149,7 @@
 					</view>
 
 					<view v-else-if="isCallMsg(msg)" class="msg-call" @click="onCallRecordTap(msg)">
-						<text class="msg-call-icon">{{ callRecordIcon(msg) }}</text>
+						<image class="msg-call-icon-img" :src="callRecordIconSrc(msg)" mode="aspectFit"></image>
 						<text class="msg-call-text">{{ callRecordText(msg) }}</text>
 					</view>
 
@@ -172,7 +168,7 @@
 						<text class="msg-text">{{ msg.body }}</text>
 					</view>
 					<view v-else-if="msg.type == 'm.room.calling'" class="msg-call" @click="onCallRecordTap(msg)">
-						<text class="msg-call-icon">📹</text>
+						<image class="msg-call-icon-img" src="/static/login/t4.png" mode="aspectFit"></image>
 						<text class="msg-call-text">视频通话</text>
 					</view>
 				</view>
@@ -181,8 +177,7 @@
 				</view>
 				</view>
 				<view v-if="msg.sender == currentUserId" class="msg-avatar msg-avatar-me">
-					<image v-if="myAvatarSrc.length > 0" class="msg-avatar-img" :src="myAvatarSrc" mode="aspectFill"></image>
-					<text v-else class="avatar-letter">{{ myInitial }}</text>
+					<image class="msg-avatar-img" :src="myAvatarSrc.length > 0 ? myAvatarSrc : '/static/login/tiki.png'" mode="aspectFill"></image>
 				</view>
 				</view>
 			</view>
@@ -193,12 +188,10 @@
 		<view class="input-bar">
 			<view class="input-tool" @click="toggleVoiceMode">
 				<image
-					v-if="!voiceMode"
 					class="input-tool-img"
-					src="/static/login/yuying.png"
+					:src="voiceMode ? '/static/login/j1.png' : '/static/login/yuying.png'"
 					mode="aspectFit"
 				></image>
-				<text v-else class="input-tool-text">⌨</text>
 			</view>
 			<view
 				v-if="voiceMode && inputText.trim().length == 0"
@@ -391,7 +384,7 @@
 	import { ref, onUnmounted, onMounted, computed, nextTick } from 'vue'
 	import { getMatrix, MatrixClient, MatrixMessage, MatrixEvent, errText, RoomMember, MatrixRoom, roomIsGroup, memberDisplayName } from '@/common/matrix.uts'
 	import { bootstrapMatrix, openGroupInfo, ensureMatrixClient, hasPlatformLogin } from '@/common/app.uts'
-	import { getCallManager, CallSnapshot, h5TapRunAnswer, unlockH5CallMedia } from '@/common/call.uts'
+	import { getCallManager, CallSnapshot, h5TapRunAnswer } from '@/common/call.uts'
 	import { loadRoomChat, saveRoomChat } from '@/common/storage.uts'
 
 	type ChatMsg = {
@@ -531,23 +524,41 @@
 		return 0
 	})
 
+	const DEFAULT_AVA = '/static/login/tiki.png'
+	const stripAvaFailed: Map<string, boolean> = new Map()
+
 	function stripRoomAvatarUrl(room: MatrixRoom): string {
 		let a = room.avatar_url
 		if (a == null || a.length == 0) a = room.other_avatar
-		if (a == null || a.length == 0) return ''
+		if (a == null || a.length == 0) {
+			const oid = room.other_user_id
+			if (oid != null && oid.length > 0) {
+				const matrix = getMatrix()
+				if (matrix != null) {
+					const cached = matrix.userAvatars.get(oid)
+					if (cached != null && cached.length > 0) a = cached
+				}
+			}
+		}
+		if (a == null || a.length == 0) return DEFAULT_AVA
 		if (a.indexOf('http://') == 0 || a.indexOf('https://') == 0) return a
-		return getMxcUrl(a, 96, 96)
+		const url = getMxcUrl(a, 96, 96)
+		if (url.length == 0) return DEFAULT_AVA
+		return url
 	}
 
-	function stripRoomInitialOf(room: MatrixRoom): string {
-		const n = room.name
-		if (n != null && n.length > 0) return n.substring(0, 1)
-		const oid = room.other_user_id
-		if (oid != null && oid.length > 0) {
-			const local = oid.split(':')[0].replace('@', '')
-			if (local.length > 0) return local.substring(0, 1).toUpperCase()
-		}
-		return '?'
+	function stripAvaSrc(slot: StripSlot): string {
+		const key = slot.room_id
+		if (key.length > 0 && stripAvaFailed.get(key) == true) return DEFAULT_AVA
+		const a = slot.avatar
+		if (a.length == 0) return DEFAULT_AVA
+		return a
+	}
+
+	function onStripAvaError(slot: StripSlot): void {
+		if (slot.room_id.length == 0) return
+		stripAvaFailed.set(slot.room_id, true)
+		alertTick.value = alertTick.value + 1
 	}
 
 	function roomHasStripAlert(rid: string): boolean {
@@ -581,7 +592,7 @@
 			index: index,
 			focused: focused,
 			avatar: stripRoomAvatarUrl(room),
-			initial: stripRoomInitialOf(room),
+			initial: '',
 			unread: unread
 		} as StripSlot
 	}
@@ -1060,16 +1071,18 @@
 	}
 
 	function senderAvatar(sender: string): string {
-		if (sender.length == 0) return ''
+		if (sender.length == 0) return '/static/login/tiki.png'
 		if (sender == currentUserId.value && myAvatarSrc.value.length > 0) {
 			return myAvatarSrc.value
 		}
 		const mxc = resolveMemberMxc(sender)
 		if (mxc.length == 0) {
 			ensureMemberAvatar(sender)
-			return ''
+			return '/static/login/tiki.png'
 		}
-		return getMxcUrl(mxc, 96, 96)
+		const url = getMxcUrl(mxc, 96, 96)
+		if (url.length == 0) return '/static/login/tiki.png'
+		return url
 	}
 
 	const avatarFetching: Array<string> = []
@@ -1431,10 +1444,10 @@
 		if (t.length == 0) return true
 		return false
 	}
-	function callRecordIcon(msg: ChatMsg): string {
+	function callRecordIconSrc(msg: ChatMsg): string {
 		const t = pickStr(msg.info, 'call_type')
-		if (t == 'video' || msg.type == 'm.room.calling') return '📹'
-		return '📞'
+		if (t == 'video' || msg.type == 'm.room.calling') return '/static/login/t4.png'
+		return '/static/login/t3.png'
 	}
 	function formatCallClock(sec: number): string {
 		let s = sec
@@ -2119,15 +2132,13 @@
 	function onCallRecordTap(msg: ChatMsg): void {
 		const t = pickStr(msg.info, 'call_type')
 		const isVideo = t == 'video' || msg.type == 'm.room.calling'
-		unlockH5CallMedia(isVideo)
+		// LiveKit 路径无麦也可进房，不在此抢麦（避免 NotFoundError 误报）
 		startCall(isVideo)
 	}
 	function startCallVoice() {
-		unlockH5CallMedia(false)
 		startCall(false)
 	}
 	function startCallVideo() {
-		unlockH5CallMedia(true)
 		startCall(true)
 	}
 	function acceptIncomingCall() {
@@ -4587,13 +4598,16 @@
 		padding: 4rpx 8rpx 4rpx 0;
 	}
 
-	.msg-call-icon {
-		font-size: 36rpx;
+	.msg-call-icon-img {
+		width: 36rpx;
+		height: 36rpx;
 		margin-right: 12rpx;
+		flex-shrink: 0;
 	}
 
 	.msg-call-text {
 		font-size: 30rpx;
+		line-height: 36rpx;
 		color: #111111;
 	}
 

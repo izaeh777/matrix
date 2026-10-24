@@ -2,8 +2,20 @@
  * 全局 Matrix 通话
  * 任意页面都可响铃；H5 使用 WebRTC，信令走 m.call.*
  */
-import { getMatrix, MatrixEvent, setVoipSink, jsonObj, jsonArr } from './matrix.uts'
+import { getMatrix, MatrixEvent, setVoipSink, jsonObj, jsonArr, jsonStr } from './matrix.uts'
 import { tuneCallWebView, pullCallHtmlMsg, destroyCallEngine } from './call-webview.uts'
+import {
+	discoverLivekitServiceUrl,
+	fetchLivekitJwt,
+	putCallMembership,
+	clearCallMembership,
+	sendRtcNotification,
+	membershipHasLivekit,
+	membershipServiceUrl,
+	isRtcNotifyEvent,
+	isRtcMemberEvent,
+	rtcErrShort
+} from './matrix-rtc.uts'
 
 export type CallSnapshot = {
 	phase: string
@@ -213,6 +225,8 @@ function waitH5Mic(ms: number): Promise<boolean> {
 
 export function h5TapRunAnswer(): void {
 	const mgr = getCallManager()
+	// LiveKit 不走 call-engine 的 beginAnswer，避免假 SDP 触发旧 WebRTC
+	if (mgr.useLivekit) return
 	unlockH5CallMedia(mgr.isVideo)
 	// #ifdef H5
 	try {
@@ -222,11 +236,32 @@ export function h5TapRunAnswer(): void {
 	// #endif
 }
 
+function preloadLivekitJs(): void {
+	// #ifdef H5
+	try {
+		const g = h5Global()
+		if (g == null) return
+		const doc = g['document']
+		if (doc == null) return
+		const ensure = (id: string, src: string): void => {
+			if (doc.getElementById(id) != null) return
+			const s = doc.createElement('script')
+			s.id = id
+			s.src = src
+			doc.head.appendChild(s)
+		}
+		ensure('livekitClientScript', '/static/livekit-client.umd.js')
+		ensure('livekitEngineScript', '/static/livekit-engine.js')
+	} catch (eLk) {}
+	// #endif
+}
+
 function preloadH5EngineJs(): void {
 	// #ifdef H5
 	try {
 		const g = h5Global()
 		if (g == null) return
+		preloadLivekitJs()
 		if (g['__callJson'] != null) return
 		if (g['__callEngineFetching'] == true) return
 		g['__callEngineFetching'] = true
@@ -525,6 +560,11 @@ export class CallManager {
 	groupPeerCallIds: Array<string> = []
 	groupConnectedN: number = 0
 	groupMeshDone: boolean = false
+	useLivekit: boolean = false
+	livekitBusy: boolean = false
+	livekitServiceUrl: string = ''
+	rtcMembershipId: string = ''
+	rtcMembershipEventId: string = ''
 
 	getSnapshot(): CallSnapshot {
 		return {
@@ -740,7 +780,9 @@ export class CallManager {
 		this.boundToken = token
 		this.offTimeline = matrix.onVoip((event: MatrixEvent, rid: string) => {
 			const t = event.type
-			if (t.indexOf('m.call.') != 0) return
+			const isCall = t.indexOf('m.call.') == 0
+			const isRtc = t.indexOf('org.matrix.msc3401.') == 0 || t.indexOf('org.matrix.msc4075.') == 0 || t == 'm.rtc.notification'
+			if (!isCall && !isRtc) return
 			console.log('[call] voip', t, rid)
 			getCallManager().handleEvent(event, rid)
 		})
@@ -1273,9 +1315,8 @@ export class CallManager {
 		this.camRear = false
 		this.peerName = '对方'
 		this.emit()
-		this.kickTurn()
 		preloadH5EngineJs()
-		unlockH5CallMedia(isVideo)
+		preloadLivekitJs()
 		// #ifdef APP-ANDROID
 		try {
 			await new Promise((resolve: (ok: boolean) => void) => {
@@ -1358,17 +1399,193 @@ export class CallManager {
 			this.hangup(false)
 			return false
 		}
+		this.useLivekit = false
+		this.livekitServiceUrl = ''
+		this.rtcMembershipId = ''
+		this.rtcMembershipEventId = ''
+		this.livekitBusy = false
+		// #ifdef H5
+		try {
+			const foci = await discoverLivekitServiceUrl()
+			if (foci.length > 0) {
+				this.useLivekit = true
+				this.livekitServiceUrl = foci
+				this.callId = 'lk' + Date.now().toString()
+				console.log('[call] prefer LiveKit', foci)
+			}
+		} catch (eFoci) {
+			console.warn('[call] foci discover fail, legacy', eFoci)
+		}
+		// #endif
+		if (!this.useLivekit) {
+			this.kickTurn()
+			unlockH5CallMedia(this.isVideo)
+		}
+		// LiveKit：先进 JWT/SFU，麦克风由 livekit-engine 再申请（本机无麦也不阻断）
 		this.outgoingReady = true
 		this.htmlBoot = 'out'
 		this.openPage()
-		this.placeOutgoing()
+		this.placeOutgoing().catch((ePlace: any | null) => {
+			console.error('[call] placeOutgoing crash', ePlace)
+			uni.showToast({ title: '发起通话异常', icon: 'none' })
+		})
 		return true
 	}
 
 	async placeOutgoing(): Promise<void> {
 		if (this.phase != 'outgoing') return
 		if (!this.outgoingReady) return
+		if (this.useLivekit) {
+			await this.placeLivekitOutgoing()
+			return
+		}
 		await this.appOffer()
+	}
+
+	async placeLivekitOutgoing(): Promise<void> {
+		// 若控制台没有这行，说明跑的还是旧包，请重新运行到浏览器并强制刷新
+		console.log('[call] LK-BUILD 2026-10-24i placeLivekitOutgoing', this.phase, 'busy=', this.livekitBusy, 'posted=', this.invitePosted)
+		if (this.phase != 'outgoing') return
+		if (this.invitePosted || this.livekitBusy) return
+		this.livekitBusy = true
+		preloadH5EngineJs()
+		preloadLivekitJs()
+		this.sub = '正在呼叫（LiveKit）…'
+		this.emit()
+		try {
+			await this.joinLivekitSession(true)
+			this.invitePosted = true
+			this.offerSent = true
+			this.armTimeout()
+			this.sub = this.isGroupCall ? '等待群成员接听…' : '等待对方接听…'
+			this.emit()
+			uni.showToast({ title: '已发起通话（LiveKit）', icon: 'none' })
+		} catch (e) {
+			const why = rtcErrShort(e)
+			console.error('[call] livekit outgoing fail', why, e)
+			uni.showToast({ title: 'LiveKit失败: ' + why, icon: 'none', duration: 3500 })
+			this.useLivekit = false
+			this.livekitBusy = false
+			this.kickTurn()
+			await this.appOffer()
+			return
+		}
+		this.livekitBusy = false
+	}
+
+	async ensureDeviceId(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (matrix.deviceId.length > 0) return
+		try {
+			const me = await matrix.whoami()
+			const did = jsonStr(me as UTSJSONObject, 'device_id')
+			if (did.length > 0) {
+				matrix.deviceId = did
+				console.log('[call] deviceId from whoami', did)
+			}
+		} catch (eWho) {
+			console.warn('[call] whoami deviceId fail', eWho)
+		}
+		if (matrix.deviceId.length == 0) {
+			matrix.deviceId = 'WEB' + Date.now().toString()
+			console.warn('[call] deviceId fallback', matrix.deviceId)
+		}
+	}
+
+	async joinLivekitSession(sendNotify: boolean): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) throw new Error('未登录')
+		await this.ensureDeviceId()
+		let service = this.livekitServiceUrl
+		if (service.length == 0) service = await discoverLivekitServiceUrl()
+		if (service.length == 0) throw new Error('无 LiveKit foci')
+		this.livekitServiceUrl = service
+		if (this.rtcMembershipId.length == 0) {
+			this.rtcMembershipId = 'm' + Date.now().toString() + Math.floor(Math.random() * 1000).toString()
+		}
+		// 先拿 JWT（媒体关键），再发 membership / 响铃（信令）
+		console.log('[call] livekit join step=jwt device=', matrix.deviceId)
+		const sfu = await fetchLivekitJwt(this.roomId, service)
+		console.log('[call] livekit join step=membership')
+		try {
+			const eid = await putCallMembership(this.roomId, service, this.isVideo, this.rtcMembershipId)
+			this.rtcMembershipEventId = eid
+			if (sendNotify) {
+				const peer = this.inviteeId.length > 0 ? this.inviteeId : this.peerUserId
+				try {
+					await sendRtcNotification(this.roomId, eid, peer, this.isVideo)
+				} catch (eNotify) {
+					console.warn('[call] rtc notify fail (non-fatal)', eNotify)
+				}
+				// 本 App 对端靠 to-device 弹窗更稳
+				await this.ringPeerLivekit()
+			}
+		} catch (eMem) {
+			console.warn('[call] membership fail (non-fatal for SFU)', eMem)
+			if (sendNotify) await this.ringPeerLivekit()
+		}
+		await this.waitEngineBrief()
+		preloadLivekitJs()
+		const msg: UTSJSONObject = {}
+		msg['cmd'] = 'lkConnect'
+		msg['url'] = sfu.url
+		msg['token'] = sfu.jwt
+		msg['jwt'] = sfu.jwt
+		msg['video'] = this.isVideo ? '1' : '0'
+		// 主叫等对方进 SFU 再标 connected；被叫接听后本端进房即可
+		msg['waitPeer'] = this.isIncoming ? '0' : '1'
+		const packed = this.packHtmlMsg(msg)
+		console.log('[call] lkConnect pack hasUrl=', packed.indexOf('"url"') >= 0, 'len=', packed.length, 'waitPeer=', msg['waitPeer'])
+		this.sendToHtml(msg)
+		console.log('[call] lkConnect sent url=', sfu.url.substring(0, 48))
+	}
+
+	/** 给本 App 对端补一发 to-device 响铃（房间 timeline 通知 Element 不一定弹窗） */
+	async ringPeerLivekit(): Promise<void> {
+		const peer = this.inviteeId.length > 0 ? this.inviteeId : this.peerUserId
+		if (peer.length == 0) return
+		const payload: UTSJSONObject = {}
+		payload['call_id'] = this.callId
+		payload['version'] = 1
+		payload['party_id'] = this.partyId
+		payload['lifetime'] = 90000
+		payload['room_id'] = this.roomId
+		payload['livekit'] = '1'
+		payload['invitee'] = peer
+		if (this.isVideo) payload['offer_video'] = '1'
+		payload['offer'] = { type: 'offer', sdp: 'v=0\r\nlivekit\r\n' }
+		payload['sdp'] = 'v=0\r\nlivekit\r\n'
+		try {
+			await this.notifyCall('m.call.invite', payload, this.roomId, peer)
+			console.log('[call] livekit to-device ring ->', peer)
+		} catch (e) {
+			console.warn('[call] livekit to-device ring fail', e)
+		}
+	}
+
+	waitEngineBrief(): Promise<boolean> {
+		return new Promise((resolve: (ok: boolean) => void) => {
+			if (this.engineReady()) {
+				resolve(true)
+				return
+			}
+			preloadH5EngineJs()
+			let n = 0
+			const tick = (): void => {
+				if (this.engineReady()) {
+					resolve(true)
+					return
+				}
+				n = n + 1
+				if (n > 25) {
+					resolve(false)
+					return
+				}
+				setTimeout(tick, 200)
+			}
+			tick()
+		})
 	}
 
 	fillPeerProfile(): void {
@@ -1447,7 +1664,7 @@ export class CallManager {
 	}
 
 	packHtmlMsg(msg: UTSJSONObject): string {
-		const keys: Array<string> = ['cmd', 'ice', 'video', 'sdp', 'hs', 'token', 'room', 'call', 'party', 'invitee', 'name', 'sub', 'phase', 'incoming', 'candidate', 'sdpMid', 'off', 'peers', 'peer']
+		const keys: Array<string> = ['cmd', 'ice', 'video', 'sdp', 'hs', 'token', 'url', 'jwt', 'room', 'call', 'party', 'invitee', 'name', 'sub', 'phase', 'incoming', 'candidate', 'sdpMid', 'off', 'peers', 'peer', 'on', 'reason', 'message', 'waitPeer']
 		const parts: Array<string> = []
 		for (let i = 0; i < keys.length; i++) {
 			const k = keys[i]
@@ -1776,6 +1993,7 @@ export class CallManager {
 	}
 
 	async appAnswer(): Promise<void> {
+		if (this.useLivekit) return
 		if (this.answerStarted) return
 		if (this.pendingRemoteSdp.length == 0) {
 			console.warn('[call] appAnswer without remote sdp')
@@ -1833,6 +2051,11 @@ export class CallManager {
 
 	async armIncoming(): Promise<void> {
 		if (this.phase != 'ringing') return
+		// LiveKit 来电只刷新 UI，不 arm 旧 WebRTC answer
+		if (this.useLivekit) {
+			this.pushUi()
+			return
+		}
 		if (this.pendingRemoteSdp.length == 0) return
 		if (!this.engineReady()) {
 			console.log('[call] armIncoming wait engine')
@@ -2148,7 +2371,10 @@ export class CallManager {
 			this.htmlReady = true
 			this.htmlLoaded = true
 			console.log('[call] engine ready', this.phase)
-			if (this.phase == 'outgoing') this.placeOutgoing()
+			if (this.useLivekit) {
+				if (this.phase == 'outgoing') this.placeOutgoing()
+				else this.pushUi()
+			} else if (this.phase == 'outgoing') this.placeOutgoing()
 			else if (this.phase == 'ringing') this.armIncoming()
 			else if (this.phase == 'connecting') this.appAnswer()
 			else this.pushUi()
@@ -2203,11 +2429,21 @@ export class CallManager {
 			this.maybeMeshPeers()
 			return
 		}
+		if (kind == 'sfuReady') {
+			if (this.phase == 'outgoing') {
+				this.sub = this.isGroupCall ? '已入中继，等待群成员…' : '已入中继，等待对方接听…'
+				this.emit()
+				this.pushUi()
+			}
+			return
+		}
 		if (kind == 'connected') {
 			this.noteConnected()
 			if (this.isGroupCall) {
 				this.sub = '群语音中'
 				this.maybeMeshPeers()
+			} else {
+				this.sub = this.isVideo ? '视频通话中' : '语音通话中'
 			}
 			this.emit()
 			this.pushUi()
@@ -2218,8 +2454,11 @@ export class CallManager {
 				console.warn('[call] ignore peer fail in group')
 				return
 			}
-			this.sub = '连接失败'
+			const why = payload.length > 0 ? payload : 'unknown'
+			console.error('[call] engine failed', why)
+			this.sub = '连接失败: ' + why
 			this.emit()
+			uni.showToast({ title: '通话失败: ' + why, icon: 'none', duration: 3000 })
 			this.hangup(true)
 			return
 		}
@@ -2245,6 +2484,34 @@ export class CallManager {
 			uni.showToast({ title: webrtcHint(), icon: 'none' })
 			return
 		}
+		if (this.useLivekit) {
+			// 防重复：页面按钮 + engine ui.accept 可能连打两次
+			if (this.answerStarted || this.livekitBusy) {
+				console.log('[call] livekit accept already in progress')
+				return
+			}
+			this.answerStarted = true
+			this.livekitBusy = true
+			if (this.phase == 'ringing') {
+				this.phase = 'connecting'
+				this.sub = '正在接通（LiveKit）…'
+				this.emit()
+			}
+			if (this.pageOpen == false) this.openPage()
+			try {
+				await this.joinLivekitSession(false)
+				this.invitePosted = true
+			} catch (eLk) {
+				console.error('[call] livekit accept fail', eLk)
+				this.answerStarted = false
+				this.livekitBusy = false
+				uni.showToast({ title: '接通失败', icon: 'none' })
+				this.hangup(true)
+				return
+			}
+			this.livekitBusy = false
+			return
+		}
 		if (this.pendingRemoteSdp.length < 20) {
 			uni.showToast({ title: '来电信息不完整，无法接通', icon: 'none' })
 			return
@@ -2261,6 +2528,77 @@ export class CallManager {
 
 	reject(): void {
 		this.endCall(true, 'm.call.reject', 'rejected')
+	}
+
+	handleRtcNotify(_event: MatrixEvent, roomId: string, content: UTSJSONObject, sender: string): void {
+		if (this.phase != 'idle') {
+			console.log('[call] rtc notify ignore, phase', this.phase)
+			return
+		}
+		const notifyType = fieldStr(content, 'notification_type')
+		const legacyType = fieldStr(content, 'notify_type')
+		if (notifyType != 'ring' && legacyType != 'ring' && notifyType.length > 0 && notifyType != 'notification') {
+			console.log('[call] rtc notify skip type', notifyType, legacyType)
+			return
+		}
+		const intent = fieldStr(content, 'm.call.intent')
+		this.useLivekit = true
+		this.roomId = roomId
+		this.callId = 'lk' + Date.now().toString()
+		this.partyId = makePartyId()
+		this.isVideo = intent == 'video'
+		this.isIncoming = true
+		this.phase = 'ringing'
+		this.peerUserId = sender
+		this.initiatorId = sender
+		this.pendingRemoteSdp = 'livekit'
+		this.connectedAt = 0
+		this.leaving = false
+		this.incomingArmed = false
+		this.incomingPrompted = false
+		this.isGroupCall = false
+		this.sub = this.isVideo ? '视频来电（LiveKit）' : '语音来电（LiveKit）'
+		let cached = ''
+		const mx = getMatrix()
+		if (mx != null) cached = mx.getCachedUserName(sender)
+		this.peerName = cached.length > 0 ? cached : localPart(sender)
+		this.fillPeerProfile()
+		discoverLivekitServiceUrl().then((u: string) => {
+			if (u.length > 0) this.livekitServiceUrl = u
+		}).catch((_e) => {})
+		this.emit()
+		this.openPage()
+		this.armTimeout()
+		console.log('[call] rtc notify ring from', sender)
+	}
+
+	handleRtcMember(_event: MatrixEvent, roomId: string, content: UTSJSONObject, sender: string): void {
+		const keys = jsonArr(content, 'foci_preferred')
+		const empty = keys.length == 0 && fieldStr(content, 'application').length == 0 && fieldStr(content, 'device_id').length == 0
+		if (empty || !membershipHasLivekit(content)) {
+			// 对方清空 membership = 离开
+			if (this.useLivekit && this.roomId == roomId && this.phase != 'idle' && this.phase != 'ended') {
+				if (sender == this.peerUserId || sender == this.initiatorId) {
+					console.log('[call] peer left rtc membership')
+					uni.showToast({ title: '对方已离开', icon: 'none' })
+					this.endCall(false, 'm.call.hangup', '')
+				}
+			}
+			return
+		}
+		// 通话中已接通：无需处理
+		if (this.phase == 'connected' || this.phase == 'connecting' || this.phase == 'outgoing') {
+			if (this.useLivekit && this.livekitServiceUrl.length == 0) {
+				this.livekitServiceUrl = membershipServiceUrl(content, '')
+			}
+			return
+		}
+		// 无 notify 时，对方 membership 也可作为来电提示（Element 兼容）
+		if (this.phase == 'idle') {
+			this.handleRtcNotify(_event, roomId, content, sender)
+			const svc = membershipServiceUrl(content, '')
+			if (svc.length > 0) this.livekitServiceUrl = svc
+		}
 	}
 
 	sendHangup(reason: string): void {
@@ -2390,13 +2728,29 @@ export class CallManager {
 		const hang = this.baseCallContent()
 		hang['reason'] = signalType == 'm.call.reject' ? 'user_busy' : 'user_hangup'
 		hang['room_id'] = rid
-		const shouldNotify = notify && cid.length > 0
+		const wasLivekit = this.useLivekit
+		// LiveKit：清空 membership；同时对 to-device 响铃补发 hangup，避免对端一直振铃
+		const shouldNotify = notify && cid.length > 0 && !wasLivekit
 		this.lastHangAt = Date.now()
 		this.noteClosedCall(cid)
 		this.clearTimer()
 		const hangMsg: UTSJSONObject = {}
-		hangMsg['cmd'] = 'hangup'
+		hangMsg['cmd'] = wasLivekit ? 'lkHang' : 'hangup'
 		this.sendToHtml(hangMsg)
+		if (wasLivekit && rid.length > 0) {
+			clearCallMembership(rid)
+		}
+		if (wasLivekit && notify && cid.length > 0 && peer.length > 0) {
+			const lkHang = this.baseCallContent()
+			lkHang['call_id'] = cid
+			lkHang['reason'] = signalType == 'm.call.reject' ? 'user_busy' : 'user_hangup'
+			lkHang['room_id'] = rid
+			lkHang['livekit'] = '1'
+			this.notifyCall('m.call.hangup', lkHang, rid, peer).catch((_e) => {})
+		}
+		if (wasLivekit && notify && rid.length > 0) {
+			this.sendCallRecord(rid, wasVideo, status, duration, initiator, cid)
+		}
 		this.htmlEval = null
 		this.htmlPost = null
 		this.htmlReady = false
@@ -2457,6 +2811,11 @@ export class CallManager {
 		this.groupPeerCallIds = []
 		this.groupConnectedN = 0
 		this.groupMeshDone = false
+		this.useLivekit = false
+		this.livekitBusy = false
+		this.livekitServiceUrl = ''
+		this.rtcMembershipId = ''
+		this.rtcMembershipEventId = ''
 		this.phase = 'idle'
 		this.callId = ''
 		this.roomId = ''
@@ -2473,7 +2832,8 @@ export class CallManager {
 	toggleMute(): void {
 		this.muted = !this.muted
 		const m: UTSJSONObject = {}
-		m['cmd'] = 'mute'
+		m['cmd'] = this.useLivekit ? 'lkMute' : 'mute'
+		m['on'] = this.muted ? '1' : '0'
 		this.sendToHtml(m)
 		this.emit()
 	}
@@ -2481,7 +2841,7 @@ export class CallManager {
 	toggleCamera(): void {
 		this.cameraOff = !this.cameraOff
 		const m: UTSJSONObject = {}
-		m['cmd'] = 'camera'
+		m['cmd'] = this.useLivekit ? 'lkCamera' : 'camera'
 		m['off'] = this.cameraOff ? '1' : '0'
 		this.sendToHtml(m)
 		this.emit()
@@ -2691,6 +3051,15 @@ export class CallManager {
 			return
 		}
 
+		if (isRtcNotifyEvent(type)) {
+			this.handleRtcNotify(event, roomId, content, sender)
+			return
+		}
+		if (isRtcMemberEvent(type)) {
+			this.handleRtcMember(event, roomId, content, sender)
+			return
+		}
+
 		if (type == 'm.call.invite') {
 			if (this.callId.length > 0 && callId == this.callId) return
 			console.log('[call] recv invite from', sender, 'call', callId)
@@ -2709,6 +3078,47 @@ export class CallManager {
 					console.log('[call] invitee mismatch', invitee, myId)
 					return
 				}
+			}
+			// LiveKit 响铃：无真实 SDP，走 MatrixRTC 接听
+			const isLivekitInvite = fieldStr(content, 'livekit') == '1' || pickCallSdp(content).indexOf('livekit') >= 0
+			if (isLivekitInvite) {
+				if (this.phase != 'idle' && this.phase != 'ringing') {
+					console.warn('[call] busy, skip livekit invite', this.phase)
+					return
+				}
+				if (this.phase == 'ringing' && this.useLivekit) {
+					console.log('[call] already ringing livekit')
+					return
+				}
+				this.useLivekit = true
+				this.roomId = roomId
+				this.callId = callId.length > 0 ? callId : ('lk' + Date.now().toString())
+				this.partyId = makePartyId()
+				this.isVideo = fieldStr(content, 'offer_video') == '1'
+				this.isIncoming = true
+				this.phase = 'ringing'
+				this.peerUserId = sender
+				this.initiatorId = sender
+				this.pendingRemoteSdp = 'livekit'
+				this.connectedAt = 0
+				this.leaving = false
+				this.incomingArmed = false
+				this.incomingPrompted = false
+				this.isGroupCall = false
+				this.sub = this.isVideo ? '视频来电（LiveKit）' : '语音来电（LiveKit）'
+				const cachedLk = matrix != null ? matrix.getCachedUserName(sender) : ''
+				this.peerName = cachedLk.length > 0 ? cachedLk : localPart(sender)
+				this.htmlBoot = 'in'
+				this.fillPeerProfile()
+				discoverLivekitServiceUrl().then((u: string) => {
+					if (u.length > 0) this.livekitServiceUrl = u
+				}).catch((_e) => {})
+				this.emit()
+				this.armTimeout()
+				this.openPage()
+				this.requestCallPerms()
+				console.log('[call] livekit invite ring from', sender)
+				return
 			}
 			const groupId = fieldStr(content, 'group_id')
 			const isGroupInvite = fieldStr(content, 'group_call') == '1' || groupId.length > 0

@@ -45,7 +45,7 @@
 			</view>
 
 			<view v-for="item in results" :key="item.event_id" class="result-item" @click="onTapResult(item)">
-				<image class="result-avatar" :src="getAvatarForRoom(item.room_id)" fallback="/static/logo.png" />
+				<image class="result-avatar" :src="getAvatarForRoom(item.room_id)" fallback="/static/login/tiki.png" />
 				<view class="result-body">
 					<view class="result-line1">
 						<text class="result-room">{{ getRoomName(item.room_id) }}</text>
@@ -158,8 +158,8 @@
 
 	function getAvatarForRoom(roomId: string): string {
 		const matrix = getMatrix()
-		if (matrix == null) return '/static/logo.png'
-		return matrix.mxcToHttp('', 64, 64)
+		if (matrix == null) return '/static/login/tiki.png'
+		return '/static/login/tiki.png'
 	}
 
 	function formatTime(ts: number): string {
