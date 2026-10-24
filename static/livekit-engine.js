@@ -11,6 +11,8 @@
   var localTracks = []
   var connectedPosted = false
   var videoWanted = false
+  var camFacing = 'user'
+  var camFlipping = false
 
   function emit(obj) {
     try {
@@ -340,6 +342,86 @@
     } catch (e) {}
   }
 
+  async function flipCamera(facing) {
+    if (!room || camFlipping) return
+    var api = lkApi()
+    if (!api || !api.createLocalTracks) {
+      console.warn('[lk] flip: no sdk')
+      return
+    }
+    var next = facing || (camFacing === 'user' ? 'environment' : 'user')
+    camFlipping = true
+    console.log('[lk] flip to', next)
+    try {
+      var created = await api.createLocalTracks({
+        audio: false,
+        video: {
+          facingMode: { ideal: next },
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }
+      })
+      var vt = null
+      for (var i = 0; i < (created || []).length; i++) {
+        if (created[i].kind === 'video') {
+          vt = created[i]
+          break
+        }
+      }
+      if (!vt) throw new Error('no video track')
+      // 卸掉旧视频轨
+      var keep = []
+      for (var j = 0; j < localTracks.length; j++) {
+        var old = localTracks[j]
+        if (old.kind !== 'video') {
+          keep.push(old)
+          continue
+        }
+        try { await room.localParticipant.unpublishTrack(old) } catch (eU) {}
+        try { old.stop() } catch (eS) {}
+        try { old.detach() } catch (eD) {}
+      }
+      localTracks = keep
+      localTracks.push(vt)
+      await room.localParticipant.publishTrack(vt)
+      showMediaLayout(hasRemoteParticipant())
+      attachTrack(vt, w.document.getElementById('local'), true)
+      camFacing = next
+      console.log('[lk] flip ok', next)
+    } catch (e) {
+      console.warn('[lk] flip fail', e)
+      // 再试一次 exact / soft
+      try {
+        var soft = await api.createLocalTracks({
+          audio: false,
+          video: { facingMode: next }
+        })
+        var vt2 = null
+        for (var k = 0; k < (soft || []).length; k++) {
+          if (soft[k].kind === 'video') { vt2 = soft[k]; break }
+        }
+        if (vt2) {
+          var keep2 = []
+          for (var m = 0; m < localTracks.length; m++) {
+            var o2 = localTracks[m]
+            if (o2.kind !== 'video') { keep2.push(o2); continue }
+            try { await room.localParticipant.unpublishTrack(o2) } catch (e2) {}
+            try { o2.stop() } catch (e3) {}
+          }
+          localTracks = keep2
+          localTracks.push(vt2)
+          await room.localParticipant.publishTrack(vt2)
+          attachTrack(vt2, w.document.getElementById('local'), true)
+          camFacing = next
+          console.log('[lk] flip ok soft', next)
+        }
+      } catch (e4) {
+        console.warn('[lk] flip soft fail', e4)
+      }
+    }
+    camFlipping = false
+  }
+
   function handleCmd(msg) {
     if (!msg || !msg.cmd) return false
     if (msg.cmd === 'lkConnect') {
@@ -360,6 +442,10 @@
     if (msg.cmd === 'lkCamera' || (msg.cmd === 'camera' && room != null)) {
       setCameraOff(msg.off === '1' || msg.off === true)
       return msg.cmd === 'lkCamera' || room != null
+    }
+    if (msg.cmd === 'lkFlip' || (msg.cmd === 'flip' && room != null)) {
+      flipCamera(msg.facing || '')
+      return true
     }
     return false
   }

@@ -1365,7 +1365,7 @@ export class CallManager {
 			}
 			if (others.length > 1) {
 				this.isGroupCall = true
-				this.isVideo = false
+				// 群通话支持语音/视频（LiveKit SFU 天然多人）
 				this.groupCallId = 'g' + Date.now().toString()
 				this.callId = this.groupCallId
 				for (let gi = 0; gi < others.length && gi < 8; gi++) {
@@ -1375,9 +1375,9 @@ export class CallManager {
 				}
 				this.inviteeId = ''
 				this.peerUserId = ''
-				this.peerName = '群语音(' + this.groupPeerIds.length + '人)'
+				this.peerName = (this.isVideo ? '群视频' : '群语音') + '(' + this.groupPeerIds.length + '人)'
 				this.sub = '正在呼叫群成员…'
-				console.log('[call] group voice peers', this.groupPeerIds.length, this.groupPeerIds.join(','))
+				console.log('[call] group call peers', this.isVideo ? 'video' : 'voice', this.groupPeerIds.length, this.groupPeerIds.join(','))
 			} else if (others.length > 0) {
 				this.inviteeId = others[0]
 				this.peerUserId = others[0]
@@ -1410,8 +1410,11 @@ export class CallManager {
 			if (foci.length > 0) {
 				this.useLivekit = true
 				this.livekitServiceUrl = foci
-				this.callId = 'lk' + Date.now().toString()
-				console.log('[call] prefer LiveKit', foci)
+				// 群呼保留 groupCallId 作为 callId，便于成员对账；1:1 另起 lk id
+				if (!this.isGroupCall) {
+					this.callId = 'lk' + Date.now().toString()
+				}
+				console.log('[call] prefer LiveKit', foci, this.isGroupCall ? 'group' : '1:1')
 			}
 		} catch (eFoci) {
 			console.warn('[call] foci discover fail, legacy', eFoci)
@@ -1444,7 +1447,7 @@ export class CallManager {
 
 	async placeLivekitOutgoing(): Promise<void> {
 		// 若控制台没有这行，说明跑的还是旧包，请重新运行到浏览器并强制刷新
-		console.log('[call] LK-BUILD 2026-10-24i placeLivekitOutgoing', this.phase, 'busy=', this.livekitBusy, 'posted=', this.invitePosted)
+		console.log('[call] LK-BUILD 2026-10-24k placeLivekitOutgoing', this.phase, 'busy=', this.livekitBusy, 'posted=', this.invitePosted, 'group=', this.isGroupCall)
 		if (this.phase != 'outgoing') return
 		if (this.invitePosted || this.livekitBusy) return
 		this.livekitBusy = true
@@ -1541,26 +1544,47 @@ export class CallManager {
 		console.log('[call] lkConnect sent url=', sfu.url.substring(0, 48))
 	}
 
-	/** 给本 App 对端补一发 to-device 响铃（房间 timeline 通知 Element 不一定弹窗） */
+	/** 给本 App 对端补发 to-device 响铃；群呼则逐个成员发 */
 	async ringPeerLivekit(): Promise<void> {
-		const peer = this.inviteeId.length > 0 ? this.inviteeId : this.peerUserId
-		if (peer.length == 0) return
-		const payload: UTSJSONObject = {}
-		payload['call_id'] = this.callId
-		payload['version'] = 1
-		payload['party_id'] = this.partyId
-		payload['lifetime'] = 90000
-		payload['room_id'] = this.roomId
-		payload['livekit'] = '1'
-		payload['invitee'] = peer
-		if (this.isVideo) payload['offer_video'] = '1'
-		payload['offer'] = { type: 'offer', sdp: 'v=0\r\nlivekit\r\n' }
-		payload['sdp'] = 'v=0\r\nlivekit\r\n'
-		try {
-			await this.notifyCall('m.call.invite', payload, this.roomId, peer)
-			console.log('[call] livekit to-device ring ->', peer)
-		} catch (e) {
-			console.warn('[call] livekit to-device ring fail', e)
+		const peers: Array<string> = []
+		if (this.isGroupCall && this.groupPeerIds.length > 0) {
+			for (let i = 0; i < this.groupPeerIds.length; i++) {
+				const p = this.groupPeerIds[i]
+				if (p.length > 0 && peers.indexOf(p) < 0) peers.push(p)
+			}
+		} else {
+			const one = this.inviteeId.length > 0 ? this.inviteeId : this.peerUserId
+			if (one.length > 0) peers.push(one)
+		}
+		if (peers.length == 0) {
+			console.warn('[call] livekit ring no peers')
+			return
+		}
+		const gid = this.groupCallId.length > 0 ? this.groupCallId : this.callId
+		for (let i = 0; i < peers.length; i++) {
+			const peer = peers[i]
+			const payload: UTSJSONObject = {}
+			payload['call_id'] = this.callId
+			payload['version'] = 1
+			payload['party_id'] = this.partyId
+			payload['lifetime'] = 90000
+			payload['room_id'] = this.roomId
+			payload['livekit'] = '1'
+			payload['invitee'] = peer
+			if (this.isVideo) payload['offer_video'] = '1'
+			if (this.isGroupCall) {
+				payload['group_call'] = '1'
+				payload['group_id'] = gid
+				payload['group_peers'] = this.groupPeerIds.join(',')
+			}
+			payload['offer'] = { type: 'offer', sdp: 'v=0\r\nlivekit\r\n' }
+			payload['sdp'] = 'v=0\r\nlivekit\r\n'
+			try {
+				await this.notifyCall('m.call.invite', payload, this.roomId, peer)
+				console.log('[call] livekit to-device ring ->', peer, this.isGroupCall ? 'group' : '1:1')
+			} catch (e) {
+				console.warn('[call] livekit to-device ring fail', peer, e)
+			}
 		}
 	}
 
@@ -1664,7 +1688,7 @@ export class CallManager {
 	}
 
 	packHtmlMsg(msg: UTSJSONObject): string {
-		const keys: Array<string> = ['cmd', 'ice', 'video', 'sdp', 'hs', 'token', 'url', 'jwt', 'room', 'call', 'party', 'invitee', 'name', 'sub', 'phase', 'incoming', 'candidate', 'sdpMid', 'off', 'peers', 'peer', 'on', 'reason', 'message', 'waitPeer']
+		const keys: Array<string> = ['cmd', 'ice', 'video', 'sdp', 'hs', 'token', 'url', 'jwt', 'room', 'call', 'party', 'invitee', 'name', 'sub', 'phase', 'incoming', 'candidate', 'sdpMid', 'off', 'peers', 'peer', 'on', 'reason', 'message', 'waitPeer', 'facing']
 		const parts: Array<string> = []
 		for (let i = 0; i < keys.length; i++) {
 			const k = keys[i]
@@ -2740,13 +2764,27 @@ export class CallManager {
 		if (wasLivekit && rid.length > 0) {
 			clearCallMembership(rid)
 		}
-		if (wasLivekit && notify && cid.length > 0 && peer.length > 0) {
-			const lkHang = this.baseCallContent()
-			lkHang['call_id'] = cid
-			lkHang['reason'] = signalType == 'm.call.reject' ? 'user_busy' : 'user_hangup'
-			lkHang['room_id'] = rid
-			lkHang['livekit'] = '1'
-			this.notifyCall('m.call.hangup', lkHang, rid, peer).catch((_e) => {})
+		if (wasLivekit && notify && cid.length > 0) {
+			const hangPeers: Array<string> = []
+			if (this.isGroupCall && this.groupPeerIds.length > 0) {
+				for (let hi = 0; hi < this.groupPeerIds.length; hi++) {
+					if (this.groupPeerIds[hi].length > 0) hangPeers.push(this.groupPeerIds[hi])
+				}
+			} else if (peer.length > 0) {
+				hangPeers.push(peer)
+			}
+			for (let hi = 0; hi < hangPeers.length; hi++) {
+				const lkHang = this.baseCallContent()
+				lkHang['call_id'] = cid
+				lkHang['reason'] = signalType == 'm.call.reject' ? 'user_busy' : 'user_hangup'
+				lkHang['room_id'] = rid
+				lkHang['livekit'] = '1'
+				if (this.isGroupCall && this.groupCallId.length > 0) {
+					lkHang['group_call'] = '1'
+					lkHang['group_id'] = this.groupCallId
+				}
+				this.notifyCall('m.call.hangup', lkHang, rid, hangPeers[hi]).catch((_e) => {})
+			}
 		}
 		if (wasLivekit && notify && rid.length > 0) {
 			this.sendCallRecord(rid, wasVideo, status, duration, initiator, cid)
@@ -2855,13 +2893,14 @@ export class CallManager {
 		this.camRear = !this.camRear
 		const facing = this.camRear ? 'environment' : 'user'
 		const m: UTSJSONObject = {}
-		m['cmd'] = 'flip'
+		// LiveKit 与旧 WebRTC 引擎分开处理
+		m['cmd'] = this.useLivekit ? 'lkFlip' : 'flip'
 		m['facing'] = facing
 		this.sendToHtml(m)
-		console.log('[call] flip camera', facing)
+		console.log('[call] flip camera', this.useLivekit ? 'livekit' : 'legacy', facing)
 		setTimeout(() => {
 			this.camFlipping = false
-		}, 1500)
+		}, 2000)
 	}
 
 	async flipH5Camera(facing: string): Promise<void> {
@@ -3079,9 +3118,16 @@ export class CallManager {
 					return
 				}
 			}
-			// LiveKit 响铃：无真实 SDP，走 MatrixRTC 接听
+			// LiveKit 响铃：无真实 SDP，走 MatrixRTC 接听（含群呼）
 			const isLivekitInvite = fieldStr(content, 'livekit') == '1' || pickCallSdp(content).indexOf('livekit') >= 0
 			if (isLivekitInvite) {
+				const lkGroupId = fieldStr(content, 'group_id')
+				const lkIsGroup = fieldStr(content, 'group_call') == '1' || lkGroupId.length > 0
+				// 已在同群 LiveKit 通话中：忽略重复邀请
+				if (lkIsGroup && this.useLivekit && this.isGroupCall && this.groupCallId.length > 0 && lkGroupId == this.groupCallId && this.phase != 'idle' && this.phase != 'ended') {
+					console.log('[call] already in same livekit group call')
+					return
+				}
 				if (this.phase != 'idle' && this.phase != 'ringing') {
 					console.warn('[call] busy, skip livekit invite', this.phase)
 					return
@@ -3104,10 +3150,27 @@ export class CallManager {
 				this.leaving = false
 				this.incomingArmed = false
 				this.incomingPrompted = false
-				this.isGroupCall = false
-				this.sub = this.isVideo ? '视频来电（LiveKit）' : '语音来电（LiveKit）'
+				this.isGroupCall = lkIsGroup
+				this.groupCallId = lkIsGroup ? (lkGroupId.length > 0 ? lkGroupId : this.callId) : ''
+				this.groupPeerIds = []
+				this.groupPeerCallIds = []
+				if (lkIsGroup) {
+					const gps = this.parseGroupPeers(content)
+					for (let gi = 0; gi < gps.length; gi++) {
+						if (gps[gi] == myId) continue
+						this.groupPeerIds.push(gps[gi])
+					}
+					if (this.groupPeerIds.indexOf(sender) < 0) this.groupPeerIds.push(sender)
+				}
 				const cachedLk = matrix != null ? matrix.getCachedUserName(sender) : ''
-				this.peerName = cachedLk.length > 0 ? cachedLk : localPart(sender)
+				const who = cachedLk.length > 0 ? cachedLk : localPart(sender)
+				if (lkIsGroup) {
+					this.peerName = (this.isVideo ? '群视频' : '群语音') + '(' + (this.groupPeerIds.length > 0 ? this.groupPeerIds.length : 1) + '人)'
+					this.sub = who + (this.isVideo ? ' 邀请你加入群视频' : ' 邀请你加入群语音')
+				} else {
+					this.peerName = who
+					this.sub = this.isVideo ? '视频来电（LiveKit）' : '语音来电（LiveKit）'
+				}
 				this.htmlBoot = 'in'
 				this.fillPeerProfile()
 				discoverLivekitServiceUrl().then((u: string) => {
@@ -3117,7 +3180,7 @@ export class CallManager {
 				this.armTimeout()
 				this.openPage()
 				this.requestCallPerms()
-				console.log('[call] livekit invite ring from', sender)
+				console.log('[call] livekit invite ring from', sender, lkIsGroup ? 'group' : '1:1')
 				return
 			}
 			const groupId = fieldStr(content, 'group_id')

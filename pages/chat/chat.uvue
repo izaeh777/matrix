@@ -248,11 +248,11 @@
 					</view>
 					<text class="more-label">{{ isGroup ? '群语音' : '语音通话' }}</text>
 				</view>
-				<view v-if="!isGroup" class="more-item" @click.stop="startCallVideo">
+				<view class="more-item" @click.stop="startCallVideo">
 					<view class="more-icon-bg">
 						<image class="more-icon-img" src="/static/login/t4.png" mode="aspectFit"></image>
 					</view>
-					<text class="more-label">视频通话</text>
+					<text class="more-label">{{ isGroup ? '群视频' : '视频通话' }}</text>
 				</view>
 			</view>
 		</view>
