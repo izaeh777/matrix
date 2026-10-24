@@ -1611,6 +1611,8 @@ export class CallManager {
 			payload['room_id'] = this.roomId
 			payload['livekit'] = '1'
 			payload['invitee'] = peer
+			// 每次响铃带时间戳，避免 alreadySeen 把「再次邀请」当成重复事件丢掉
+			payload['ring_ts'] = '' + Date.now()
 			if (this.isVideo) payload['offer_video'] = '1'
 			if (this.isGroupCall) {
 				payload['group_call'] = '1'
@@ -3339,6 +3341,24 @@ export class CallManager {
 		if (this.closedCallIds.length > 40) this.closedCallIds.splice(0, 10)
 	}
 
+	uncloseCall(callId: string): void {
+		if (callId.length == 0) return
+		const next: Array<string> = []
+		for (let i = 0; i < this.closedCallIds.length; i++) {
+			if (this.closedCallIds[i] == callId) continue
+			next.push(this.closedCallIds[i])
+		}
+		this.closedCallIds = next
+		// 同时清掉该通话相关的 alreadySeen，否则会静默吞掉再次邀请
+		const keep: Array<string> = []
+		for (let j = 0; j < this.seenVoip.length; j++) {
+			const k = this.seenVoip[j]
+			if (k.indexOf(callId) >= 0) continue
+			keep.push(k)
+		}
+		this.seenVoip = keep
+	}
+
 	isClosedCall(callId: string): boolean {
 		if (callId.length == 0) return false
 		for (let i = 0; i < this.closedCallIds.length; i++) {
@@ -3391,8 +3411,25 @@ export class CallManager {
 		if (type == 'm.call.invite' && activeId.length > 0 && activeId == callId) return
 		if (type == 'm.call.invite' && this.callId == callId && this.phase != 'idle') return
 		if (this.isClosedCall(callId)) {
-			if (type == 'm.call.invite') console.log('[call] ignore closed invite', callId)
-			return
+			// 同一群呼 id 再次邀请：仅当事件发生在本端上次挂断之后，才重新打开（避免 sync 回放旧 invite 反复弹）
+			let reopen = false
+			if (type == 'm.call.invite' && (this.phase == 'idle' || this.phase == 'ended')) {
+				let evTs = event.origin_server_ts != null ? event.origin_server_ts : 0
+				if (evTs > 0 && evTs < 1000000000000) evTs = evTs * 1000
+				const ringTs = parseFloat(fieldStr(content, 'ring_ts'))
+				const freshTs = (ringTs == ringTs && ringTs > 0) ? ringTs : evTs
+				if (freshTs > this.lastHangAt && (Date.now() - freshTs) < 90000) {
+					reopen = true
+				}
+			}
+			if (reopen) {
+				console.log('[call] re-open closed invite', callId)
+				this.uncloseCall(callId)
+				this.phase = 'idle'
+			} else {
+				if (type == 'm.call.invite') console.log('[call] ignore closed invite', callId, 'phase=', this.phase)
+				return
+			}
 		}
 		const eid = (event.event_id != null) ? event.event_id : ''
 		const ts0 = event.origin_server_ts != null ? event.origin_server_ts : 0
