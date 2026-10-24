@@ -151,12 +151,28 @@
 			applySummary(summary)
 		} catch (e) {}
 		try {
+			// 清掉 joined 缓存，避免刚邀请回来仍显示旧名单
+			matrix.invalidateRoomSummary(roomId.value)
 			const list = await matrix.getRoomMembers(roomId.value)
 			const joined: Array<RoomMember> = []
+			const seen: Array<string> = []
 			for (let i = 0; i < list.length; i++) {
 				if (list[i].membership == 'join' || list[i].membership == 'invite') {
 					joined.push(list[i])
+					seen.push(list[i].user_id)
 				}
+			}
+			// 双保险：pending 里还有但 list 没带上的
+			const pending = matrix.takePendingInvites(roomId.value)
+			for (let p = 0; p < pending.length; p++) {
+				const uid = pending[p]
+				if (uid.length == 0 || seen.indexOf(uid) >= 0) continue
+				joined.push({
+					user_id: uid,
+					membership: 'invite',
+					display_name: matrix.getCachedUserName(uid),
+					avatar_url: matrix.userAvatars.get(uid) ?? ''
+				} as RoomMember)
 			}
 			members.value = joined
 		} catch (e) {}

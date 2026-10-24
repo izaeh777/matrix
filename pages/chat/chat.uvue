@@ -101,7 +101,7 @@
 				<view
 					class="msg-row"
 					:class="[msg.sender == currentUserId ? 'msg-row-me' : 'msg-row-other', msg._highlight ? 'msg-highlight' : '']"
-					@longpress="onLongPress(msg)"
+					@longpress.stop="onLongPress(msg)"
 				>
 				<view v-if="msg.sender != currentUserId" class="msg-avatar">
 					<image class="msg-avatar-img" :src="senderAvatar(msg.sender)" mode="aspectFill"></image>
@@ -346,8 +346,8 @@
 			</view>
 		</view>
 
-		<!-- 操作面板（长按弹出，底部抽屉） -->
-		<view v-if="actionSheet.show" class="action-sheet" @click="hideActionSheet">
+		<!-- 长按消息操作面板：暂时隐藏 -->
+		<view v-if="false && actionSheet.show" class="action-sheet" @click="hideActionSheet">
 			<view class="action-panel" @click.stop="noop">
 				<view class="action-handle"></view>
 				<view class="action-list">
@@ -2628,12 +2628,9 @@
 		// 现在按住说话按钮通过 onVoiceTouchStart/End/Move 直接控制录音。
 	}
 
-	function onLongPress(msg: ChatMsg) {
-		showMorePanel.value = false
-		showEmojiPanel.value = false
-		actionSheet.value.target = msg
-		actionSheet.value.mine = msg.sender == currentUserId.value
-		actionSheet.value.show = true
+	function onLongPress(_msg: ChatMsg) {
+		// 长按弹窗暂时关闭
+		return
 	}
 
 	async function applyEditMessage(eventId: string, content: string): Promise<void> {

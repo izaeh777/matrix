@@ -249,13 +249,21 @@
 		uni.showLoading({ title: '邀请中…' })
 		try {
 			for (let i = 0; i < selectedIds.value.length; i++) {
-				await matrix.inviteUser(roomId.value, selectedIds.value[i])
+				const uid = selectedIds.value[i]
+				await matrix.inviteUser(roomId.value, uid)
+				// 缓存显示名，返回群资料页立刻能显示
+				for (let j = 0; j < selectedUsers.length; j++) {
+					if (selectedUsers[j].user_id == uid && selectedUsers[j].display_name.length > 0) {
+						matrix.cacheUserName(uid, selectedUsers[j].display_name)
+						break
+					}
+				}
 			}
 			uni.hideLoading()
 			uni.showToast({ title: '已添加到群聊', icon: 'success' })
 			setTimeout((): void => {
 				uni.navigateBack()
-			}, 400)
+			}, 300)
 		} catch (e) {
 			uni.hideLoading()
 			uni.showToast({ title: errText(e, '邀请失败'), icon: 'none' })

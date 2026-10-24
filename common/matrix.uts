@@ -1450,13 +1450,17 @@ export class MatrixClient {
 	/**
 	 * 拿到房间已加入的成员（从 cache 取或单次 /joined_members）
 	 */
-	async getJoinedMembers(roomId: string): Promise<Array<string>> {
+	async getJoinedMembers(roomId: string, forceRefresh: boolean = false): Promise<Array<string>> {
 		const cacheKey = 'joined_members:' + roomId
-		const cached = this.memberCache.get(cacheKey)
-		if (cached != null) {
-			if (Date.now() - cached.loaded_at < 60000) {
-				return cached.members
+		if (!forceRefresh) {
+			const cached = this.memberCache.get(cacheKey)
+			if (cached != null) {
+				if (Date.now() - cached.loaded_at < 60000) {
+					return this.mergePendingMemberIds(roomId, cached.members)
+				}
 			}
+		} else {
+			this.memberCache.delete(cacheKey)
 		}
 		const url = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`
 		const res = (await this.request('GET', url, null)) as UTSJSONObject
@@ -1482,7 +1486,17 @@ export class MatrixClient {
 		if (members.length > 1) {
 			this.memberCache.set(cacheKey, { members: members, loaded_at: Date.now() })
 		}
-		return members
+		return this.mergePendingMemberIds(roomId, members)
+	}
+
+	mergePendingMemberIds(roomId: string, base: Array<string>): Array<string> {
+		const out = base.slice()
+		const pending = this.takePendingInvites(roomId)
+		for (let i = 0; i < pending.length; i++) {
+			const u = pending[i]
+			if (u.length > 0 && out.indexOf(u) < 0) out.push(u)
+		}
+		return out
 	}
 
 	/**
@@ -1854,10 +1868,30 @@ export class MatrixClient {
 		return rid
 	}
 
+	/** 刚邀请、接口尚未反映时的本地待显示成员（按房间） */
+	pendingInvites: Map<string, Array<string>> = new Map()
+
+	notePendingInvite(roomId: string, userId: string): void {
+		if (roomId.length == 0 || userId.length == 0) return
+		let list = this.pendingInvites.get(roomId)
+		if (list == null) {
+			list = []
+			this.pendingInvites.set(roomId, list)
+		}
+		if (list.indexOf(userId) < 0) list.push(userId)
+	}
+
+	takePendingInvites(roomId: string): Array<string> {
+		const list = this.pendingInvites.get(roomId)
+		if (list == null) return []
+		return list.slice()
+	}
+
 	async inviteUser(roomId: string, userId: string): Promise<void> {
 		await this.request('POST', '/_matrix/client/v3/rooms/' + encodeURIComponent(roomId) + '/invite', {
 			user_id: userId
 		})
+		this.notePendingInvite(roomId, userId)
 		this.invalidateRoomSummary(roomId)
 	}
 
@@ -2321,6 +2355,7 @@ export class MatrixClient {
 		)) as UTSJSONObject
 		const chunk = jsonArr(data, 'chunk')
 		const result: RoomMember[] = []
+		const seen: Array<string> = []
 		for (let i = 0; i < chunk.length; i++) {
 			const m = chunk[i]
 			const content = jsonObj(m, 'content')
@@ -2339,9 +2374,10 @@ export class MatrixClient {
 				avatar_url: av
 			}
 			result.push(item)
+			seen.push(uid)
 		}
 		if (result.length == 0) {
-			const ids = await this.getJoinedMembers(roomId)
+			const ids = await this.getJoinedMembers(roomId, true)
 			for (let j = 0; j < ids.length; j++) {
 				const uid = ids[j]
 				if (uid.length == 0) continue
@@ -2351,8 +2387,28 @@ export class MatrixClient {
 					display_name: '',
 					avatar_url: ''
 				})
+				seen.push(uid)
 			}
 		}
+		// 刚 invite 成功、服务端成员列表还没跟上时，本地补上
+		const pending = this.takePendingInvites(roomId)
+		const still: Array<string> = []
+		for (let k = 0; k < pending.length; k++) {
+			const pid = pending[k]
+			if (pid.length == 0) continue
+			if (seen.indexOf(pid) >= 0) continue
+			still.push(pid)
+			const cachedName = this.getCachedUserName(pid)
+			const av2 = this.userAvatars.get(pid)
+			result.push({
+				user_id: pid,
+				membership: 'invite',
+				display_name: cachedName,
+				avatar_url: av2 != null ? av2 : ''
+			})
+		}
+		// 已出现在服务端名单里的 pending 清掉，避免一直占着
+		this.pendingInvites.set(roomId, still)
 		return result
 	}
 

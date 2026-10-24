@@ -1654,11 +1654,21 @@ export class CallManager {
 			out.push(u)
 		}
 		try {
-			const members = await matrix.getJoinedMembers(this.roomId)
+			// 强制刷新：避免 60s 缓存导致刚进群/刚邀请的人列表里没有
+			const members = await matrix.getJoinedMembers(this.roomId, true)
 			console.log('[call] invite members', members.length, 'joinedInCall', this.groupJoinedUserIds.length)
 			for (let i = 0; i < members.length; i++) push(members[i])
 		} catch (e0) {
 			console.warn('[call] invite getJoinedMembers fail', e0)
+		}
+		try {
+			const full = await matrix.getRoomMembers(this.roomId)
+			for (let fi = 0; fi < full.length; fi++) {
+				const m = full[fi]
+				if (m.membership == 'join' || m.membership == 'invite') push(m.user_id)
+			}
+		} catch (e1) {
+			console.warn('[call] invite getRoomMembers fail', e1)
 		}
 		// 兜底：原先已邀请但未进会的 peer
 		for (let j = 0; j < this.groupPeerIds.length; j++) push(this.groupPeerIds[j])
