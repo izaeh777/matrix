@@ -2688,6 +2688,8 @@ export class CallManager {
 			let n = 0
 			try { n = parseInt(payload) } catch (eN) { n = 0 }
 			if (n < 0) n = 0
+			const prevN = this.groupJoinedCount
+			const prevRemotes = this.groupJoinedUserIds.length
 			this.groupJoinedCount = n
 			const names = this.htmlStr(cand, 'peer')
 			if (names.length > 0) this.groupJoinedNames = names
@@ -2701,6 +2703,9 @@ export class CallManager {
 					if (u.length > 2 && u.indexOf('@') == 0 && ids.indexOf(u) < 0) ids.push(u)
 				}
 				this.groupJoinedUserIds = ids
+			} else if (n <= 1) {
+				// 只剩自己时 names 为空，必须清空远程名单，否则「只剩一人」挂不断
+				this.groupJoinedUserIds = []
 			}
 			if (this.isGroupCall) {
 				this.peerName = this.isVideo ? '群视频' : '群语音'
@@ -2713,6 +2718,13 @@ export class CallManager {
 				if (n > 1) this.noteConnected()
 				this.emit()
 				this.pushUi()
+				// 曾经有人（>1 或有远程），现在 SFU 只剩自己 → 整场挂断；独自等待接听不挂
+				const wasTogether = prevN > 1 || prevRemotes > 0
+				if (wasTogether && n <= 1 && this.groupJoinedUserIds.length == 0 && this.phase != 'idle' && this.phase != 'ended') {
+					console.log('[call] peers alone in SFU → hang all', 'prevN=', prevN)
+					uni.showToast({ title: '对方已离开', icon: 'none' })
+					this.endCall(false, 'm.call.hangup', '')
+				}
 			}
 			return
 		}
@@ -2898,9 +2910,8 @@ export class CallManager {
 
 	/**
 	 * 群呼某人离开。
-	 * 离开后若还有其他对端（名单或 SFU）→ 本端继续；
-	 * 只剩自己（真正的两人通话一方退出）→ 整场挂断。
-	 * 注意：不能用「入会人数≤2」判断，SFU 先减员时三人也会变成 2，会误杀整场。
+	 * 已入会：以 SFU 为准——远程入会名单空了（只剩自己）→ 整场挂断；
+	 * 还在振铃/等待：邀请名单空了才挂断（避免名单里残留未接成员挡住「两人已挂」）。
 	 */
 	noteGroupPeerLeft(sender: string): boolean {
 		if (sender.length > 0) {
@@ -2922,24 +2933,37 @@ export class CallManager {
 		}
 		if (this.groupConnectedN > 0) this.groupConnectedN = this.groupConnectedN - 1
 		if (this.groupJoinedCount > 1) this.groupJoinedCount = this.groupJoinedCount - 1
+		// SFU 已报只剩自己时，joinedCount 可能还是 1
+		if (this.groupJoinedUserIds.length == 0 && this.groupJoinedCount > 1) {
+			this.groupJoinedCount = 1
+		}
 
-		// 还剩其他对端 → 继续（三人及以上正常减员）
-		const othersLeft = this.groupPeerIds.length > 0 || this.groupJoinedUserIds.length > 0
-		if (othersLeft) {
+		const inMedia = this.connectedAt > 0 || this.phase == 'connected' || this.phase == 'connecting'
+		const remotesInSfu = this.groupJoinedUserIds.length
+		// 已在通话中且 SFU 无远程成员 → 只剩自己，整场挂断
+		if (inMedia && remotesInSfu == 0) {
+			if (this.phase != 'idle' && this.phase != 'ended') {
+				console.log('[call] alone in SFU → hang all', sender, 'peers=', this.groupPeerIds.length)
+				uni.showToast({ title: '对方已离开', icon: 'none' })
+				this.endCall(false, 'm.call.hangup', '')
+				return true
+			}
+			return false
+		}
+		// 仍有人在 SFU，或还在等未接的人
+		if (remotesInSfu > 0 || (!inMedia && this.groupPeerIds.length > 0)) {
 			if (sender.length > 0) {
 				uni.showToast({ title: this.displayNameOf(sender) + ' 已离开', icon: 'none' })
 			}
-			const n = this.groupJoinedCount > 0 ? this.groupJoinedCount : (this.groupConnectedN > 0 ? this.groupConnectedN : 1)
+			const n = remotesInSfu > 0 ? (remotesInSfu + 1) : (this.groupJoinedCount > 0 ? this.groupJoinedCount : 1)
 			this.sub = (this.isVideo ? '群视频中' : '群语音中') + ' · ' + n + '人'
 			this.emit()
 			this.pushUi()
-			console.log('[call] group peer left, stay', sender, 'peers=', this.groupPeerIds.length, 'joined=', this.groupJoinedUserIds.length)
+			console.log('[call] group peer left, stay', sender, 'peers=', this.groupPeerIds.length, 'joined=', remotesInSfu)
 			return false
 		}
-
-		// 名单与 SFU 都已无对端 = 两人通话对方退出 → 整场挂断
 		if (this.phase != 'idle' && this.phase != 'ended') {
-			console.log('[call] alone after leave → hang all', sender)
+			console.log('[call] no peers left → hang all', sender)
 			uni.showToast({ title: '对方已离开', icon: 'none' })
 			this.endCall(false, 'm.call.hangup', '')
 			return true
