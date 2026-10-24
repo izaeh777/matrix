@@ -2855,6 +2855,12 @@ export class CallManager {
 		if (empty || !membershipHasLivekit(content)) {
 			// 对方清空 membership = 离开
 			if (this.useLivekit && this.roomId == roomId && this.phase != 'idle' && this.phase != 'ended') {
+				// 群呼：某人退会 ≠ 整场结束（SFU 会自己摘掉对方画面）
+				if (this.isGroupCall) {
+					console.log('[call] group peer left membership', sender)
+					this.noteGroupPeerLeft(sender)
+					return
+				}
 				if (sender == this.peerUserId || sender == this.initiatorId) {
 					console.log('[call] peer left rtc membership')
 					uni.showToast({ title: '对方已离开', icon: 'none' })
@@ -2878,6 +2884,35 @@ export class CallManager {
 		}
 	}
 
+	/** 群呼某人离开：更新名单/人数，不结束本端通话 */
+	noteGroupPeerLeft(sender: string): void {
+		if (sender.length > 0) {
+			const nextPeers: Array<string> = []
+			const nextCids: Array<string> = []
+			for (let i = 0; i < this.groupPeerIds.length; i++) {
+				if (this.groupPeerIds[i] == sender) continue
+				nextPeers.push(this.groupPeerIds[i])
+				nextCids.push(this.groupPeerCallIds[i])
+			}
+			this.groupPeerIds = nextPeers
+			this.groupPeerCallIds = nextCids
+			const nextJoined: Array<string> = []
+			for (let j = 0; j < this.groupJoinedUserIds.length; j++) {
+				if (this.groupJoinedUserIds[j] == sender) continue
+				nextJoined.push(this.groupJoinedUserIds[j])
+			}
+			this.groupJoinedUserIds = nextJoined
+			const nm = this.displayNameOf(sender)
+			uni.showToast({ title: nm + ' 已离开', icon: 'none' })
+		}
+		if (this.groupConnectedN > 0) this.groupConnectedN = this.groupConnectedN - 1
+		if (this.groupJoinedCount > 1) this.groupJoinedCount = this.groupJoinedCount - 1
+		const n = this.groupJoinedCount > 0 ? this.groupJoinedCount : (this.groupConnectedN > 0 ? this.groupConnectedN : 1)
+		this.sub = (this.isVideo ? '群视频中' : '群语音中') + ' · ' + n + '人'
+		this.emit()
+		this.pushUi()
+	}
+
 	sendHangup(reason: string): void {
 		if (this.isGroupCall && this.groupPeerIds.length > 0) {
 			for (let i = 0; i < this.groupPeerIds.length; i++) {
@@ -2889,6 +2924,8 @@ export class CallManager {
 				hang['version'] = '1'
 				hang['party_id'] = this.partyId
 				hang['reason'] = reason
+				hang['group_call'] = '1'
+				hang['group_leave'] = '1'
 				if (this.groupCallId.length > 0) hang['group_id'] = this.groupCallId
 				this.notifyCall('m.call.hangup', hang, this.roomId, peer)
 			}
@@ -3032,9 +3069,11 @@ export class CallManager {
 				lkHang['reason'] = signalType == 'm.call.reject' ? 'user_busy' : 'user_hangup'
 				lkHang['room_id'] = rid
 				lkHang['livekit'] = '1'
-				if (this.isGroupCall && this.groupCallId.length > 0) {
+				if (this.isGroupCall) {
 					lkHang['group_call'] = '1'
-					lkHang['group_id'] = this.groupCallId
+					// 标记「个人离会」，对端收到后不应整场挂断
+					lkHang['group_leave'] = '1'
+					if (this.groupCallId.length > 0) lkHang['group_id'] = this.groupCallId
 				}
 				this.notifyCall('m.call.hangup', lkHang, rid, hangPeers[hi]).catch((_e) => {})
 			}
@@ -3660,16 +3699,28 @@ export class CallManager {
 		}
 
 		if (type == 'm.call.hangup' || type == 'm.call.reject') {
-			if (this.isGroupCall) {
-				const leftPeer = this.peerOfCallId(callId)
-				if (leftPeer.length > 0 && this.connectedAt > 0 && callId != this.callId) {
-					console.log('[call] group peer left', leftPeer)
-					if (this.groupConnectedN > 0) this.groupConnectedN = this.groupConnectedN - 1
-					this.sub = '群语音中 · ' + (this.groupConnectedN > 0 ? this.groupConnectedN : 0) + '人'
-					this.emit()
+			const groupLeave = fieldStr(content, 'group_leave') == '1'
+			const groupFlag = this.isGroupCall || fieldStr(content, 'group_call') == '1' || fieldStr(content, 'group_id').length > 0 || groupLeave
+			// 群呼：某人挂断/拒绝只表示他离会，其余人继续（LiveKit SFU 自动摘掉对方）
+			if (groupFlag && this.phase != 'idle' && this.phase != 'ended') {
+				const inMedia = this.connectedAt > 0 || this.phase == 'connected' || this.phase == 'connecting' || (this.useLivekit && this.invitePosted)
+				if (inMedia || groupLeave || type == 'm.call.reject') {
+					console.log('[call] group peer left/reject, stay in call', sender, type)
+					this.noteGroupPeerLeft(sender.length > 0 ? sender : this.peerOfCallId(callId))
 					return
 				}
-			} else if (this.callId.length > 0 && callId != this.callId) {
+				// 仍在振铃：仅发起人取消整场时才挂断本端
+				if (this.phase == 'ringing' && this.isIncoming && sender == this.initiatorId && type == 'm.call.hangup' && !groupLeave) {
+					console.log('[call] group initiator cancelled while ringing')
+					uni.showToast({ title: '群通话已取消', icon: 'none' })
+					this.endCall(false, 'm.call.hangup', '')
+					return
+				}
+				console.log('[call] group hang ignore (stay)', sender, this.phase)
+				this.noteGroupPeerLeft(sender)
+				return
+			}
+			if (this.callId.length > 0 && callId != this.callId) {
 				return
 			}
 			if (this.phase == 'idle' || this.phase == 'ended') {
