@@ -2886,14 +2886,11 @@ export class CallManager {
 
 	/**
 	 * 群呼某人离开。
-	 * 仅剩两人（或离开后只剩自己）→ 整场挂断；三人及以上 → 继续通话。
-	 * @returns 是否已因此整场挂断
+	 * 离开后若还有其他对端（名单或 SFU）→ 本端继续；
+	 * 只剩自己（真正的两人通话一方退出）→ 整场挂断。
+	 * 注意：不能用「入会人数≤2」判断，SFU 先减员时三人也会变成 2，会误杀整场。
 	 */
 	noteGroupPeerLeft(sender: string): boolean {
-		const beforeJoined = this.groupJoinedCount > 0 ? this.groupJoinedCount : (this.groupConnectedN > 0 ? this.groupConnectedN : 0)
-		const beforePeers = this.groupPeerIds.length
-		// 两人通话：入会≤2，或对端名单只剩/只有 1 人
-		const wasTwoParty = (beforeJoined > 0 && beforeJoined <= 2) || beforePeers <= 1 || this.isGroupCall == false
 		if (sender.length > 0) {
 			const nextPeers: Array<string> = []
 			const nextCids: Array<string> = []
@@ -2913,21 +2910,28 @@ export class CallManager {
 		}
 		if (this.groupConnectedN > 0) this.groupConnectedN = this.groupConnectedN - 1
 		if (this.groupJoinedCount > 1) this.groupJoinedCount = this.groupJoinedCount - 1
-		const alone = this.groupJoinedUserIds.length == 0 && this.groupJoinedCount <= 1
-		const hangAll = wasTwoParty || alone
-		if (hangAll && this.phase != 'idle' && this.phase != 'ended') {
-			console.log('[call] two-party or alone after leave → hang all', sender, 'wasTwo=', wasTwoParty, 'alone=', alone)
+
+		// 还剩其他对端 → 继续（三人及以上正常减员）
+		const othersLeft = this.groupPeerIds.length > 0 || this.groupJoinedUserIds.length > 0
+		if (othersLeft) {
+			if (sender.length > 0) {
+				uni.showToast({ title: this.displayNameOf(sender) + ' 已离开', icon: 'none' })
+			}
+			const n = this.groupJoinedCount > 0 ? this.groupJoinedCount : (this.groupConnectedN > 0 ? this.groupConnectedN : 1)
+			this.sub = (this.isVideo ? '群视频中' : '群语音中') + ' · ' + n + '人'
+			this.emit()
+			this.pushUi()
+			console.log('[call] group peer left, stay', sender, 'peers=', this.groupPeerIds.length, 'joined=', this.groupJoinedUserIds.length)
+			return false
+		}
+
+		// 名单与 SFU 都已无对端 = 两人通话对方退出 → 整场挂断
+		if (this.phase != 'idle' && this.phase != 'ended') {
+			console.log('[call] alone after leave → hang all', sender)
 			uni.showToast({ title: '对方已离开', icon: 'none' })
 			this.endCall(false, 'm.call.hangup', '')
 			return true
 		}
-		if (sender.length > 0) {
-			uni.showToast({ title: this.displayNameOf(sender) + ' 已离开', icon: 'none' })
-		}
-		const n = this.groupJoinedCount > 0 ? this.groupJoinedCount : (this.groupConnectedN > 0 ? this.groupConnectedN : 1)
-		this.sub = (this.isVideo ? '群视频中' : '群语音中') + ' · ' + n + '人'
-		this.emit()
-		this.pushUi()
 		return false
 	}
 
