@@ -2,14 +2,31 @@
 	<view class="settings-page">
 		<!-- 顶部导航 -->
 		<view class="topbar">
-			<text class="topbar-back" @click="goBack">←</text>
+			<view class="topbar-back" @click="goBack">
+				<image class="topbar-back-icon" src="/static/login/f.png" mode="aspectFit"></image>
+			</view>
 			<text class="topbar-title">设置</text>
 			<view class="topbar-right"></view>
 		</view>
 
 		<scroll-view class="settings-scroll" scroll-y>
-			<!-- 推送通知 -->
+			<!-- 个人资料：对接 PUT /api/v1/users/me -->
 			<view class="section">
+				<view class="section-title">个人资料</view>
+				<view class="setting-row" @click="onEditAvatar">
+					<text class="setting-label">头像</text>
+					<image class="setting-avatar" :src="profileAvatar" mode="aspectFill"></image>
+					<text class="setting-arrow">›</text>
+				</view>
+				<view class="setting-row" @click="onEditNickname">
+					<text class="setting-label">昵称</text>
+					<text class="setting-value">{{ profileNickname }}</text>
+					<text class="setting-arrow">›</text>
+				</view>
+			</view>
+
+			<!-- 推送 / 设备 / 账号安全 / 关于：暂隐 -->
+			<view v-if="false" class="section">
 				<view class="section-title">推送通知</view>
 				<view class="setting-row">
 					<text class="setting-label">接收推送</text>
@@ -20,9 +37,7 @@
 					<text class="setting-value" :class="pushStatusClass">{{ pushStatusText }}</text>
 				</view>
 			</view>
-
-			<!-- 设备管理 -->
-			<view class="section">
+			<view v-if="false" class="section">
 				<view class="section-title">登录设备</view>
 				<view v-if="loadingDevices" class="loading-row">
 					<text class="loading-text">加载中…</text>
@@ -52,9 +67,7 @@
 					<text class="setting-label danger-text">登出其他所有设备</text>
 				</view>
 			</view>
-
-			<!-- 账号安全 -->
-			<view class="section">
+			<view v-if="false" class="section">
 				<view class="section-title">账号安全</view>
 				<view class="setting-row" @click="onChangePassword">
 					<text class="setting-label">修改密码</text>
@@ -65,9 +78,7 @@
 					<text class="setting-arrow">›</text>
 				</view>
 			</view>
-
-			<!-- 关于 -->
-			<view class="section">
+			<view v-if="false" class="section">
 				<view class="section-title">关于</view>
 				<view class="setting-row">
 					<text class="setting-label">Matrix 版本</text>
@@ -80,17 +91,42 @@
 			</view>
 
 			<!-- 退出登录 -->
-			<view class="section">
-				<button class="btn-logout" @click="onLogout">
+			<view class="logout-wrap">
+				<view class="btn-logout" @click="onLogout">
 					<text class="btn-logout-text">退出登录</text>
-				</button>
+				</view>
 			</view>
 		</scroll-view>
 
+		<!-- 改昵称弹窗 -->
+		<view v-if="showNicknameModal" class="modal-overlay" @click="closeNicknameModal">
+			<view class="modal-card" @click.stop="noopModal">
+				<text class="modal-title">修改昵称</text>
+				<input
+					class="modal-input"
+					type="text"
+					v-model="nicknameDraft"
+					:focus="nicknameInputFocus"
+					placeholder="请输入新昵称"
+					placeholder-class="modal-placeholder"
+					maxlength="32"
+					confirm-type="done"
+				/>
+				<view class="modal-actions">
+					<view class="modal-btn-cancel" @click.stop="closeNicknameModal">
+						<text class="modal-btn-cancel-text">取消</text>
+					</view>
+					<view class="modal-btn-confirm" @click.stop="onSubmitNickname">
+						<text class="modal-btn-confirm-text">保存</text>
+					</view>
+				</view>
+			</view>
+		</view>
+
 		<!-- 改密码弹窗 -->
 		<view v-if="showPasswordModal" class="modal-overlay" @click="closePasswordModal">
-			<view class="modal-card" @click="stopBubble">
-				<view class="modal-title">修改密码</view>
+			<view class="modal-card" @click.stop="noopModal">
+				<text class="modal-title">修改密码</text>
 				<input
 					class="modal-input"
 					v-model="passwordForm.oldPassword"
@@ -113,10 +149,10 @@
 					placeholder-class="modal-placeholder"
 				/>
 				<view class="modal-actions">
-					<button class="modal-btn-cancel" @click="closePasswordModal">
+					<button class="modal-btn-cancel" @click.stop="closePasswordModal">
 						<text class="modal-btn-cancel-text">取消</text>
 					</button>
-					<button class="modal-btn-confirm" @click="onSubmitPassword">
+					<button class="modal-btn-confirm" @click.stop="onSubmitPassword">
 						<text class="modal-btn-confirm-text">确认</text>
 					</button>
 				</view>
@@ -125,8 +161,8 @@
 
 		<!-- 设备详情弹窗 -->
 		<view v-if="showDeviceModal && selectedDevice != null" class="modal-overlay" @click="closeDeviceModal">
-			<view class="modal-card" @click="stopBubble">
-				<view class="modal-title">{{ deviceName(selectedDevice) }}</view>
+			<view class="modal-card" @click.stop="noopModal">
+				<text class="modal-title">{{ deviceName(selectedDevice) }}</text>
 				<view class="device-detail-row">
 					<text class="device-detail-key">设备ID</text>
 					<text class="device-detail-val">{{ selectedId() }}</text>
@@ -152,8 +188,8 @@
 
 		<!-- 注销二次确认弹窗 -->
 		<view v-if="showDeactivateModal" class="modal-overlay" @click="closeDeactivateModal">
-			<view class="modal-card" @click="stopBubble">
-				<view class="modal-title danger-text">注销账号</view>
+			<view class="modal-card" @click.stop="noopModal">
+				<text class="modal-title danger-text">注销账号</text>
 				<text class="modal-desc">注销后你的所有数据将被永久删除，包括聊天记录和联系人。此操作不可恢复！</text>
 				<input
 					class="modal-input"
@@ -163,10 +199,10 @@
 					placeholder-class="modal-placeholder"
 				/>
 				<view class="modal-actions">
-					<button class="modal-btn-cancel" @click="closeDeactivateModal">
+					<button class="modal-btn-cancel" @click.stop="closeDeactivateModal">
 						<text class="modal-btn-cancel-text">取消</text>
 					</button>
-					<button class="modal-btn-danger" @click="onSubmitDeactivate">
+					<button class="modal-btn-danger" @click.stop="onSubmitDeactivate">
 						<text class="modal-btn-danger-text">确认注销</text>
 					</button>
 				</view>
@@ -176,11 +212,11 @@
 </template>
 
 <script setup lang="uts">
-	import { ref, computed, onMounted, onUnmounted } from 'vue'
+	import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 	import { getMatrix, errText, errCode, DeviceInfo } from '@/common/matrix.uts'
-	import { loadSession, SessionInfo } from '@/common/storage.uts'
+	import { loadSession, saveSession, SessionInfo } from '@/common/storage.uts'
 	import { endMatrixSession } from '@/common/app.uts'
-	import { platformLogout } from '@/common/platform.uts'
+	import { platformLogout, loadPlatformSession, fetchPlatformMe, updatePlatformProfile } from '@/common/platform.uts'
 
 	type SettingsDevice = {
 		device_id: string
@@ -203,6 +239,13 @@
 		if (s == null) return ''
 		return s.device_id
 	})
+
+	const profileNickname = ref<string>('')
+	const profileAvatar = ref<string>('/static/login/tiki.png')
+	const showNicknameModal = ref<boolean>(false)
+	const nicknameDraft = ref<string>('')
+	const nicknameInputFocus = ref<boolean>(false)
+	const savingProfile = ref<boolean>(false)
 
 	// 推送状态
 	const pushEnabled = ref<boolean>(true)
@@ -233,9 +276,179 @@
 	function goBack() {
 		uni.navigateBack()
 	}
+	function noopModal(): void {}
 	function stopBubble(): void {}
+	function closeNicknameModal(): void {
+		nicknameInputFocus.value = false
+		showNicknameModal.value = false
+	}
 	function closePasswordModal(): void {
 		showPasswordModal.value = false
+	}
+
+	async function loadProfileInfo(): Promise<void> {
+		const p = loadPlatformSession()
+		if (p != null && p.nickname.length > 0) profileNickname.value = p.nickname
+		const s = session.value
+		if (s != null) {
+			if (profileNickname.value.length == 0 && s.display_name.length > 0) profileNickname.value = s.display_name
+			if (s.avatar_url.length > 0) {
+				const matrix = getMatrix()
+				if (matrix != null) {
+					let url = matrix.mxcToHttp(s.avatar_url, 160, 160)
+					const token = matrix.accessToken
+					if (token.length > 0 && url.indexOf('access_token=') < 0) {
+						url = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'access_token=' + encodeURIComponent(token)
+					}
+					if (url.length > 0) profileAvatar.value = url
+				}
+			}
+		}
+		try {
+			const me = await fetchPlatformMe()
+			if (me.nickname.length > 0) profileNickname.value = me.nickname
+			if (me.avatar.length > 0) {
+				if (me.avatar.indexOf('http') == 0 || me.avatar.indexOf('mxc://') == 0) {
+					if (me.avatar.indexOf('mxc://') == 0) {
+						const matrix = getMatrix()
+						if (matrix != null) {
+							let url = matrix.mxcToHttp(me.avatar, 160, 160)
+							if (url.length > 0) profileAvatar.value = url
+						}
+					} else {
+						profileAvatar.value = me.avatar
+					}
+				}
+			}
+		} catch (e) {
+			console.warn('load profile me fail', e)
+		}
+	}
+
+	function onEditNickname(): void {
+		nicknameDraft.value = profileNickname.value
+		nicknameInputFocus.value = false
+		showNicknameModal.value = true
+		nextTick(() => {
+			nicknameInputFocus.value = true
+		})
+	}
+
+	async function onSubmitNickname(): Promise<void> {
+		const name = nicknameDraft.value.trim()
+		if (name.length == 0) {
+			uni.showToast({ title: '请输入昵称', icon: 'none' })
+			return
+		}
+		if (savingProfile.value) return
+		savingProfile.value = true
+		uni.showLoading({ title: '保存中…' })
+		let platformOk = false
+		let matrixOk = false
+		let errMsg = ''
+		// 先改 Matrix（聊天可见），再改平台资料
+		const matrix = getMatrix()
+		if (matrix != null) {
+			try {
+				await matrix.setDisplayName(name)
+				const s = session.value
+				if (s != null) {
+					s.display_name = name
+					saveSession(s)
+					session.value = s
+				}
+				matrixOk = true
+			} catch (eMx) {
+				console.warn('sync matrix displayname fail', eMx)
+				errMsg = errText(eMx, '聊天昵称更新失败')
+			}
+		}
+		try {
+			const me = await updatePlatformProfile(name, '')
+			profileNickname.value = me.nickname.length > 0 ? me.nickname : name
+			platformOk = true
+		} catch (e) {
+			console.warn('platform nickname fail', e)
+			errMsg = errText(e, '平台资料更新失败')
+			if (matrixOk) profileNickname.value = name
+		}
+		uni.hideLoading()
+		savingProfile.value = false
+		if (platformOk || matrixOk) {
+			showNicknameModal.value = false
+			if (platformOk) {
+				uni.showToast({ title: '昵称已更新', icon: 'success' })
+			} else {
+				uni.showToast({ title: '聊天昵称已改；平台：' + errMsg, icon: 'none', duration: 2500 })
+			}
+		} else {
+			uni.showToast({ title: errMsg.length > 0 ? errMsg : '更新失败', icon: 'none', duration: 2500 })
+		}
+	}
+
+	function onEditAvatar(): void {
+		uni.chooseImage({
+			count: 1,
+			sizeType: ['compressed'],
+			sourceType: ['album', 'camera'],
+			success: (res) => {
+				const paths = res.tempFilePaths
+				if (paths == null || paths.length == 0) return
+				uploadAvatarNow(paths[0])
+			}
+		})
+	}
+
+	async function uploadAvatarNow(localPath: string): Promise<void> {
+		if (savingProfile.value) return
+		savingProfile.value = true
+		uni.showLoading({ title: '上传中…' })
+		try {
+			const matrix = getMatrix()
+			if (matrix == null) {
+				uni.hideLoading()
+				uni.showToast({ title: '请先登录聊天账号', icon: 'none' })
+				savingProfile.value = false
+				return
+			}
+			const lower = localPath.toLowerCase()
+			let mime = 'image/jpeg'
+			let fname = 'avatar.jpg'
+			if (lower.indexOf('.png') >= 0) {
+				mime = 'image/png'
+				fname = 'avatar.png'
+			} else if (lower.indexOf('.webp') >= 0) {
+				mime = 'image/webp'
+				fname = 'avatar.webp'
+			}
+			const mxc = await matrix.uploadMedia(localPath, mime, fname)
+			await matrix.setAvatarUrl(mxc)
+			let httpUrl = matrix.mxcToHttp(mxc, 256, 256)
+			const token = matrix.accessToken
+			if (token.length > 0 && httpUrl.indexOf('access_token=') < 0) {
+				httpUrl = httpUrl + (httpUrl.indexOf('?') >= 0 ? '&' : '?') + 'access_token=' + encodeURIComponent(token)
+			}
+			// 平台资料：把可访问地址写到 PUT /users/me
+			try {
+				await updatePlatformProfile('', httpUrl.length > 0 ? httpUrl : mxc)
+			} catch (ePlat) {
+				console.warn('platform avatar update fail', ePlat)
+			}
+			const s = session.value
+			if (s != null) {
+				s.avatar_url = mxc
+				saveSession(s)
+				session.value = s
+			}
+			if (httpUrl.length > 0) profileAvatar.value = httpUrl
+			else profileAvatar.value = localPath
+			uni.hideLoading()
+			uni.showToast({ title: '头像已更新', icon: 'success' })
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: errText(e, '上传失败'), icon: 'none' })
+		}
+		savingProfile.value = false
 	}
 	function closeDeviceModal(): void {
 		showDeviceModal.value = false
@@ -382,6 +595,7 @@
 	}
 
 	async function setupSettings(): Promise<void> {
+		await loadProfileInfo()
 		await loadDevices()
 		await checkPushStatus()
 	}
@@ -687,10 +901,10 @@
 
 	.topbar {
 		background-color: #fff;
-		padding-top: 88rpx;
-		padding-left: 24rpx;
+		padding-top: 24rpx;
+		padding-bottom: 16rpx;
+		padding-left: 16rpx;
 		padding-right: 24rpx;
-		height: 176rpx;
 		flex-direction: row;
 		align-items: center;
 		border-bottom-width: 1rpx;
@@ -698,9 +912,15 @@
 	}
 
 	.topbar-back {
-		font-size: 40rpx;
-		color: #1f6feb;
-		padding: 10rpx 16rpx 10rpx 0;
+		width: 72rpx;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
+		margin-right: 8rpx;
+	}
+	.topbar-back-icon {
+		width: 36rpx;
+		height: 36rpx;
 	}
 
 	.topbar-title {
@@ -747,6 +967,15 @@
 	.setting-value {
 		font-size: 26rpx;
 		color: #999;
+		max-width: 320rpx;
+	}
+
+	.setting-avatar {
+		width: 72rpx;
+		height: 72rpx;
+		border-radius: 36rpx;
+		background-color: #e8eef8;
+		margin-right: 8rpx;
 	}
 
 	.setting-arrow {
@@ -860,7 +1089,7 @@
 		background-color: rgba(0, 0, 0, 0.5);
 		align-items: center;
 		justify-content: center;
-		z-index: 999;
+		z-index: 10080;
 	}
 
 	.modal-card {
@@ -868,6 +1097,7 @@
 		background-color: #fff;
 		border-radius: 24rpx;
 		padding: 40rpx;
+		z-index: 10081;
 	}
 
 	.modal-title {
@@ -886,11 +1116,15 @@
 	}
 
 	.modal-input {
+		width: 100%;
+		height: 80rpx;
+		line-height: 80rpx;
 		background-color: #f7f7fa;
 		border-radius: 12rpx;
-		padding: 20rpx 24rpx;
+		padding: 0 24rpx;
 		font-size: 28rpx;
 		margin-bottom: 16rpx;
+		color: #1a1a1a;
 	}
 
 	.modal-placeholder {
@@ -956,16 +1190,23 @@
 	}
 
 	/* 退出登录 */
-	.btn-logout {
-		border-radius: 12rpx;
-		padding: 24rpx;
-		margin: 32rpx 24rpx;
-		background-color: #fff;
-		border: 1rpx solid #e8e8ec;
+	.logout-wrap {
+		padding: 48rpx 24rpx 80rpx;
 	}
-
+	.btn-logout {
+		height: 96rpx;
+		border-radius: 48rpx;
+		background-color: #ffffff;
+		align-items: center;
+		justify-content: center;
+		border-width: 1rpx;
+		border-style: solid;
+		border-color: #f0d0ce;
+	}
 	.btn-logout-text {
-		font-size: 30rpx;
-		color: #ff3b30;
+		font-size: 32rpx;
+		color: #e5484d;
+		font-weight: 600;
+		text-align: center;
 	}
 </style>

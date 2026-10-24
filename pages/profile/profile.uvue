@@ -146,7 +146,7 @@
 	import { ref, computed, onMounted, onUnmounted } from 'vue'
 	import { getMatrix } from '@/common/matrix.uts'
 	import { loadSession, saveSession, SessionInfo } from '@/common/storage.uts'
-	import { loadPlatformSession, PlatformSession, fetchPlatformMe } from '@/common/platform.uts'
+	import { loadPlatformSession, PlatformSession, fetchPlatformMe, savePlatformSession } from '@/common/platform.uts'
 	import { friendCodeOf, inviteQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
 	import { openChat } from '@/common/app.uts'
 
@@ -211,6 +211,16 @@
 		try {
 			const me = await fetchPlatformMe()
 			usdtBalance.value = me.money.length > 0 ? me.money : '0'
+			// 同步昵称到本地 session，资料页立刻刷新
+			const p = loadPlatformSession()
+			if (p != null && me.nickname.length > 0) {
+				p.nickname = me.nickname
+				savePlatformSession(p)
+				platform.value = p
+			}
+			if (me.avatar.length > 0 && me.avatar.indexOf('http') == 0) {
+				avatarUrl.value = me.avatar
+			}
 		} catch (e) {
 			console.warn('拉取余额失败', e)
 			usdtBalance.value = '--'
@@ -258,6 +268,12 @@
 
 	onMounted(() => {
 		setupProfile()
+	})
+
+	onShow(() => {
+		session.value = loadSession()
+		platform.value = loadPlatformSession()
+		loadUsdtBalance()
 	})
 
 	onUnmounted(() => {

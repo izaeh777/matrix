@@ -590,7 +590,8 @@ export class CallManager {
 			cameraOff: this.cameraOff,
 			isGroupCall: this.isGroupCall,
 			groupPeerCount: this.groupPeerIds.length,
-			groupJoinedCount: this.groupJoinedCount > 0 ? this.groupJoinedCount : (this.groupConnectedN > 0 ? this.groupConnectedN : 0),
+			// 以 SFU peers 为准；勿用 groupConnectedN 回退（mesh 累加易偏大）
+			groupJoinedCount: this.groupJoinedCount > 0 ? this.groupJoinedCount : 0,
 			groupJoinedNames: this.groupJoinedNames,
 			minimized: this.minimized
 		}
@@ -1730,6 +1731,20 @@ export class CallManager {
 		this.minimized = true
 		this.pageOpen = false
 		this.ensureH5CallBridge()
+		// H5：同步藏黑底层，避免 navigateBack 后 track 回调又把 #callEngineRoot 拉满屏
+		// #ifdef H5
+		try {
+			const g = h5Global()
+			const win = (g != null && g['window'] != null) ? g['window'] : g
+			if (win != null && win['__lkHandle'] != null) {
+				win['__lkHandle']({ cmd: 'lkMinimize' } as any)
+			} else {
+				const doc = (win != null) ? win['document'] : null
+				const root = (doc != null) ? doc.getElementById('callEngineRoot') : null
+				if (root != null) root.style.cssText = 'display:none!important;'
+			}
+		} catch (eMin) {}
+		// #endif
 		if (this.useLivekit) {
 			const m: UTSJSONObject = {}
 			m['cmd'] = 'lkMinimize'
@@ -1787,10 +1802,13 @@ export class CallManager {
 						const mgr = getCallManager()
 						let n = 0
 						try { n = parseInt('' + d.message) } catch (eN) { n = 0 }
-						if (n >= 0) mgr.groupJoinedCount = n
+						if (n < 0) n = 0
+						mgr.groupJoinedCount = n
+						mgr.groupConnectedN = n
 						if (d.peer != null) {
 							const names = '' + d.peer
-							if (names.length > 0) mgr.groupJoinedNames = names
+							// 空名单也要清，避免残留「我、甲」
+							mgr.groupJoinedNames = names
 						}
 						if (d.names != null) {
 							const raw = '' + d.names
@@ -1803,8 +1821,18 @@ export class CallManager {
 								if (u.length > 2 && u.indexOf('@') == 0 && ids.indexOf(u) < 0) ids.push(u)
 							}
 							mgr.groupJoinedUserIds = ids
+						} else if (n <= 1) {
+							mgr.groupJoinedUserIds = []
 						}
-						if (mgr.isGroupCall) mgr.emit()
+						if (mgr.isGroupCall) {
+							if (n > 1) {
+								mgr.sub = (mgr.isVideo ? '群视频中' : '群语音中') + ' · ' + n + '人'
+							} else {
+								mgr.sub = '等待群成员加入…'
+							}
+							mgr.emit()
+							mgr.pushUi()
+						}
 					}
 				} catch (e1) {}
 			}
@@ -2691,8 +2719,9 @@ export class CallManager {
 			const prevN = this.groupJoinedCount
 			const prevRemotes = this.groupJoinedUserIds.length
 			this.groupJoinedCount = n
+			this.groupConnectedN = n
 			const names = this.htmlStr(cand, 'peer')
-			if (names.length > 0) this.groupJoinedNames = names
+			this.groupJoinedNames = names
 			const joinedRaw = this.htmlStr(cand, 'names')
 			if (joinedRaw.length > 0) {
 				const ids: Array<string> = []
@@ -2709,9 +2738,10 @@ export class CallManager {
 			}
 			if (this.isGroupCall) {
 				this.peerName = this.isVideo ? '群视频' : '群语音'
-				if (n > 0) {
+				if (n > 1) {
 					this.sub = (this.isVideo ? '群视频中' : '群语音中') + ' · ' + n + '人'
-					this.groupConnectedN = n
+				} else if (n == 1) {
+					this.sub = '等待群成员加入…'
 				} else {
 					this.sub = '等待群成员加入…'
 				}
@@ -2931,15 +2961,12 @@ export class CallManager {
 			}
 			this.groupJoinedUserIds = nextJoined
 		}
-		if (this.groupConnectedN > 0) this.groupConnectedN = this.groupConnectedN - 1
-		if (this.groupJoinedCount > 1) this.groupJoinedCount = this.groupJoinedCount - 1
-		// SFU 已报只剩自己时，joinedCount 可能还是 1
-		if (this.groupJoinedUserIds.length == 0 && this.groupJoinedCount > 1) {
-			this.groupJoinedCount = 1
-		}
+		// 人数只跟 SFU 远程名单走，禁止对 groupJoinedCount 再 -1（会与 peers 事件重复减）
+		const remotesInSfu = this.groupJoinedUserIds.length
+		this.groupJoinedCount = remotesInSfu + 1
+		this.groupConnectedN = this.groupJoinedCount
 
 		const inMedia = this.connectedAt > 0 || this.phase == 'connected' || this.phase == 'connecting'
-		const remotesInSfu = this.groupJoinedUserIds.length
 		// 已在通话中且 SFU 无远程成员 → 只剩自己，整场挂断
 		if (inMedia && remotesInSfu == 0) {
 			if (this.phase != 'idle' && this.phase != 'ended') {
@@ -2955,8 +2982,12 @@ export class CallManager {
 			if (sender.length > 0) {
 				uni.showToast({ title: this.displayNameOf(sender) + ' 已离开', icon: 'none' })
 			}
-			const n = remotesInSfu > 0 ? (remotesInSfu + 1) : (this.groupJoinedCount > 0 ? this.groupJoinedCount : 1)
-			this.sub = (this.isVideo ? '群视频中' : '群语音中') + ' · ' + n + '人'
+			const n = this.groupJoinedCount
+			if (n > 1) {
+				this.sub = (this.isVideo ? '群视频中' : '群语音中') + ' · ' + n + '人'
+			} else {
+				this.sub = '等待群成员加入…'
+			}
 			this.emit()
 			this.pushUi()
 			console.log('[call] group peer left, stay', sender, 'peers=', this.groupPeerIds.length, 'joined=', remotesInSfu)

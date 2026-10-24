@@ -2,7 +2,7 @@
 	<view class="group-page">
 		<view class="topbar">
 			<view class="back-btn" @click="goBack">
-				<text class="back-text">‹</text>
+				<image class="back-icon" src="/static/login/f.png" mode="aspectFit"></image>
 			</view>
 			<text class="topbar-title">{{ pageTitle }}</text>
 			<view class="topbar-right"></view>
@@ -394,15 +394,18 @@
 	.topbar {
 		flex-direction: row;
 		align-items: center;
-		padding: 48rpx 20rpx 16rpx 20rpx;
+		padding: 24rpx 16rpx 16rpx 12rpx;
 		background-color: #ededed;
 	}
 	.back-btn {
 		width: 72rpx;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
 	}
-	.back-text {
-		font-size: 56rpx;
-		color: #181818;
+	.back-icon {
+		width: 36rpx;
+		height: 36rpx;
 	}
 	.topbar-title {
 		flex: 1;

@@ -230,6 +230,86 @@ function httpPostForm(path: string, fields: UTSJSONObject, withAuth: boolean): P
 	})
 }
 
+function httpPutForm(path: string, fields: UTSJSONObject, withAuth: boolean): Promise<UTSJSONObject> {
+	const url = apiBase() + path
+	const header: UTSJSONObject = {
+		'Content-Type': 'application/x-www-form-urlencoded'
+	}
+	if (withAuth) {
+		const t = platformToken()
+		if (t.length > 0) header['token'] = t
+	}
+	return new Promise((resolve, reject) => {
+		uni.request({
+			url: url,
+			method: 'PUT',
+			timeout: 20000,
+			header: header,
+			data: fields,
+			success: (res) => {
+				try {
+					const code = res.statusCode
+					if (code < 200 || code >= 300) {
+						reject(new Error('HTTP_' + code))
+						return
+					}
+					const data = res.data as UTSJSONObject
+					if (data == null) {
+						reject(new Error('empty'))
+						return
+					}
+					resolve(data)
+				} catch (e) {
+					reject(new Error('parse fail'))
+				}
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}
+
+function httpPutJson(path: string, body: UTSJSONObject, withAuth: boolean): Promise<UTSJSONObject> {
+	const url = apiBase() + path
+	const header: UTSJSONObject = {
+		'Content-Type': 'application/json'
+	}
+	if (withAuth) {
+		const t = platformToken()
+		if (t.length > 0) header['token'] = t
+	}
+	return new Promise((resolve, reject) => {
+		uni.request({
+			url: url,
+			method: 'PUT',
+			timeout: 20000,
+			header: header,
+			data: body,
+			success: (res) => {
+				try {
+					const code = res.statusCode
+					if (code < 200 || code >= 300) {
+						reject(new Error('HTTP_' + code))
+						return
+					}
+					const data = res.data as UTSJSONObject
+					if (data == null) {
+						reject(new Error('empty'))
+						return
+					}
+					resolve(data)
+				} catch (e) {
+					reject(new Error('parse fail'))
+				}
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}
+
 function assertOk(root: UTSJSONObject, fallback: string): UTSJSONObject {
 	const code = pickNum(root, 'code')
 	if (code != 1) {
@@ -365,11 +445,10 @@ export type PlatformMe = {
 	nickname: string
 	username: string
 	user_id: string
+	avatar: string
 }
 
-export async function fetchPlatformMe(): Promise<PlatformMe> {
-	const root = await httpGet('/api/v1/users/me', true)
-	const data = assertOk(root, '获取用户信息失败')
+function parsePlatformMe(data: UTSJSONObject): PlatformMe {
 	let money = pickStr(data, 'money')
 	if (money.length == 0) {
 		const n = pickNum(data, 'money')
@@ -380,11 +459,133 @@ export async function fetchPlatformMe(): Promise<PlatformMe> {
 		const idNum = pickNum(data, 'id')
 		if (idNum > 0) userId = '' + idNum
 	}
+	let nickname = pickStr(data, 'nickname')
+	if (nickname.length == 0) nickname = pickStr(data, 'username')
+	if (nickname.length == 0) nickname = pickStr(data, 'name')
+	let avatar = pickStr(data, 'avatar')
+	if (avatar.length == 0) avatar = pickStr(data, 'avatar_url')
+	if (avatar.length == 0) avatar = pickStr(data, 'headimg')
+	if (avatar.length == 0) avatar = pickStr(data, 'head_img')
 	const me: PlatformMe = {
 		money: money,
-		nickname: pickStr(data, 'nickname'),
+		nickname: nickname,
 		username: pickStr(data, 'username'),
-		user_id: userId
+		user_id: userId,
+		avatar: avatar
+	}
+	return me
+}
+
+function applyMeToLocalSession(me: PlatformMe): void {
+	const s = loadPlatformSession()
+	if (s == null) return
+	if (me.nickname.length > 0) s.nickname = me.nickname
+	if (me.user_id.length > 0) s.user_id = me.user_id
+	savePlatformSession(s)
+}
+
+export async function fetchPlatformMe(): Promise<PlatformMe> {
+	const root = await httpGet('/api/v1/users/me', true)
+	const data = assertOk(root, '获取用户信息失败')
+	const me = parsePlatformMe(data)
+	applyMeToLocalSession(me)
+	return me
+}
+
+/**
+ * 更新我的资料 — 文档 PUT /api/v1/users/me（user_update）
+ * 传空字符串表示不改该字段。
+ * 注意：部分端（App/H5）对 PUT body 支持差，优先用 POST + _method=PUT（服务端已验证可用）。
+ */
+export async function updatePlatformProfile(nickname: string, avatar: string): Promise<PlatformMe> {
+	if (platformToken().length == 0) {
+		throw new Error('请先登录平台账号后再改资料')
+	}
+	const nick = nickname.trim()
+	const av = avatar.trim()
+	if (nick.length == 0 && av.length == 0) {
+		throw new Error('请填写要修改的内容')
+	}
+	const form: UTSJSONObject = {}
+	form['_method'] = 'PUT'
+	if (nick.length > 0) form['nickname'] = nick
+	if (av.length > 0) {
+		form['avatar'] = av
+		form['avatar_url'] = av
+	}
+	const jsonBody: UTSJSONObject = {}
+	if (nick.length > 0) jsonBody['nickname'] = nick
+	if (av.length > 0) {
+		jsonBody['avatar'] = av
+		jsonBody['avatar_url'] = av
+	}
+
+	let root: UTSJSONObject | null = null
+	let lastMsg = ''
+
+	// 1) POST form + _method=PUT（最稳）
+	try {
+		const r1 = await httpPostForm('/api/v1/users/me', form, true)
+		console.log('[platform] update profile via POST _method=PUT', pickNum(r1, 'code'), pickStr(r1, 'msg'))
+		if (pickNum(r1, 'code') == 1) {
+			root = r1
+		} else {
+			lastMsg = pickStr(r1, 'msg')
+		}
+	} catch (e1) {
+		lastMsg = '' + e1
+		console.warn('[platform] POST _method=PUT fail', e1)
+	}
+
+	// 2) PUT JSON
+	if (root == null) {
+		try {
+			const r2 = await httpPutJson('/api/v1/users/me', jsonBody, true)
+			console.log('[platform] update profile via PUT json', pickNum(r2, 'code'), pickStr(r2, 'msg'))
+			if (pickNum(r2, 'code') == 1) {
+				root = r2
+			} else {
+				lastMsg = pickStr(r2, 'msg')
+			}
+		} catch (e2) {
+			lastMsg = '' + e2
+			console.warn('[platform] PUT json fail', e2)
+		}
+	}
+
+	// 3) PUT form
+	if (root == null) {
+		try {
+			const putForm: UTSJSONObject = {}
+			if (nick.length > 0) putForm['nickname'] = nick
+			if (av.length > 0) {
+				putForm['avatar'] = av
+				putForm['avatar_url'] = av
+			}
+			const r3 = await httpPutForm('/api/v1/users/me', putForm, true)
+			console.log('[platform] update profile via PUT form', pickNum(r3, 'code'), pickStr(r3, 'msg'))
+			if (pickNum(r3, 'code') == 1) {
+				root = r3
+			} else {
+				lastMsg = pickStr(r3, 'msg')
+			}
+		} catch (e3) {
+			lastMsg = '' + e3
+			console.warn('[platform] PUT form fail', e3)
+		}
+	}
+
+	if (root == null) {
+		throw new Error(lastMsg.length > 0 ? lastMsg : '更新资料失败')
+	}
+	const data = assertOk(root, lastMsg.length > 0 ? lastMsg : '更新资料失败')
+	let me = parsePlatformMe(data)
+	if (me.nickname.length == 0 && me.user_id.length == 0) {
+		me = await fetchPlatformMe()
+	} else {
+		if (nick.length > 0 && me.nickname.length == 0) me.nickname = nick
+		if (av.length > 0 && me.avatar.length == 0) me.avatar = av
+		applyMeToLocalSession(me)
 	}
 	return me
 }

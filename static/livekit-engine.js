@@ -45,6 +45,16 @@
     return String(identity || 'x').replace(/[^a-zA-Z0-9_@.:-]/g, '_').substring(0, 48)
   }
 
+  function applyRootVisible(root) {
+    if (!root) return
+    // 缩小后严禁再把黑底全屏层拉起来（track/peers 异步回调会踩到）
+    if (minimized) {
+      root.style.cssText = 'display:none!important;'
+      return
+    }
+    root.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:160px;z-index:9998;background:#111;overflow:hidden;pointer-events:none;'
+  }
+
   function ensureMediaEls() {
     var doc = w.document
     if (!doc) return null
@@ -54,7 +64,7 @@
       root.id = 'callEngineRoot'
       doc.body.appendChild(root)
     }
-    root.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:160px;z-index:9998;background:#111;overflow:hidden;pointer-events:none;'
+    applyRootVisible(root)
     if (!doc.getElementById('remote')) {
       var remote = doc.createElement('video')
       remote.id = 'remote'
@@ -273,22 +283,19 @@
 
   function setMinimized(on) {
     minimized = !!on
-    ensureMediaEls()
-    var root = w.document.getElementById('callEngineRoot')
+    var root = ensureMediaEls()
     var btn = ensureFloatBtn()
     if (minimized) {
-      if (root) root.style.cssText = 'display:none!important;'
+      applyRootVisible(root)
       if (btn) {
         btn.style.display = 'flex'
         var tip = w.document.getElementById('lkCallFloatTip')
         if (tip) tip.textContent = groupMode ? '群通话' : '通话中'
       }
     } else {
-      if (root) {
-        root.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:160px;z-index:9998;background:#111;overflow:hidden;pointer-events:none;'
-        if (groupMode) layoutGroupGrid()
-        else showMediaLayout(true)
-      }
+      applyRootVisible(root)
+      if (groupMode) layoutGroupGrid()
+      else showMediaLayout(true)
       if (btn) btn.style.display = 'none'
     }
   }
@@ -313,35 +320,23 @@
   }
 
   function emitPeers() {
-    var names = []
+    // 人数 = 自己 + SFU 远程（按用户去重）；不以 tiles 为准（宫格可能短暂残留）
+    var names = ['我']
     var users = []
-    var count = 0
-    if (tiles['__local__']) {
-      names.push('我')
-      count++
-    }
+    var seen = {}
+    var remoteN = 0
     eachRemoteParticipant(function (p) {
       var id = (p && p.identity) || ''
       if (id.length == 0) return
-      names.push(shortName(id))
       var uid = matrixUserOf(id)
-      if (uid.length > 0 && users.indexOf(uid) < 0) users.push(uid)
-      count++
+      var key = uid.length > 0 ? uid : id
+      if (seen[key]) return
+      seen[key] = true
+      remoteN++
+      names.push(shortName(id))
+      if (uid.length > 2 && uid.indexOf('@') === 0) users.push(uid)
     })
-    if (count < Object.keys(tiles).length) {
-      count = Object.keys(tiles).length
-      names = []
-      users = []
-      var ks = Object.keys(tiles)
-      for (var i = 0; i < ks.length; i++) {
-        var t = tiles[ks[i]]
-        names.push(t.isLocal ? '我' : shortName(t.identity))
-        if (!t.isLocal) {
-          var u2 = matrixUserOf(t.identity)
-          if (u2.length > 0 && users.indexOf(u2) < 0) users.push(u2)
-        }
-      }
-    }
+    var count = 1 + remoteN
     emit({ type: 'peers', message: '' + count, peer: names.join('、'), names: users.join(',') })
     console.log('[lk] peers', count, names.join(','))
   }
@@ -470,6 +465,11 @@
     localTracks = []
     clearTiles()
     destroyFloat()
+    minimized = false
+    try {
+      var root = w.document && w.document.getElementById('callEngineRoot')
+      if (root) root.style.cssText = 'display:none!important;'
+    } catch (eHide) {}
     if (room) {
       try { await room.disconnect(true) } catch (e3) {}
       room = null

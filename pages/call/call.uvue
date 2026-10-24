@@ -24,7 +24,7 @@
 			<view v-if="ui.isGroupCall" class="group-head">
 				<text class="call-name">{{ ui.isVideo ? '群视频' : '群语音' }}</text>
 				<text class="group-count">{{ groupJoinedLabel() }}</text>
-				<text v-if="ui.groupJoinedNames.length > 0" class="group-names">{{ ui.groupJoinedNames }}</text>
+				<text v-if="ui.groupJoinedCount > 1 && ui.groupJoinedNames.length > 0" class="group-names">{{ ui.groupJoinedNames }}</text>
 			</view>
 			<view v-else class="peer-head">
 				<image class="call-avatar" :src="avatarSrc()"></image>
@@ -315,8 +315,13 @@
 				root.appendChild(audio)
 				doc.body.appendChild(root)
 			}
-			root.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:160px;z-index:9998;background:#111;overflow:hidden;pointer-events:none;'
 			const mgr = getCallManager()
+			// 缩小态不要把黑底层再次显示出来
+			if (mgr.minimized) {
+				root.style.cssText = 'display:none!important;'
+			} else {
+				root.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:160px;z-index:9998;background:#111;overflow:hidden;pointer-events:none;'
+			}
 			mgr.htmlPost = (json: string): void => {
 				try {
 					const fn = win.__callJson
@@ -380,9 +385,11 @@
 	}
 	function groupJoinedLabel(): string {
 		const n = ui.value.groupJoinedCount
-		if (n > 0) return n + '人通话中'
+		// 仅 SFU 里 ≥2 人（含自己）才算「通话中」；独自入会仍显示邀请/等待，避免「1人通话中」不准
+		if (n > 1) return n + '人通话中'
 		const invite = ui.value.groupPeerCount
 		if (invite > 0) return '邀请 ' + invite + ' 人'
+		if (n == 1) return '等待成员加入'
 		return '等待成员加入'
 	}
 
@@ -444,11 +451,11 @@
 		return true
 	}
 	function showInviteBtn(): boolean {
+		// 仅群聊通话显示邀请；单聊不显示
+		if (ui.value.isGroupCall == false) return false
 		const p = ui.value.phase
-		if (p != 'outgoing' && p != 'connecting' && p != 'connected') return false
-		// 群呼优先；LiveKit 1:1 也可点邀请（会按房间成员拉人并切群模式）
-		if (ui.value.isGroupCall) return true
-		return getCallManager().useLivekit
+		if (p == 'outgoing' || p == 'connecting' || p == 'connected') return true
+		return false
 	}
 	function showEngine(): boolean {
 		return ui.value.phase != 'idle'
@@ -1186,22 +1193,17 @@
 		flex-wrap: wrap;
 	}
 	.call-btn {
-		padding: 0 36rpx;
-		height: 72rpx;
+		padding: 0 40rpx;
+		height: 80rpx;
 		border-radius: 48rpx;
 		margin: 0 12rpx 16rpx;
-		min-width: 140rpx;
+		width: 220rpx;
 		flex-direction: row;
 		justify-content: center;
 		align-items: center;
 	}
 	.call-btn-accept { background-color: #07c160; }
-	.call-btn-hang {
-		background-color: #fa5151;
-		min-width: 240rpx;
-		height: 88rpx;
-		padding: 0 48rpx;
-	}
+	.call-btn-hang { background-color: #fa5151; }
 	.call-btn-mute { background-color: #4a4a4a; }
 	.call-btn-cam { background-color: #4a4a4a; }
 	.call-btn-text {
