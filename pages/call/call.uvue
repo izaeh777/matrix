@@ -15,10 +15,21 @@
 			@error="onWebError"
 		></web-view>
 		<!-- #endif -->
+		<!-- 缩小：右上角图标 -->
+		<view v-if="showHangBtn()" class="call-min-btn" @click.stop="onMinimize">
+			<image class="call-min-icon" src="/static/login/suoxiao.png" mode="aspectFit"></image>
+		</view>
 		<view class="call-bar">
-			<image class="call-avatar" :src="avatarSrc()"></image>
-			<text class="call-name">{{ ui.peerName }}</text>
-			<text v-if="ui.isGroupCall && ui.groupPeerCount > 0" class="call-sub">群成员 {{ ui.groupPeerCount }} 人</text>
+			<!-- 群呼：微信式人数/名单；1:1 仍显示对方头像 -->
+			<view v-if="ui.isGroupCall" class="group-head">
+				<text class="call-name">{{ ui.isVideo ? '群视频' : '群语音' }}</text>
+				<text class="group-count">{{ groupJoinedLabel() }}</text>
+				<text v-if="ui.groupJoinedNames.length > 0" class="group-names">{{ ui.groupJoinedNames }}</text>
+			</view>
+			<view v-else class="peer-head">
+				<image class="call-avatar" :src="avatarSrc()"></image>
+				<text class="call-name">{{ ui.peerName }}</text>
+			</view>
 			<text v-if="durText != ''" class="call-dur">{{ durText }}</text>
 			<text v-else class="call-sub">{{ ui.sub }}</text>
 			<view class="call-actions">
@@ -27,6 +38,9 @@
 				</view>
 				<view v-if="ui.phase == 'ringing' && ui.isIncoming" class="call-btn call-btn-hang" @click="onReject">
 					<text class="call-btn-text">拒绝</text>
+				</view>
+				<view v-if="showInviteBtn()" class="call-btn call-btn-cam" @click.stop="onInvite">
+					<text class="call-btn-text">邀请</text>
 				</view>
 				<view v-if="showHangBtn()" class="call-btn call-btn-mute" @click="onMute">
 					<text class="call-btn-text">{{ ui.muted ? '取消静音' : '静音' }}</text>
@@ -39,6 +53,30 @@
 				</view>
 				<view v-if="showHangBtn()" class="call-btn call-btn-hang" @click="onHang">
 					<text class="call-btn-text">挂断</text>
+				</view>
+			</view>
+		</view>
+		<!-- 邀请面板：避免 H5 ActionSheet 被通话层挡住 -->
+		<view v-if="inviteOpen" class="invite-mask" @click="closeInvite">
+			<view class="invite-sheet" @click.stop="noopInvite">
+				<text class="invite-title">邀请成员加入通话</text>
+				<text class="invite-tip">未接听的人可再次催促</text>
+				<scroll-view class="invite-scroll" scroll-y="true">
+					<view
+						v-for="(name, idx) in inviteNames"
+						:key="inviteIds[idx]"
+						class="invite-row"
+						@click="inviteOne(idx)"
+					>
+						<text class="invite-row-name">{{ name }}</text>
+						<text class="invite-row-act">邀请</text>
+					</view>
+				</scroll-view>
+				<view v-if="inviteIds.length > 1" class="invite-all" @click="inviteAll">
+					<text class="invite-all-text">全部邀请（{{ inviteIds.length }}人）</text>
+				</view>
+				<view class="invite-cancel" @click="closeInvite">
+					<text class="invite-cancel-text">取消</text>
 				</view>
 			</view>
 		</view>
@@ -57,9 +95,14 @@
 
 	const ui = ref<CallSnapshot>({
 		phase: 'idle', roomId: '', callId: '', peerName: '', peerAvatar: '', isVideo: false,
-		isIncoming: false, sub: '', muted: false, cameraOff: false, isGroupCall: false, groupPeerCount: 0
+		isIncoming: false, sub: '', muted: false, cameraOff: false, isGroupCall: false, groupPeerCount: 0,
+		groupJoinedCount: 0, groupJoinedNames: '', minimized: false
 	})
 	const durText = ref<string>('')
+	const inviteOpen = ref<boolean>(false)
+	const inviteIds = ref<Array<string>>([])
+	const inviteNames = ref<Array<string>>([])
+	const inviteBusy = ref<boolean>(false)
 	let durTimer: number | null = null
 	let off: (() => void) | null = null
 	let closing: boolean = false
@@ -312,6 +355,7 @@
 						if (d.sdpMid != null) cand['sdpMid'] = d.sdpMid
 						if (d.sdpMLineIndex != null) cand['sdpMLineIndex'] = d.sdpMLineIndex
 						if (d.peer != null) cand['peer'] = d.peer
+						if (d.names != null) cand['names'] = d.names
 						getCallManager().onHtmlMessage(kind, payload, cand)
 					} catch (e1) {}
 				}
@@ -333,6 +377,13 @@
 		const a = ui.value.peerAvatar
 		if (a.length > 0) return a
 		return '/static/login/tiki.png'
+	}
+	function groupJoinedLabel(): string {
+		const n = ui.value.groupJoinedCount
+		if (n > 0) return n + '人通话中'
+		const invite = ui.value.groupPeerCount
+		if (invite > 0) return '邀请 ' + invite + ' 人'
+		return '等待成员加入'
 	}
 
 	function tickDur(): void {
@@ -391,6 +442,13 @@
 		if (p == 'idle') return false
 		if (p == 'ringing' && ui.value.isIncoming) return false
 		return true
+	}
+	function showInviteBtn(): boolean {
+		const p = ui.value.phase
+		if (p != 'outgoing' && p != 'connecting' && p != 'connected') return false
+		// 群呼优先；LiveKit 1:1 也可点邀请（会按房间成员拉人并切群模式）
+		if (ui.value.isGroupCall) return true
+		return getCallManager().useLivekit
 	}
 	function showEngine(): boolean {
 		return ui.value.phase != 'idle'
@@ -848,10 +906,71 @@
 	function onFlip() {
 		getCallManager().flipCamera()
 	}
+	function noopInvite(): void {}
+	function closeInvite(): void {
+		inviteOpen.value = false
+	}
+	async function onInvite() {
+		if (inviteBusy.value) return
+		inviteBusy.value = true
+		uni.showToast({ title: '加载成员…', icon: 'none', duration: 800 })
+		try {
+			const mgr = getCallManager()
+			console.log('[call] invite tap', mgr.phase, mgr.useLivekit, mgr.isGroupCall, mgr.roomId)
+			if (mgr.useLivekit == false) {
+				uni.showToast({ title: '当前通话不支持加人', icon: 'none' })
+				inviteBusy.value = false
+				return
+			}
+			const ids = await mgr.listInviteCandidates()
+			const names: Array<string> = []
+			for (let i = 0; i < ids.length; i++) {
+				names.push(mgr.displayNameOf(ids[i]))
+			}
+			inviteIds.value = ids
+			inviteNames.value = names
+			if (ids.length == 0) {
+				uni.showToast({ title: '没有可邀请的成员', icon: 'none' })
+			} else {
+				inviteOpen.value = true
+			}
+		} catch (e) {
+			console.warn('[call] invite open fail', e)
+			uni.showToast({ title: '打开邀请失败', icon: 'none' })
+		}
+		inviteBusy.value = false
+	}
+	async function inviteOne(idx: number) {
+		if (idx < 0 || idx >= inviteIds.value.length) return
+		const one: Array<string> = [inviteIds.value[idx]]
+		await getCallManager().inviteMoreToCall(one)
+		closeInvite()
+	}
+	async function inviteAll() {
+		const ids: Array<string> = []
+		for (let i = 0; i < inviteIds.value.length; i++) {
+			ids.push(inviteIds.value[i])
+		}
+		await getCallManager().inviteMoreToCall(ids)
+		closeInvite()
+	}
+	function onMinimize() {
+		closing = true
+		getCallManager().minimizeCall()
+	}
 
 	onMounted(() => {
+		closing = false
 		const mgr = getCallManager()
-		console.log('[call] 进入页面', mgr.phase, mgr.callId)
+		console.log('[call] 进入页面', mgr.phase, mgr.callId, 'min=', mgr.minimized)
+		if (mgr.minimized) {
+			mgr.minimized = false
+			mgr.ensureH5CallBridge()
+			const m: UTSJSONObject = {}
+			m['cmd'] = 'lkExpand'
+			mgr.sendToHtml(m)
+		}
+		mgr.ensureH5CallBridge()
 		// #ifdef H5
 		httpsTried = true
 		httpsReady = true
@@ -871,7 +990,18 @@
 
 	onBackPress(() => {
 		if (closing) return false
-		getCallManager().hangup(true)
+		const mgr = getCallManager()
+		// 通话中返回 = 缩小为悬浮，不挂断
+		if (mgr.phase != 'idle' && mgr.phase != 'ended' && mgr.phase != 'ringing') {
+			onMinimize()
+			return true
+		}
+		if (mgr.phase == 'ringing' && mgr.isIncoming) {
+			mgr.reject()
+			goBack()
+			return true
+		}
+		mgr.hangup(true)
 		goBack()
 		return true
 	})
@@ -881,6 +1011,23 @@
 		stopOff(off)
 		off = null
 		const mgr = getCallManager()
+		const keep = mgr.minimized && mgr.phase != 'idle' && mgr.phase != 'ended'
+		if (keep) {
+			// 缩小离开：保留 SFU / 引擎 DOM，只卸本页监听
+			mgr.ensureH5CallBridge()
+			// #ifdef H5
+			try {
+				if (h5MsgFn != null) {
+					window.removeEventListener('message', h5MsgFn)
+					h5MsgFn = null
+				}
+			} catch (eKeep) {}
+			// #endif
+			httpsTried = false
+			httpsReady = false
+			httpsFallbackArmed = false
+			return
+		}
 		if (mgr.phase == 'idle') {
 			mgr.htmlEval = null
 			mgr.htmlPost = null
@@ -928,6 +1075,22 @@
 		bottom: 220rpx;
 		z-index: 1;
 	}
+	.call-min-btn {
+		position: fixed;
+		top: 48rpx;
+		right: 28rpx;
+		width: 72rpx;
+		height: 72rpx;
+		border-radius: 36rpx;
+		background-color: rgba(0, 0, 0, 0.45);
+		align-items: center;
+		justify-content: center;
+		z-index: 10020;
+	}
+	.call-min-icon {
+		width: 40rpx;
+		height: 40rpx;
+	}
 	.call-bar {
 		width: 750rpx;
 		padding-top: 24rpx;
@@ -969,6 +1132,29 @@
 		align-items: center;
 		z-index: 3;
 		background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.55) 100%);
+	}
+	.peer-head {
+		align-items: center;
+	}
+	.group-head {
+		align-items: center;
+		padding: 8rpx 24rpx 0;
+		max-width: 700rpx;
+	}
+	.group-count {
+		font-size: 36rpx;
+		color: #07c160;
+		font-weight: 700;
+		margin-bottom: 8rpx;
+	}
+	.group-names {
+		font-size: 24rpx;
+		color: rgba(255,255,255,0.75);
+		text-align: center;
+		lines: 2;
+		text-overflow: ellipsis;
+		margin-bottom: 8rpx;
+		max-width: 680rpx;
 	}
 	.call-avatar {
 		width: 160rpx;
@@ -1024,5 +1210,80 @@
 		font-weight: 600;
 		line-height: 28rpx;
 		text-align: center;
+	}
+	.invite-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: rgba(0, 0, 0, 0.55);
+		z-index: 10060;
+		justify-content: flex-end;
+	}
+	.invite-sheet {
+		width: 750rpx;
+		max-height: 70%;
+		background-color: #1c1c1e;
+		border-top-left-radius: 24rpx;
+		border-top-right-radius: 24rpx;
+		padding: 28rpx 32rpx 48rpx;
+	}
+	.invite-title {
+		color: #ffffff;
+		font-size: 34rpx;
+		font-weight: 600;
+		margin-bottom: 8rpx;
+	}
+	.invite-tip {
+		color: rgba(255, 255, 255, 0.55);
+		font-size: 24rpx;
+		margin-bottom: 20rpx;
+	}
+	.invite-scroll {
+		max-height: 480rpx;
+	}
+	.invite-row {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding-top: 24rpx;
+		padding-bottom: 24rpx;
+		border-bottom-width: 1px;
+		border-bottom-color: rgba(255, 255, 255, 0.08);
+		border-bottom-style: solid;
+	}
+	.invite-row-name {
+		color: #ffffff;
+		font-size: 30rpx;
+		flex: 1;
+	}
+	.invite-row-act {
+		color: #07c160;
+		font-size: 28rpx;
+		margin-left: 16rpx;
+	}
+	.invite-all {
+		margin-top: 24rpx;
+		height: 88rpx;
+		border-radius: 16rpx;
+		background-color: #07c160;
+		align-items: center;
+		justify-content: center;
+	}
+	.invite-all-text {
+		color: #ffffff;
+		font-size: 30rpx;
+		font-weight: 600;
+	}
+	.invite-cancel {
+		margin-top: 16rpx;
+		height: 80rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.invite-cancel-text {
+		color: rgba(255, 255, 255, 0.7);
+		font-size: 28rpx;
 	}
 </style>

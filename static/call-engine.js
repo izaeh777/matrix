@@ -764,7 +764,7 @@ window.__callJson = function (msg) {
   }
   var cmd = msg.cmd
   // LiveKit 命令：转给 livekit-engine（避免后加载的 call-engine 盖掉 __callJson 后丢指令）
-  if (cmd === 'lkConnect' || cmd === 'lkHang' || cmd === 'lkMute' || cmd === 'lkCamera' || cmd === 'lkFlip') {
+  if (cmd === 'lkConnect' || cmd === 'lkHang' || cmd === 'lkMute' || cmd === 'lkCamera' || cmd === 'lkFlip' || cmd === 'lkMinimize' || cmd === 'lkExpand') {
     try {
       if (typeof window.__lkHandle === 'function') {
         window.__lkHandle(msg)

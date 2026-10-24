@@ -30,6 +30,12 @@ export type CallSnapshot = {
 	cameraOff: boolean
 	isGroupCall: boolean
 	groupPeerCount: number
+	/** LiveKit 群呼：当前已入会人数（含自己） */
+	groupJoinedCount: number
+	/** LiveKit 群呼：已入会昵称，顿号分隔 */
+	groupJoinedNames: string
+	/** 缩小为悬浮窗，通话未挂断 */
+	minimized: boolean
 }
 
 type PageRef = {
@@ -559,12 +565,16 @@ export class CallManager {
 	groupPeerIds: Array<string> = []
 	groupPeerCallIds: Array<string> = []
 	groupConnectedN: number = 0
+	groupJoinedCount: number = 0
+	groupJoinedNames: string = ''
+	groupJoinedUserIds: Array<string> = []
 	groupMeshDone: boolean = false
 	useLivekit: boolean = false
 	livekitBusy: boolean = false
 	livekitServiceUrl: string = ''
 	rtcMembershipId: string = ''
 	rtcMembershipEventId: string = ''
+	minimized: boolean = false
 
 	getSnapshot(): CallSnapshot {
 		return {
@@ -579,7 +589,10 @@ export class CallManager {
 			muted: this.muted,
 			cameraOff: this.cameraOff,
 			isGroupCall: this.isGroupCall,
-			groupPeerCount: this.groupPeerIds.length
+			groupPeerCount: this.groupPeerIds.length,
+			groupJoinedCount: this.groupJoinedCount > 0 ? this.groupJoinedCount : (this.groupConnectedN > 0 ? this.groupConnectedN : 0),
+			groupJoinedNames: this.groupJoinedNames,
+			minimized: this.minimized
 		}
 	}
 
@@ -1345,7 +1358,11 @@ export class CallManager {
 		this.groupPeerIds = []
 		this.groupPeerCallIds = []
 		this.groupConnectedN = 0
+		this.groupJoinedCount = 0
+		this.groupJoinedNames = ''
+		this.groupJoinedUserIds = []
 		this.groupMeshDone = false
+		this.minimized = false
 		try {
 			const others: Array<string> = []
 			const members = await matrix.getJoinedMembers(roomId)
@@ -1447,7 +1464,8 @@ export class CallManager {
 
 	async placeLivekitOutgoing(): Promise<void> {
 		// 若控制台没有这行，说明跑的还是旧包，请重新运行到浏览器并强制刷新
-		console.log('[call] LK-BUILD 2026-10-24k placeLivekitOutgoing', this.phase, 'busy=', this.livekitBusy, 'posted=', this.invitePosted, 'group=', this.isGroupCall)
+		console.log('[call] LK-BUILD 2026-10-25k placeLivekitOutgoing', this.phase, 'busy=', this.livekitBusy, 'posted=', this.invitePosted, 'group=', this.isGroupCall)
+		this.ensureH5CallBridge()
 		if (this.phase != 'outgoing') return
 		if (this.invitePosted || this.livekitBusy) return
 		this.livekitBusy = true
@@ -1536,10 +1554,11 @@ export class CallManager {
 		msg['token'] = sfu.jwt
 		msg['jwt'] = sfu.jwt
 		msg['video'] = this.isVideo ? '1' : '0'
+		msg['group'] = this.isGroupCall ? '1' : '0'
 		// 主叫等对方进 SFU 再标 connected；被叫接听后本端进房即可
 		msg['waitPeer'] = this.isIncoming ? '0' : '1'
 		const packed = this.packHtmlMsg(msg)
-		console.log('[call] lkConnect pack hasUrl=', packed.indexOf('"url"') >= 0, 'len=', packed.length, 'waitPeer=', msg['waitPeer'])
+		console.log('[call] lkConnect pack hasUrl=', packed.indexOf('"url"') >= 0, 'len=', packed.length, 'waitPeer=', msg['waitPeer'], 'group=', msg['group'])
 		this.sendToHtml(msg)
 		console.log('[call] lkConnect sent url=', sfu.url.substring(0, 48))
 	}
@@ -1556,13 +1575,34 @@ export class CallManager {
 			const one = this.inviteeId.length > 0 ? this.inviteeId : this.peerUserId
 			if (one.length > 0) peers.push(one)
 		}
+		await this.ringPeersLivekit(peers)
+	}
+
+	/** 对指定成员发 LiveKit 响铃（通话中继续邀请 / 未接再催） */
+	async ringPeersLivekit(peers: Array<string>): Promise<void> {
 		if (peers.length == 0) {
 			console.warn('[call] livekit ring no peers')
 			return
 		}
 		const gid = this.groupCallId.length > 0 ? this.groupCallId : this.callId
+		const allPeers: Array<string> = []
+		for (let i = 0; i < this.groupPeerIds.length; i++) {
+			const p0 = this.groupPeerIds[i]
+			if (p0.length > 0 && allPeers.indexOf(p0) < 0) allPeers.push(p0)
+		}
+		let meId = ''
+		const mx = getMatrix()
+		if (mx != null) meId = mx.userId
+		for (let j = 0; j < peers.length; j++) {
+			const p1 = peers[j]
+			if (p1.length > 0 && allPeers.indexOf(p1) < 0) allPeers.push(p1)
+			if (p1.length > 0 && this.groupPeerIds.indexOf(p1) < 0) {
+				this.setGroupPeerCallId(p1, pairCallId(gid.length > 0 ? gid : this.callId, meId, p1))
+			}
+		}
 		for (let i = 0; i < peers.length; i++) {
 			const peer = peers[i]
+			if (peer.length == 0) continue
 			const payload: UTSJSONObject = {}
 			payload['call_id'] = this.callId
 			payload['version'] = 1
@@ -1575,7 +1615,7 @@ export class CallManager {
 			if (this.isGroupCall) {
 				payload['group_call'] = '1'
 				payload['group_id'] = gid
-				payload['group_peers'] = this.groupPeerIds.join(',')
+				payload['group_peers'] = allPeers.join(',')
 			}
 			payload['offer'] = { type: 'offer', sdp: 'v=0\r\nlivekit\r\n' }
 			payload['sdp'] = 'v=0\r\nlivekit\r\n'
@@ -1586,6 +1626,185 @@ export class CallManager {
 				console.warn('[call] livekit to-device ring fail', peer, e)
 			}
 		}
+	}
+
+	/** 是否已在 SFU 入会（按 Matrix userId） */
+	isUserInCall(userId: string): boolean {
+		if (userId.length == 0) return false
+		for (let i = 0; i < this.groupJoinedUserIds.length; i++) {
+			if (this.groupJoinedUserIds[i] == userId) return true
+		}
+		return false
+	}
+
+	/** 列出可邀请：房间成员里还没进会的（含未接） */
+	async listInviteCandidates(): Promise<Array<string>> {
+		const out: Array<string> = []
+		if (this.phase == 'idle' || this.phase == 'ended') return out
+		const matrix = getMatrix()
+		if (matrix == null || this.roomId.length == 0) {
+			console.warn('[call] invite list: no matrix/room')
+			return out
+		}
+		const me = matrix.userId
+		const push = (u: string): void => {
+			if (u.length == 0 || u == me) return
+			if (this.isUserInCall(u)) return
+			if (out.indexOf(u) >= 0) return
+			out.push(u)
+		}
+		try {
+			const members = await matrix.getJoinedMembers(this.roomId)
+			console.log('[call] invite members', members.length, 'joinedInCall', this.groupJoinedUserIds.length)
+			for (let i = 0; i < members.length; i++) push(members[i])
+		} catch (e0) {
+			console.warn('[call] invite getJoinedMembers fail', e0)
+		}
+		// 兜底：原先已邀请但未进会的 peer
+		for (let j = 0; j < this.groupPeerIds.length; j++) push(this.groupPeerIds[j])
+		return out
+	}
+
+	displayNameOf(userId: string): string {
+		const matrix = getMatrix()
+		if (matrix != null) {
+			const nm = matrix.getCachedUserName(userId)
+			if (nm.length > 0) return nm
+		}
+		return localPart(userId)
+	}
+
+	/** 通话中邀请：指定用户；空数组则邀请全部未入会 */
+	async inviteMoreToCall(extraIds: Array<string> | null): Promise<number> {
+		if (this.phase == 'idle' || this.phase == 'ended') {
+			uni.showToast({ title: '当前不在通话中', icon: 'none' })
+			return 0
+		}
+		if (!this.useLivekit) {
+			uni.showToast({ title: '当前通话不支持加人', icon: 'none' })
+			return 0
+		}
+		if (this.roomId.length == 0) {
+			uni.showToast({ title: '房间无效', icon: 'none' })
+			return 0
+		}
+		this.isGroupCall = true
+		let candidates: Array<string> = []
+		if (extraIds != null && extraIds.length > 0) {
+			const matrix = getMatrix()
+			const me = matrix != null ? matrix.userId : ''
+			for (let i = 0; i < extraIds.length; i++) {
+				const u = extraIds[i]
+				if (u.length == 0 || u == me) continue
+				if (this.isUserInCall(u)) continue
+				if (candidates.indexOf(u) < 0) candidates.push(u)
+			}
+		} else {
+			candidates = await this.listInviteCandidates()
+		}
+		if (candidates.length == 0) {
+			uni.showToast({ title: '没有可邀请的成员', icon: 'none' })
+			return 0
+		}
+		await this.ringPeersLivekit(candidates)
+		uni.showToast({ title: '已邀请 ' + candidates.length + ' 人', icon: 'none' })
+		this.emit()
+		return candidates.length
+	}
+
+	/** 返回上一页但不挂断，显示悬浮窗 */
+	minimizeCall(): void {
+		if (this.phase == 'idle' || this.phase == 'ended') return
+		this.minimized = true
+		this.pageOpen = false
+		this.ensureH5CallBridge()
+		if (this.useLivekit) {
+			const m: UTSJSONObject = {}
+			m['cmd'] = 'lkMinimize'
+			this.sendToHtml(m)
+		}
+		this.emit()
+		try {
+			const pages = getCurrentPages()
+			if (pages.length > 1) {
+				const last = pages[pages.length - 1] as PageRef
+				if (last.route.indexOf('pages/call/call') >= 0) {
+					uni.navigateBack()
+				}
+			}
+		} catch (e) {}
+		console.log('[call] minimized')
+	}
+
+	/** 从悬浮窗回到通话页 */
+	expandCall(): void {
+		if (this.phase == 'idle' || this.phase == 'ended') return
+		this.minimized = false
+		this.ensureH5CallBridge()
+		if (this.useLivekit) {
+			const m: UTSJSONObject = {}
+			m['cmd'] = 'lkExpand'
+			this.sendToHtml(m)
+		}
+		this.emit()
+		this.openPage()
+		console.log('[call] expanded')
+	}
+
+	ensureH5CallBridge(): void {
+		// #ifdef H5
+		try {
+			const g = h5Global()
+			if (g == null) return
+			const w = (g['window'] != null) ? g['window'] : g
+			w['__lkExpandCall'] = (): void => {
+				getCallManager().expandCall()
+			}
+			if (w['__lkCallBridgeOn'] == true) return
+			w['__lkCallBridgeOn'] = true
+			const onMsg = (ev: any): void => {
+				try {
+					const d = ev.data
+					if (d == null || d['__callEngine'] != true) return
+					const kind = (d.type != null) ? ('' + d.type) : ''
+					if (kind == 'ui') {
+						const act = (d.action != null) ? ('' + d.action) : ''
+						if (act == 'expand') getCallManager().expandCall()
+					}
+					if (kind == 'peers') {
+						const mgr = getCallManager()
+						let n = 0
+						try { n = parseInt('' + d.message) } catch (eN) { n = 0 }
+						if (n >= 0) mgr.groupJoinedCount = n
+						if (d.peer != null) {
+							const names = '' + d.peer
+							if (names.length > 0) mgr.groupJoinedNames = names
+						}
+						if (d.names != null) {
+							const raw = '' + d.names
+							const ids: Array<string> = []
+							const parts = raw.split(',')
+							for (let i = 0; i < parts.length; i++) {
+								let u = parts[i]
+								while (u.length > 0 && (u.charAt(0) == ' ' || u.charAt(0) == '\t')) u = u.substring(1)
+								while (u.length > 0 && (u.charAt(u.length - 1) == ' ' || u.charAt(u.length - 1) == '\t')) u = u.substring(0, u.length - 1)
+								if (u.length > 2 && u.indexOf('@') == 0 && ids.indexOf(u) < 0) ids.push(u)
+							}
+							mgr.groupJoinedUserIds = ids
+						}
+						if (mgr.isGroupCall) mgr.emit()
+					}
+				} catch (e1) {}
+			}
+			w.addEventListener('message', onMsg)
+			const win = w as any
+			if (win.__callJson != null) {
+				this.htmlPost = (json: string): void => {
+					try { win.__callJson(json) } catch (e2) {}
+				}
+			}
+		} catch (e) {}
+		// #endif
 	}
 
 	waitEngineBrief(): Promise<boolean> {
@@ -1688,7 +1907,7 @@ export class CallManager {
 	}
 
 	packHtmlMsg(msg: UTSJSONObject): string {
-		const keys: Array<string> = ['cmd', 'ice', 'video', 'sdp', 'hs', 'token', 'url', 'jwt', 'room', 'call', 'party', 'invitee', 'name', 'sub', 'phase', 'incoming', 'candidate', 'sdpMid', 'off', 'peers', 'peer', 'on', 'reason', 'message', 'waitPeer', 'facing']
+		const keys: Array<string> = ['cmd', 'ice', 'video', 'sdp', 'hs', 'token', 'url', 'jwt', 'room', 'call', 'party', 'invitee', 'name', 'sub', 'phase', 'incoming', 'candidate', 'sdpMid', 'off', 'peers', 'peer', 'on', 'reason', 'message', 'waitPeer', 'facing', 'group', 'names']
 		const parts: Array<string> = []
 		for (let i = 0; i < keys.length; i++) {
 			const k = keys[i]
@@ -2453,6 +2672,38 @@ export class CallManager {
 			this.maybeMeshPeers()
 			return
 		}
+		if (kind == 'peers') {
+			let n = 0
+			try { n = parseInt(payload) } catch (eN) { n = 0 }
+			if (n < 0) n = 0
+			this.groupJoinedCount = n
+			const names = this.htmlStr(cand, 'peer')
+			if (names.length > 0) this.groupJoinedNames = names
+			const joinedRaw = this.htmlStr(cand, 'names')
+			if (joinedRaw.length > 0) {
+				const ids: Array<string> = []
+				const parts = joinedRaw.split(',')
+				for (let ji = 0; ji < parts.length; ji++) {
+					let u = parts[ji]
+					while (u.length > 0 && u.charAt(0) == ' ') u = u.substring(1)
+					if (u.length > 2 && u.indexOf('@') == 0 && ids.indexOf(u) < 0) ids.push(u)
+				}
+				this.groupJoinedUserIds = ids
+			}
+			if (this.isGroupCall) {
+				this.peerName = this.isVideo ? '群视频' : '群语音'
+				if (n > 0) {
+					this.sub = (this.isVideo ? '群视频中' : '群语音中') + ' · ' + n + '人'
+					this.groupConnectedN = n
+				} else {
+					this.sub = '等待群成员加入…'
+				}
+				if (n > 1) this.noteConnected()
+				this.emit()
+				this.pushUi()
+			}
+			return
+		}
 		if (kind == 'sfuReady') {
 			if (this.phase == 'outgoing') {
 				this.sub = this.isGroupCall ? '已入中继，等待群成员…' : '已入中继，等待对方接听…'
@@ -2464,7 +2715,8 @@ export class CallManager {
 		if (kind == 'connected') {
 			this.noteConnected()
 			if (this.isGroupCall) {
-				this.sub = '群语音中'
+				const n = this.groupJoinedCount > 0 ? this.groupJoinedCount : 1
+				this.sub = (this.isVideo ? '群视频中' : '群语音中') + ' · ' + n + '人'
 				this.maybeMeshPeers()
 			} else {
 				this.sub = this.isVideo ? '视频通话中' : '语音通话中'
@@ -2499,6 +2751,7 @@ export class CallManager {
 			if (payload == 'accept') this.accept()
 			if (payload == 'reject') this.reject()
 			if (payload == 'hang') this.hangup(true)
+			if (payload == 'expand') this.expandCall()
 		}
 	}
 
@@ -2848,12 +3101,17 @@ export class CallManager {
 		this.groupPeerIds = []
 		this.groupPeerCallIds = []
 		this.groupConnectedN = 0
+		this.groupJoinedCount = 0
+		this.groupJoinedNames = ''
+		this.groupJoinedUserIds = []
 		this.groupMeshDone = false
 		this.useLivekit = false
+		this.livekitBusy = false
 		this.livekitBusy = false
 		this.livekitServiceUrl = ''
 		this.rtcMembershipId = ''
 		this.rtcMembershipEventId = ''
+		this.minimized = false
 		this.phase = 'idle'
 		this.callId = ''
 		this.roomId = ''

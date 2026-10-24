@@ -7,7 +7,7 @@
 					<text class="back-text">‹</text>
 				</view>
 				<view class="topbar-center">
-					<text class="topbar-title">{{ roomName }}</text>
+					<text class="topbar-title">{{ roomTitleBar }}</text>
 				</view>
 				<view class="topbar-right" @click="openInfo">
 					<view class="more-icon">
@@ -476,9 +476,25 @@
 	const chatPageStyle = 'background-color:#F3F8FE;'
 	const chatHeaderStyle = 'background-color:#F3F8FE;'
 	const roomTitleBar = computed((): string => {
-		const n = roomName.value
-		const title = n.length > 0 ? n : '聊天'
-		if (isGroup.value && memberCount.value > 0) return title + '(' + memberCount.value + ')'
+		let title = roomName.value
+		if (title.length == 0) title = '聊天'
+		const n = memberCount.value
+		if (isGroup.value) {
+			// Matrix 未命名群常把成员名用顿号拼在一起，标题会挤爆顶栏
+			let sep = title.indexOf('、')
+			if (sep < 0) sep = title.indexOf(',')
+			if (sep >= 0) {
+				let first = title.substring(0, sep).trim()
+				if (first.length > 10) first = first.substring(0, 8) + '…'
+				if (n > 1) return first + '等' + n + '人'
+				if (first.length > 0) return first
+				return n > 0 ? '群聊(' + n + ')' : '群聊'
+			}
+			if (title.length > 12) title = title.substring(0, 10) + '…'
+			if (n > 0) return title + '(' + n + ')'
+			return title
+		}
+		if (title.length > 16) return title.substring(0, 14) + '…'
 		return title
 	})
 	const roomTopic = ref<string>('')
@@ -3546,23 +3562,28 @@
 
 	.topbar-center {
 		position: absolute;
-		left: 120rpx;
-		right: 120rpx;
+		left: 100rpx;
+		right: 100rpx;
 		top: 40rpx;
 		bottom: 0;
 		align-items: center;
 		justify-content: center;
+		overflow: hidden;
 		z-index: 1;
 	}
 
 	.topbar-title {
-		font-size: 34rpx;
+		font-size: 32rpx;
 		font-weight: 700;
 		color: #1a1a1a;
 		lines: 1;
 		text-overflow: ellipsis;
+		overflow: hidden;
+		white-space: nowrap;
 		text-align: center;
-		width: 100%;
+		max-width: 100%;
+		height: 44rpx;
+		line-height: 44rpx;
 	}
 
 	.back-btn {

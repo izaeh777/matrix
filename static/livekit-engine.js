@@ -1,7 +1,6 @@
 /**
  * LiveKit SFU 引擎（H5）
- * 挂到 __callJson：cmd=lkConnect / lkHang / lkMute / lkCamera
- * 回传 type=connected|failed|hangup|sfuReady（与 call-engine 一致）
+ * 群呼：微信式宫格（每人一格，视频/头像+昵称）
  */
 (function (w) {
   if (w.__lkEngineReady) return
@@ -11,8 +10,11 @@
   var localTracks = []
   var connectedPosted = false
   var videoWanted = false
+  var groupMode = false
   var camFacing = 'user'
   var camFlipping = false
+  /** @type {Object.<string, {wrap:HTMLElement, video:HTMLVideoElement, label:HTMLElement, face:HTMLElement}>} */
+  var tiles = {}
 
   function emit(obj) {
     try {
@@ -27,6 +29,20 @@
 
   function lkApi() {
     return w.LivekitClient || null
+  }
+
+  function shortName(identity) {
+    var s = identity || ''
+    if (s.indexOf('@') === 0) {
+      var loc = s.split(':')[0].replace('@', '')
+      return loc.length > 0 ? loc : s
+    }
+    if (s.length > 14) return s.substring(0, 12) + '…'
+    return s || '成员'
+  }
+
+  function safeId(identity) {
+    return String(identity || 'x').replace(/[^a-zA-Z0-9_@.:-]/g, '_').substring(0, 48)
   }
 
   function ensureMediaEls() {
@@ -66,16 +82,28 @@
       audio.setAttribute('playsinline', 'true')
       root.appendChild(audio)
     }
+    if (!doc.getElementById('lkGrid')) {
+      var grid = doc.createElement('div')
+      grid.id = 'lkGrid'
+      grid.style.cssText = 'display:none;position:absolute;left:0;top:0;right:0;bottom:0;z-index:5;padding:8px;box-sizing:border-box;'
+      root.appendChild(grid)
+    }
     return root
   }
 
   function showMediaLayout(hasRemoteVideo) {
     ensureMediaEls()
+    if (groupMode) {
+      layoutGroupGrid()
+      return
+    }
     var doc = w.document
     if (!doc) return
     var root = doc.getElementById('callEngineRoot')
     var remote = doc.getElementById('remote')
     var local = doc.getElementById('local')
+    var grid = doc.getElementById('lkGrid')
+    if (grid) grid.style.display = 'none'
     var w0 = (root && root.clientWidth) ? root.clientWidth : (w.innerWidth || 360)
     var h0 = (root && root.clientHeight) ? root.clientHeight : Math.max(240, (w.innerHeight || 640) - 160)
     if (typeof w.setVideoLayout === 'function') {
@@ -98,6 +126,226 @@
     }
   }
 
+  function ensureTile(identity, isLocal) {
+    ensureMediaEls()
+    var doc = w.document
+    var grid = doc.getElementById('lkGrid')
+    if (!grid) return null
+    var key = isLocal ? '__local__' : identity
+    if (tiles[key]) return tiles[key]
+    var wrap = doc.createElement('div')
+    wrap.className = 'lk-tile'
+    wrap.setAttribute('data-id', safeId(key))
+    wrap.style.cssText = 'position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;'
+    var face = doc.createElement('div')
+    face.className = 'lk-face'
+    var nm = shortName(isLocal ? '我' : identity)
+    face.textContent = nm.length > 0 ? nm.substring(0, 1).toUpperCase() : '?'
+    face.style.cssText = 'width:48px;height:48px;border-radius:24px;background:#2f6ff2;color:#fff;font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center;z-index:1;'
+    var video = doc.createElement('video')
+    video.autoplay = true
+    video.muted = true
+    video.setAttribute('playsinline', 'true')
+    video.setAttribute('webkit-playsinline', 'true')
+    video.playsInline = true
+    video.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;display:none;z-index:2;background:#000;'
+    var label = doc.createElement('div')
+    label.textContent = isLocal ? '我' : shortName(identity)
+    label.style.cssText = 'position:absolute;left:0;right:0;bottom:0;padding:4px 6px;background:linear-gradient(transparent,rgba(0,0,0,.65));color:#fff;font-size:11px;z-index:3;text-align:center;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;'
+    wrap.appendChild(face)
+    wrap.appendChild(video)
+    wrap.appendChild(label)
+    grid.appendChild(wrap)
+    tiles[key] = { wrap: wrap, video: video, label: label, face: face, identity: identity, isLocal: !!isLocal }
+    layoutGroupGrid()
+    return tiles[key]
+  }
+
+  function matrixUserOf(identity) {
+    var s = identity || ''
+    if (s.indexOf('@') !== 0) return s
+    var parts = s.split(':')
+    if (parts.length >= 2) return parts[0] + ':' + parts[1]
+    return s
+  }
+
+  function removeTile(identity) {
+    var key = identity === '__local__' ? '__local__' : identity
+    var t = tiles[key]
+    if (!t) return
+    try {
+      if (t.wrap && t.wrap.parentNode) t.wrap.parentNode.removeChild(t.wrap)
+    } catch (e) {}
+    delete tiles[key]
+    layoutGroupGrid()
+  }
+
+  function clearTiles() {
+    var keys = Object.keys(tiles)
+    for (var i = 0; i < keys.length; i++) {
+      try {
+        var t = tiles[keys[i]]
+        if (t && t.wrap && t.wrap.parentNode) t.wrap.parentNode.removeChild(t.wrap)
+      } catch (e0) {}
+    }
+    tiles = {}
+  }
+
+  function layoutGroupGrid() {
+    var doc = w.document
+    if (!doc) return
+    var grid = doc.getElementById('lkGrid')
+    var remote = doc.getElementById('remote')
+    var local = doc.getElementById('local')
+    var root = doc.getElementById('callEngineRoot')
+    if (!grid) return
+    if (!groupMode) {
+      grid.style.display = 'none'
+      return
+    }
+    if (remote) remote.style.cssText = 'display:none!important;'
+    if (local) local.style.cssText = 'display:none!important;'
+    var keys = Object.keys(tiles)
+    var n = keys.length
+    if (n == 0) {
+      grid.style.display = 'none'
+      return
+    }
+    // 微信式：偏小格子，人多时 3～4 列
+    var cols = 2
+    if (n <= 1) cols = 2
+    else if (n <= 4) cols = 2
+    else if (n <= 9) cols = 3
+    else cols = 4
+    var rw = (root && root.clientWidth) ? root.clientWidth : (w.innerWidth || 360)
+    var rh = (root && root.clientHeight) ? root.clientHeight : Math.max(240, (w.innerHeight || 640) - 160)
+    var gap = 6
+    var pad = 10
+    var cellW = Math.floor((rw - pad * 2 - gap * (cols - 1)) / cols)
+    if (cellW > 120) cellW = 120
+    if (cellW < 72) cellW = 72
+    var cellH = Math.floor(cellW * 1.15)
+    grid.style.display = 'flex'
+    grid.style.flexWrap = 'wrap'
+    grid.style.justifyContent = 'center'
+    grid.style.alignContent = 'center'
+    grid.style.alignItems = 'center'
+    grid.style.gap = gap + 'px'
+    grid.style.padding = pad + 'px'
+    for (var i = 0; i < keys.length; i++) {
+      var t = tiles[keys[i]]
+      if (t && t.wrap) {
+        t.wrap.style.width = cellW + 'px'
+        t.wrap.style.height = cellH + 'px'
+        t.wrap.style.flex = '0 0 auto'
+      }
+    }
+  }
+
+  var floatEl = null
+  var minimized = false
+
+  function ensureFloatBtn() {
+    var doc = w.document
+    if (!doc) return null
+    if (floatEl) return floatEl
+    floatEl = doc.createElement('div')
+    floatEl.id = 'lkCallFloat'
+    floatEl.style.cssText = 'display:none;position:fixed;right:16px;bottom:100px;width:64px;height:64px;border-radius:32px;background:#07c160;z-index:10050;box-shadow:0 4px 16px rgba(0,0,0,.35);align-items:center;justify-content:center;flex-direction:column;cursor:pointer;pointer-events:auto;'
+    var ico = doc.createElement('div')
+    ico.textContent = '📞'
+    ico.style.cssText = 'font-size:22px;line-height:1;'
+    var tip = doc.createElement('div')
+    tip.id = 'lkCallFloatTip'
+    tip.textContent = '通话中'
+    tip.style.cssText = 'color:#fff;font-size:10px;margin-top:2px;'
+    floatEl.appendChild(ico)
+    floatEl.appendChild(tip)
+    floatEl.onclick = function () {
+      emit({ type: 'ui', action: 'expand' })
+      try {
+        if (typeof w.__lkExpandCall === 'function') w.__lkExpandCall()
+      } catch (e0) {}
+    }
+    doc.body.appendChild(floatEl)
+    return floatEl
+  }
+
+  function setMinimized(on) {
+    minimized = !!on
+    ensureMediaEls()
+    var root = w.document.getElementById('callEngineRoot')
+    var btn = ensureFloatBtn()
+    if (minimized) {
+      if (root) root.style.cssText = 'display:none!important;'
+      if (btn) {
+        btn.style.display = 'flex'
+        var tip = w.document.getElementById('lkCallFloatTip')
+        if (tip) tip.textContent = groupMode ? '群通话' : '通话中'
+      }
+    } else {
+      if (root) {
+        root.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:160px;z-index:9998;background:#111;overflow:hidden;pointer-events:none;'
+        if (groupMode) layoutGroupGrid()
+        else showMediaLayout(true)
+      }
+      if (btn) btn.style.display = 'none'
+    }
+  }
+
+  function destroyFloat() {
+    if (floatEl && floatEl.parentNode) {
+      try { floatEl.parentNode.removeChild(floatEl) } catch (e) {}
+    }
+    floatEl = null
+    minimized = false
+  }
+
+  function showTileVideo(tile, on) {
+    if (!tile) return
+    if (on) {
+      tile.video.style.display = 'block'
+      tile.face.style.display = 'none'
+    } else {
+      tile.video.style.display = 'none'
+      tile.face.style.display = 'flex'
+    }
+  }
+
+  function emitPeers() {
+    var names = []
+    var users = []
+    var count = 0
+    if (tiles['__local__']) {
+      names.push('我')
+      count++
+    }
+    eachRemoteParticipant(function (p) {
+      var id = (p && p.identity) || ''
+      if (id.length == 0) return
+      names.push(shortName(id))
+      var uid = matrixUserOf(id)
+      if (uid.length > 0 && users.indexOf(uid) < 0) users.push(uid)
+      count++
+    })
+    if (count < Object.keys(tiles).length) {
+      count = Object.keys(tiles).length
+      names = []
+      users = []
+      var ks = Object.keys(tiles)
+      for (var i = 0; i < ks.length; i++) {
+        var t = tiles[ks[i]]
+        names.push(t.isLocal ? '我' : shortName(t.identity))
+        if (!t.isLocal) {
+          var u2 = matrixUserOf(t.identity)
+          if (u2.length > 0 && users.indexOf(u2) < 0) users.push(u2)
+        }
+      }
+    }
+    emit({ type: 'peers', message: '' + count, peer: names.join('、'), names: users.join(',') })
+    console.log('[lk] peers', count, names.join(','))
+  }
+
   function attachTrack(track, el, isLocal) {
     if (!track || !el) return false
     try {
@@ -117,13 +365,40 @@
     var doc = w.document
     var who = (participant && (participant.identity || participant.name)) || '?'
     console.log('[lk] track subscribed', track.kind, who, publication && publication.trackSid)
+    if (groupMode) {
+      var tile = ensureTile(who, false)
+      if (track.kind === 'video' && tile) {
+        attachTrack(track, tile.video, false)
+        showTileVideo(tile, true)
+      } else if (track.kind === 'audio') {
+        var a = doc.getElementById('remoteAudio')
+        // 多人音频：挂到独立 audio，避免互相覆盖
+        try {
+          var aid = 'lkAudio_' + safeId(who)
+          var ae = doc.getElementById(aid)
+          if (!ae) {
+            ae = doc.createElement('audio')
+            ae.id = aid
+            ae.autoplay = true
+            doc.getElementById('callEngineRoot').appendChild(ae)
+          }
+          attachTrack(track, ae, false)
+        } catch (eA) {
+          if (a) attachTrack(track, a, false)
+        }
+      }
+      layoutGroupGrid()
+      emitPeers()
+      markConnected('track')
+      return
+    }
     if (track.kind === 'video') {
       showMediaLayout(true)
       attachTrack(track, doc.getElementById('remote'), false)
       markConnected('video')
     } else if (track.kind === 'audio') {
-      var a = doc.getElementById('remoteAudio')
-      attachTrack(track, a, false)
+      var a2 = doc.getElementById('remoteAudio')
+      attachTrack(track, a2, false)
       markConnected('audio')
     }
   }
@@ -168,6 +443,7 @@
 
   function attachExistingRemoteTracks() {
     eachRemoteParticipant(function (participant) {
+      if (groupMode) ensureTile(participant.identity || '?', false)
       eachPublication(participant, function (pub) {
         if (!pub) return
         try {
@@ -175,11 +451,13 @@
         } catch (eSub) {}
         if (pub.track) {
           onTrackSubscribed(pub.track, pub, participant)
-        } else {
-          console.log('[lk] remote pub pending', pub.kind || '', pub.trackSid || '')
         }
       })
     })
+    if (groupMode) {
+      layoutGroupGrid()
+      emitPeers()
+    }
   }
 
   async function disconnect() {
@@ -190,11 +468,14 @@
       }
     } catch (e2) {}
     localTracks = []
+    clearTiles()
+    destroyFloat()
     if (room) {
       try { await room.disconnect(true) } catch (e3) {}
       room = null
     }
     connectedPosted = false
+    groupMode = false
   }
 
   function waitApi(ms) {
@@ -233,7 +514,6 @@
 
   async function createLocalMedia(api) {
     var tracks = []
-    // 音视频分开申请：无麦时仍尽量开摄像头
     try {
       var audioTracks = await api.createLocalTracks({ audio: true, video: false }) || []
       tracks = tracks.concat(audioTracks)
@@ -261,14 +541,20 @@
     var url = msg.url || ''
     var token = msg.token || msg.jwt || ''
     videoWanted = msg.video === '1' || msg.video === true || msg.video === 1
+    groupMode = msg.group === '1' || msg.group === true || msg.group === 1
     var waitPeer = msg.waitPeer === '1' || msg.waitPeer === true || msg.waitPeer === 1
     if (!url || !token) {
       emit({ type: 'failed', reason: 'no_token' })
       return
     }
     await disconnect()
-    // 先把画面容器摆出来，再进房（避免 adaptiveStream 因 0 尺寸不拉流）
+    groupMode = msg.group === '1' || msg.group === true || msg.group === 1
     showMediaLayout(false)
+    if (groupMode) {
+      ensureTile('__local__', true)
+      layoutGroupGrid()
+      emitPeers()
+    }
     room = new api.Room({
       adaptiveStream: false,
       dynacast: true,
@@ -278,29 +564,42 @@
       onTrackSubscribed(track, publication, participant)
     })
     room.on(api.RoomEvent.TrackPublished, function (publication, participant) {
-      console.log('[lk] track published', publication && publication.kind, participant && participant.identity)
       try {
         if (publication && publication.setSubscribed) publication.setSubscribed(true)
       } catch (eP) {}
     })
     room.on(api.RoomEvent.ParticipantConnected, function (participant) {
       console.log('[lk] participant connected', participant && participant.identity)
+      if (groupMode && participant) ensureTile(participant.identity || '?', false)
       markConnected('participant')
       setTimeout(attachExistingRemoteTracks, 200)
+      if (groupMode) emitPeers()
+    })
+    room.on(api.RoomEvent.ParticipantDisconnected, function (participant) {
+      var id = participant && participant.identity
+      console.log('[lk] participant left', id)
+      if (groupMode && id) removeTile(id)
+      if (groupMode) emitPeers()
     })
     room.on(api.RoomEvent.Disconnected, function () {
       emit({ type: 'hangup' })
     })
     try {
-      console.log('[lk] connecting', url, 'waitPeer=', waitPeer, 'video=', videoWanted)
+      console.log('[lk] connecting', url, 'waitPeer=', waitPeer, 'video=', videoWanted, 'group=', groupMode)
       await room.connect(url, token)
       localTracks = await createLocalMedia(api)
       var doc = w.document
+      var localTile = groupMode ? ensureTile('__local__', true) : null
       for (var i = 0; i < localTracks.length; i++) {
         var t = localTracks[i]
         if (t.kind === 'video') {
-          showMediaLayout(hasRemoteParticipant())
-          attachTrack(t, doc.getElementById('local'), true)
+          if (groupMode && localTile) {
+            attachTrack(t, localTile.video, true)
+            showTileVideo(localTile, true)
+          } else {
+            showMediaLayout(hasRemoteParticipant())
+            attachTrack(t, doc.getElementById('local'), true)
+          }
         }
         try {
           await room.localParticipant.publishTrack(t)
@@ -309,12 +608,15 @@
           console.warn('[lk] publish fail', t.kind, ePub)
         }
       }
-      // 对端可能已在房：立即挂载已有轨
       attachExistingRemoteTracks()
       setTimeout(attachExistingRemoteTracks, 500)
       setTimeout(attachExistingRemoteTracks, 1500)
+      if (groupMode) {
+        layoutGroupGrid()
+        emitPeers()
+      }
       emit({ type: 'sfuReady' })
-      console.log('[lk] joined SFU local=', localTracks.length, 'remote=', hasRemoteParticipant())
+      console.log('[lk] joined SFU local=', localTracks.length, 'remote=', hasRemoteParticipant(), 'group=', groupMode)
       if (!waitPeer || hasRemoteParticipant()) {
         markConnected(waitPeer ? 'peer-already' : 'incoming')
       } else {
@@ -339,44 +641,34 @@
       if (!room) return
       room.localParticipant.setCameraEnabled(!off)
       if (!off) showMediaLayout(hasRemoteParticipant())
+      if (groupMode) {
+        var tile = tiles['__local__']
+        if (tile) showTileVideo(tile, !off && videoWanted)
+      }
     } catch (e) {}
   }
 
   async function flipCamera(facing) {
     if (!room || camFlipping) return
     var api = lkApi()
-    if (!api || !api.createLocalTracks) {
-      console.warn('[lk] flip: no sdk')
-      return
-    }
+    if (!api || !api.createLocalTracks) return
     var next = facing || (camFacing === 'user' ? 'environment' : 'user')
     camFlipping = true
     console.log('[lk] flip to', next)
     try {
       var created = await api.createLocalTracks({
         audio: false,
-        video: {
-          facingMode: { ideal: next },
-          width: { ideal: 640 },
-          height: { ideal: 480 }
-        }
+        video: { facingMode: { ideal: next }, width: { ideal: 640 }, height: { ideal: 480 } }
       })
       var vt = null
       for (var i = 0; i < (created || []).length; i++) {
-        if (created[i].kind === 'video') {
-          vt = created[i]
-          break
-        }
+        if (created[i].kind === 'video') { vt = created[i]; break }
       }
       if (!vt) throw new Error('no video track')
-      // 卸掉旧视频轨
       var keep = []
       for (var j = 0; j < localTracks.length; j++) {
         var old = localTracks[j]
-        if (old.kind !== 'video') {
-          keep.push(old)
-          continue
-        }
+        if (old.kind !== 'video') { keep.push(old); continue }
         try { await room.localParticipant.unpublishTrack(old) } catch (eU) {}
         try { old.stop() } catch (eS) {}
         try { old.detach() } catch (eD) {}
@@ -384,40 +676,18 @@
       localTracks = keep
       localTracks.push(vt)
       await room.localParticipant.publishTrack(vt)
-      showMediaLayout(hasRemoteParticipant())
-      attachTrack(vt, w.document.getElementById('local'), true)
+      if (groupMode) {
+        var tile = ensureTile('__local__', true)
+        attachTrack(vt, tile.video, true)
+        showTileVideo(tile, true)
+      } else {
+        showMediaLayout(hasRemoteParticipant())
+        attachTrack(vt, w.document.getElementById('local'), true)
+      }
       camFacing = next
       console.log('[lk] flip ok', next)
     } catch (e) {
       console.warn('[lk] flip fail', e)
-      // 再试一次 exact / soft
-      try {
-        var soft = await api.createLocalTracks({
-          audio: false,
-          video: { facingMode: next }
-        })
-        var vt2 = null
-        for (var k = 0; k < (soft || []).length; k++) {
-          if (soft[k].kind === 'video') { vt2 = soft[k]; break }
-        }
-        if (vt2) {
-          var keep2 = []
-          for (var m = 0; m < localTracks.length; m++) {
-            var o2 = localTracks[m]
-            if (o2.kind !== 'video') { keep2.push(o2); continue }
-            try { await room.localParticipant.unpublishTrack(o2) } catch (e2) {}
-            try { o2.stop() } catch (e3) {}
-          }
-          localTracks = keep2
-          localTracks.push(vt2)
-          await room.localParticipant.publishTrack(vt2)
-          attachTrack(vt2, w.document.getElementById('local'), true)
-          camFacing = next
-          console.log('[lk] flip ok soft', next)
-        }
-      } catch (e4) {
-        console.warn('[lk] flip soft fail', e4)
-      }
     }
     camFlipping = false
   }
@@ -445,6 +715,14 @@
     }
     if (msg.cmd === 'lkFlip' || (msg.cmd === 'flip' && room != null)) {
       flipCamera(msg.facing || '')
+      return true
+    }
+    if (msg.cmd === 'lkMinimize') {
+      setMinimized(true)
+      return true
+    }
+    if (msg.cmd === 'lkExpand') {
+      setMinimized(false)
       return true
     }
     return false
