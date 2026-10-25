@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:tools="http://schemas.android.com/tools"
+	package="com.itiklink.app">
+	<application>
+		<!--
+			TokenPocket Mobile-SDK 回传 Activity（与官方 TPAssistActivity 同协议）
+			+ callbackSchema: itiklink://tp-wallet
+			须「制作自定义调试基座」后才进 APK。
+		-->
+		<activity
+			android:name="uts.sdk.modules.tpWalletSdk.TpAssistActivity"
+			android:exported="true"
+			android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+		<activity
+			android:name="io.dcloud.uniapp.UniLaunchProxyActivity"
+			android:exported="true">
+			<intent-filter>
+				<action android:name="android.intent.action.VIEW" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<category android:name="android.intent.category.BROWSABLE" />
+				<data android:scheme="itiklink" android:host="tp-wallet" />
+				<data android:scheme="itiklink" />
+			</intent-filter>
+		</activity>
+		<activity
+			android:name="io.dcloud.uniapp.UniAppActivity"
+			android:exported="true">
+			<intent-filter>
+				<action android:name="android.intent.action.VIEW" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<category android:name="android.intent.category.BROWSABLE" />
+				<data android:scheme="itiklink" android:host="tp-wallet" />
+				<data android:scheme="itiklink" />
+			</intent-filter>
+		</activity>
+	</application>
+</manifest>

@@ -1,0 +1,46 @@
+/**
+ * 非 Android 平台占位：TP Mobile-SDK 仅 App-Android 可用
+ */
+import {
+	TpAuthorize,
+	TpPersonalSign,
+	TpIsInstalled,
+	TpDeliverSchema,
+	TpSdkResult
+} from './interface.uts'
+
+function unsupported(): Promise<TpSdkResult> {
+	return new Promise<TpSdkResult>((_resolve, reject) => {
+		reject('TokenPocket Mobile-SDK 仅支持 Android App')
+	})
+}
+
+export const tpAuthorize: TpAuthorize = function (
+	_actionId: string,
+	_chainId: string,
+	_dappName: string,
+	_dappIcon: string,
+	_memo: string
+): Promise<TpSdkResult> {
+	return unsupported()
+}
+
+export const tpPersonalSign: TpPersonalSign = function (
+	_message: string,
+	_actionId: string,
+	_chainId: string,
+	_dappName: string,
+	_dappIcon: string,
+	_memo: string,
+	_signType: string
+): Promise<TpSdkResult> {
+	return unsupported()
+}
+
+export const tpIsInstalled: TpIsInstalled = function (): boolean {
+	return false
+}
+
+export const tpDeliverSchema: TpDeliverSchema = function (_urlOrQuery: string): boolean {
+	return false
+}

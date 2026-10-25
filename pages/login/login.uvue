@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="hero">
 			<view class="hero-fade"></view>
 			<view class="header">

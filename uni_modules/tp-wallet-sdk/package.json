@@ -1,0 +1,34 @@
+{
+	"id": "tp-wallet-sdk",
+	"displayName": "TokenPocket Mobile SDK",
+	"version": "1.0.1",
+	"description": "TokenPocket Android Mobile-SDK（authorize / ethPersonalSign）",
+	"keywords": ["TokenPocket", "wallet", "sdk"],
+	"engines": {
+		"HBuilderX": "^4.25",
+		"uni-app-x": "^4.25"
+	},
+	"dcloudext": {
+		"type": "uts",
+		"sale": {
+			"regular": {
+				"price": "0.00"
+			}
+		}
+	},
+	"uni_modules": {
+		"dependencies": [],
+		"encrypt": [],
+		"platforms": {
+			"client": {
+				"uni-app-x": {
+					"app": {
+						"android": "√",
+						"ios": "x",
+						"harmony": "x"
+					}
+				}
+			}
+		}
+	}
+}

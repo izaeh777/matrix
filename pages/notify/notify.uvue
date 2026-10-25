@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="notify-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="header">
 			<view class="header-top">
 				<view class="spacer"></view>

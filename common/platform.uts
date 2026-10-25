@@ -69,6 +69,19 @@ function pickNum(obj: UTSJSONObject, key: string): number {
 	return 0
 }
 
+/** 安全取子对象：Kotlin 下 `null as UTSJSONObject` 会直接 NPE */
+function pickObj(obj: UTSJSONObject, key: string): UTSJSONObject | null {
+	try {
+		const raw = obj[key]
+		if (raw == null) return null
+		const s = '' + raw
+		if (s.length == 0 || s == 'null' || s == 'undefined') return null
+		return raw as UTSJSONObject
+	} catch (e) {
+		return null
+	}
+}
+
 export function savePlatformSession(session: PlatformSession): void {
 	try {
 		uni.setStorageSync(KEY_PLATFORM, JSON.stringify(session))
@@ -316,7 +329,7 @@ function assertOk(root: UTSJSONObject, fallback: string): UTSJSONObject {
 		const msg = pickStr(root, 'msg')
 		throw new Error(msg.length > 0 ? msg : fallback)
 	}
-	const data = root['data'] as UTSJSONObject
+	const data = pickObj(root, 'data')
 	if (data == null) {
 		const empty: UTSJSONObject = {}
 		return empty
@@ -328,10 +341,10 @@ function parseSession(data: UTSJSONObject, emailFallback: string): PlatformSessi
 	let token = pickStr(data, 'token')
 	if (token.length == 0) token = pickStr(data, 'access_token')
 	if (token.length == 0) {
-		const user = data['user'] as UTSJSONObject
+		const user = pickObj(data, 'user')
 		if (user != null) {
-			token = pickStr(user, 'token')
-			if (token.length == 0) token = pickStr(user, 'access_token')
+			token = pickStr(user!, 'token')
+			if (token.length == 0) token = pickStr(user!, 'access_token')
 		}
 	}
 	if (token.length == 0) throw new Error('登录成功但未返回 token')
@@ -345,34 +358,33 @@ function parseSession(data: UTSJSONObject, emailFallback: string): PlatformSessi
 		const idNum = pickNum(data, 'id')
 		if (idNum > 0) userId = '' + idNum
 	}
-	const userObj = data['user'] as UTSJSONObject
+	const userObj = pickObj(data, 'user')
 	if (userObj != null) {
-		if (email.length == 0) email = pickStr(userObj, 'email')
+		if (email.length == 0) email = pickStr(userObj!, 'email')
 		if (nickname.length == 0) {
-			nickname = pickStr(userObj, 'nickname')
-			if (nickname.length == 0) nickname = pickStr(userObj, 'username')
+			nickname = pickStr(userObj!, 'nickname')
+			if (nickname.length == 0) nickname = pickStr(userObj!, 'username')
 		}
 		if (userId.length == 0) {
-			userId = pickStr(userObj, 'id')
+			userId = pickStr(userObj!, 'id')
 			if (userId.length == 0) {
-				const n = pickNum(userObj, 'id')
+				const n = pickNum(userObj!, 'id')
 				if (n > 0) userId = '' + n
 			}
 		}
 	}
 	if (email.length == 0) email = emailFallback
 
-	// matrix 子对象：聊天（Matrix）凭证
+	// matrix 子对象：聊天（Matrix）凭证（钱包登录可能没有）
 	let matrixUserId = ''
 	let matrixToken = ''
 	let matrixHomeserver = ''
-	const mx = data['matrix'] as UTSJSONObject
+	const mx = pickObj(data, 'matrix')
 	if (mx != null) {
-		matrixUserId = pickStr(mx, 'user_id')
-		matrixToken = pickStr(mx, 'access_token')
-		// base_url 带 https 前缀，直接可用作 homeserver
-		matrixHomeserver = pickStr(mx, 'base_url')
-		if (matrixHomeserver.length == 0) matrixHomeserver = pickStr(mx, 'home_server')
+		matrixUserId = pickStr(mx!, 'user_id')
+		matrixToken = pickStr(mx!, 'access_token')
+		matrixHomeserver = pickStr(mx!, 'base_url')
+		if (matrixHomeserver.length == 0) matrixHomeserver = pickStr(mx!, 'home_server')
 	}
 
 	const out: PlatformSession = {
@@ -446,32 +458,269 @@ export type PlatformMe = {
 	username: string
 	user_id: string
 	avatar: string
+	/** 会员展示名，如 VIP1会员 */
+	vip_label: string
+	/** 有效期文案，如 有效期：2026-09-11 至 2026-10-11 */
+	vip_period: string
+}
+
+/** 订阅信息（users/me、subscription、billing 多端字段兼容） */
+export type PlatformSubscription = {
+	plan_code: string
+	plan_name: string
+	start_at: string
+	end_at: string
+	remain_days: number
+	active: boolean
+}
+
+function pickStrAny(obj: UTSJSONObject, keys: Array<string>): string {
+	for (let i = 0; i < keys.length; i++) {
+		const s = pickStr(obj, keys[i])
+		if (s.length > 0) return s
+	}
+	return ''
+}
+
+function pickNumAny(obj: UTSJSONObject, keys: Array<string>): number {
+	for (let i = 0; i < keys.length; i++) {
+		const n = pickNum(obj, keys[i])
+		if (n != 0) return n
+	}
+	return 0
+}
+
+function isUnixTsText(raw: string): boolean {
+	if (raw.length < 10 || raw.length > 13) return false
+	for (let i = 0; i < raw.length; i++) {
+		const c = raw.charCodeAt(i)
+		if (c == null) return false
+		const n = c as number
+		if (n < 48 || n > 57) return false
+	}
+	return true
+}
+
+/** 时间戳/ISO/日期串 → YYYY-MM-DD */
+function normalizeDateStr(raw: string): string {
+	if (raw.length == 0) return ''
+	if (isUnixTsText(raw)) {
+		let ms = parseFloat(raw)
+		if (ms < 1000000000000) ms = ms * 1000
+		const d = new Date(ms)
+		if (d.getTime() == d.getTime()) {
+			const y = d.getFullYear()
+			const m = d.getMonth() + 1
+			const day = d.getDate()
+			const ms2 = m < 10 ? '0' + m : '' + m
+			const ds = day < 10 ? '0' + day : '' + day
+			return '' + y + '-' + ms2 + '-' + ds
+		}
+	}
+	if (raw.length >= 10 && raw.charAt(4) == '-' && raw.charAt(7) == '-') {
+		return raw.substring(0, 10)
+	}
+	return raw
+}
+
+function logJson(tag: string, obj: any): void {
+	try {
+		if (obj == null) {
+			console.log(tag, 'null')
+			return
+		}
+		console.log(tag, JSON.stringify(obj))
+	} catch (e) {
+		console.log(tag, '(stringify fail)', e)
+	}
+}
+
+function parseSubscriptionObj(obj: UTSJSONObject | null): PlatformSubscription {
+	const empty: PlatformSubscription = {
+		plan_code: '',
+		plan_name: '',
+		start_at: '',
+		end_at: '',
+		remain_days: 0,
+		active: false
+	}
+	if (obj == null) return empty
+	// 嵌套 plan / package / product
+	const planObj = pickObj(obj, 'plan')
+	const pkgObj = pickObj(obj, 'package')
+	const productObj = pickObj(obj, 'product')
+	let planName = pickStrAny(obj, ['plan_name', 'planName', 'plan_title', 'title', 'vip_name', 'vipName', 'level_name', 'levelName', 'role_name', 'roleName', 'member_name', 'package_name', 'product_name', 'grade_name', 'gradeName'])
+	if (planName.length == 0 && planObj != null) {
+		planName = pickStrAny(planObj!, ['name', 'title', 'plan_name', 'label'])
+	}
+	if (planName.length == 0 && pkgObj != null) {
+		planName = pickStrAny(pkgObj!, ['name', 'title', 'plan_name'])
+	}
+	if (planName.length == 0 && productObj != null) {
+		planName = pickStrAny(productObj!, ['name', 'title'])
+	}
+	// 避免把用户 nickname 当成套餐名：仅当没有更好字段时才用 name
+	if (planName.length == 0) {
+		planName = pickStr(obj, 'name')
+	}
+	let planCode = pickStrAny(obj, ['plan_code', 'planCode', 'vip_code', 'package_code', 'product_code', 'role_code', 'roleCode'])
+	if (planCode.length == 0 && planObj != null) {
+		planCode = pickStrAny(planObj!, ['code', 'plan_code'])
+	}
+	if (planCode.length == 0) {
+		const lv = pickNumAny(obj, ['vip_level', 'vipLevel', 'member_level', 'level', 'grade', 'vip'])
+		if (lv > 0) planCode = 'VIP' + lv
+	}
+	if (planCode.length == 0) {
+		planCode = pickStrAny(obj, ['code', 'vip_level', 'vipLevel', 'level', 'member_level'])
+	}
+	let startAt = normalizeDateStr(pickStrAny(obj, ['start_at', 'startAt', 'start_time', 'startTime', 'begin_at', 'begin_time', 'started_at', 'valid_from', 'valid_start', 'from', 'created_at']))
+	if (startAt.length == 0) {
+		const n = pickNumAny(obj, ['start_at', 'start_time', 'begin_at', 'started_at', 'valid_from'])
+		if (n > 0) startAt = normalizeDateStr('' + n)
+	}
+	let endAt = normalizeDateStr(pickStrAny(obj, ['end_at', 'endAt', 'end_time', 'endTime', 'expire_at', 'expireAt', 'expire_time', 'expireTime', 'expired_at', 'expiredAt', 'valid_to', 'valid_end', 'to', 'deadline', 'expires_at']))
+	if (endAt.length == 0) {
+		const n2 = pickNumAny(obj, ['end_at', 'end_time', 'expire_at', 'expire_time', 'expired_at', 'valid_to', 'expires_at'])
+		if (n2 > 0) endAt = normalizeDateStr('' + n2)
+	}
+	let remain = pickNumAny(obj, ['remain_days', 'remainDays', 'remain_day', 'remain', 'days_left', 'left_days', 'surplus_days', 'days'])
+	const status = pickStrAny(obj, ['status', 'state', 'subscription_status', 'sub_status']).toLowerCase()
+	let active = status == 'active' || status == 'normal' || status == 'valid' || status == '1' || status == 'success' || status == 'paid'
+	if (!active && (planName.length > 0 || planCode.length > 0 || endAt.length > 0 || remain > 0)) {
+		active = status.length == 0 || (status != 'expired' && status != 'cancel' && status != 'cancelled' && status != '0')
+	}
+	if (planName.length == 0 && planCode.length > 0) {
+		planName = planCode.toUpperCase().indexOf('VIP') >= 0 ? (planCode.toUpperCase() + '会员') : (planCode + '会员')
+	}
+	const out: PlatformSubscription = {
+		plan_code: planCode,
+		plan_name: planName,
+		start_at: startAt,
+		end_at: endAt,
+		remain_days: remain,
+		active: active
+	}
+	return out
+}
+
+/**
+ * users/me 实际结构：
+ * { user: { money, lv_vip, lv_vip_name, ... }, role: "VISITOR", subscription: null|{} }
+ * Android 下嵌套 Map 有时不能直接 as UTSJSONObject，失败时 JSON 往返一次。
+ */
+function meUserObj(data: UTSJSONObject): UTSJSONObject {
+	let u = pickObj(data, 'user')
+	if (u != null) return u!
+	try {
+		const raw = data['user']
+		if (raw != null) {
+			const text = JSON.stringify(raw)
+			if (text.length > 2 && text.charAt(0) == '{') {
+				const parsed = JSON.parse(text) as UTSJSONObject
+				if (parsed != null) return parsed
+			}
+		}
+	} catch (e) {}
+	return data
+}
+
+function subscriptionFromMeData(data: UTSJSONObject): PlatformSubscription {
+	const user = meUserObj(data)
+	// 1) 有效订阅对象（subscription:null 跳过）
+	const nestedKeys: Array<string> = ['subscription', 'current_subscription', 'current', 'billing']
+	for (let i = 0; i < nestedKeys.length; i++) {
+		const sub = pickObj(data, nestedKeys[i])
+		if (sub != null) {
+			const parsed = parseSubscriptionObj(sub)
+			if (parsed.plan_name.length > 0 || parsed.end_at.length > 0 || parsed.remain_days > 0 || parsed.plan_code.length > 0) {
+				return parsed
+			}
+		}
+	}
+	// 2) 无订阅时用用户等级字段：lv_vip_name / lv_vip（如「游客」）
+	const vipName = pickStrAny(user, ['lv_vip_name', 'lvVipName', 'vip_name', 'vipName', 'level_name', 'lv_vip_title'])
+	let vipCode = ''
+	const lv = pickNumAny(user, ['lv_vip', 'lvVip', 'vip_level', 'level'])
+	if (lv > 0) vipCode = 'LV' + lv
+	if (vipCode.length == 0) {
+		vipCode = pickStrAny(user, ['vip_level', 'vipLevel'])
+	}
+	const role = pickStr(data, 'role')
+	const out: PlatformSubscription = {
+		plan_code: vipCode,
+		plan_name: vipName,
+		start_at: '',
+		end_at: '',
+		remain_days: 0,
+		active: false
+	}
+	if (out.plan_name.length == 0 && role.length > 0 && role != 'VISITOR') {
+		out.plan_name = role
+	}
+	return out
+}
+
+export function formatVipLabel(sub: PlatformSubscription): string {
+	if (sub.plan_name.length > 0) {
+		return sub.plan_name
+	}
+	if (sub.plan_code.length > 0) {
+		const c = sub.plan_code
+		if (c.toUpperCase().indexOf('VIP') >= 0) return c.toUpperCase() + '会员'
+		return c
+	}
+	return '普通用户'
+}
+
+export function formatVipPeriod(sub: PlatformSubscription): string {
+	if (sub.start_at.length > 0 && sub.end_at.length > 0) {
+		return '有效期：' + sub.start_at + ' 至 ' + sub.end_at
+	}
+	if (sub.end_at.length > 0) {
+		return '有效期至：' + sub.end_at
+	}
+	if (sub.remain_days > 0) {
+		return '剩余 ' + sub.remain_days + ' 天'
+	}
+	if (sub.active) return '订阅有效'
+	return '暂无有效订阅'
 }
 
 function parsePlatformMe(data: UTSJSONObject): PlatformMe {
-	let money = pickStr(data, 'money')
+	const user = meUserObj(data)
+	let money = pickStr(user, 'money')
 	if (money.length == 0) {
-		const n = pickNum(data, 'money')
+		const n = pickNum(user, 'money')
 		money = '' + n
 	}
-	let userId = pickStr(data, 'user_id')
+	let userId = pickStr(user, 'user_id')
 	if (userId.length == 0) {
-		const idNum = pickNum(data, 'id')
+		const idNum = pickNum(user, 'id')
 		if (idNum > 0) userId = '' + idNum
 	}
-	let nickname = pickStr(data, 'nickname')
-	if (nickname.length == 0) nickname = pickStr(data, 'username')
-	if (nickname.length == 0) nickname = pickStr(data, 'name')
-	let avatar = pickStr(data, 'avatar')
-	if (avatar.length == 0) avatar = pickStr(data, 'avatar_url')
-	if (avatar.length == 0) avatar = pickStr(data, 'headimg')
-	if (avatar.length == 0) avatar = pickStr(data, 'head_img')
+	let nickname = pickStr(user, 'nickname')
+	if (nickname.length == 0) nickname = pickStr(user, 'username')
+	if (nickname.length == 0) nickname = pickStr(user, 'name')
+	let avatar = pickStr(user, 'avatar')
+	if (avatar.length == 0) avatar = pickStr(user, 'avatar_url')
+	if (avatar.length == 0) avatar = pickStr(user, 'headimg')
+	if (avatar.length == 0) avatar = pickStr(user, 'head_img')
+	const sub = subscriptionFromMeData(data)
+	let vipLabel = formatVipLabel(sub)
+	// 直接再读一次 lv_vip_name，避免嵌套解析漏掉
+	if (vipLabel == '普通用户') {
+		const direct = pickStrAny(user, ['lv_vip_name', 'lvVipName', 'vip_name', 'level_name'])
+		if (direct.length > 0) vipLabel = direct
+	}
 	const me: PlatformMe = {
 		money: money,
 		nickname: nickname,
-		username: pickStr(data, 'username'),
+		username: pickStr(user, 'username'),
 		user_id: userId,
-		avatar: avatar
+		avatar: avatar,
+		vip_label: vipLabel,
+		vip_period: formatVipPeriod(sub)
 	}
 	return me
 }
@@ -487,9 +736,225 @@ function applyMeToLocalSession(me: PlatformMe): void {
 export async function fetchPlatformMe(): Promise<PlatformMe> {
 	const root = await httpGet('/api/v1/users/me', true)
 	const data = assertOk(root, '获取用户信息失败')
-	const me = parsePlatformMe(data)
+	logJson('[platform] users/me data', data)
+	let me = parsePlatformMe(data)
+	// 等级已从 user.lv_vip_name 取到；再拉订阅补有效期 / EXPIRED 文案
+	if (me.vip_period.indexOf('暂无') >= 0) {
+		try {
+			const billRoot = await httpGet('/api/v1/billing/subscription', true)
+			logJson('[platform] billing/subscription raw', billRoot)
+			if (pickNum(billRoot, 'code') == 1) {
+				const billData = pickObj(billRoot, 'data')
+				const status = billData != null ? pickStr(billData!, 'status').toUpperCase() : ''
+				const sub = parseSubscriptionResponse(billRoot)
+				if (sub.end_at.length > 0 || sub.remain_days > 0 || sub.active) {
+					me.vip_period = formatVipPeriod(sub)
+				} else if (status == 'EXPIRED' || status == 'CANCELLED') {
+					me.vip_period = '订阅已过期'
+				}
+				if (me.vip_label == '普通用户' && sub.plan_name.length > 0) {
+					me.vip_label = formatVipLabel(sub)
+				}
+			}
+		} catch (eSub) {
+			console.warn('[platform] subscription enrich fail', eSub)
+		}
+	}
+	console.log('[platform] me vip=', me.vip_label, me.vip_period, 'money=', me.money)
 	applyMeToLocalSession(me)
 	return me
+}
+
+function parseSubscriptionResponse(root: UTSJSONObject): PlatformSubscription {
+	// data 可能是对象，也可能直接是数组
+	try {
+		const rawData = root['data']
+		if (rawData != null) {
+			try {
+				const arr = rawData as Array<UTSJSONObject>
+				if (arr.length > 0) {
+					const fromArr = parseSubscriptionObj(arr[0])
+					if (fromArr.plan_name.length > 0 || fromArr.end_at.length > 0 || fromArr.plan_code.length > 0) {
+						return fromArr
+					}
+				}
+			} catch (eArr) {}
+		}
+	} catch (e0) {}
+	const data = pickObj(root, 'data')
+	if (data == null) return parseSubscriptionObj(null)
+	let hit = parseSubscriptionObj(data)
+	if (hit.plan_name.length > 0 || hit.end_at.length > 0 || hit.remain_days > 0 || hit.plan_code.length > 0) return hit
+	const nestKeys: Array<string> = ['current', 'subscription', 'active', 'item', 'info', 'vip', 'member']
+	for (let i = 0; i < nestKeys.length; i++) {
+		const nested = pickObj(data, nestKeys[i])
+		hit = parseSubscriptionObj(nested)
+		if (hit.plan_name.length > 0 || hit.end_at.length > 0 || hit.remain_days > 0 || hit.plan_code.length > 0) return hit
+	}
+	try {
+		const listRaw = data['list']
+		if (listRaw != null) {
+			const list = listRaw as Array<UTSJSONObject>
+			if (list.length > 0) {
+				hit = parseSubscriptionObj(list[0])
+				if (hit.plan_name.length > 0 || hit.end_at.length > 0 || hit.plan_code.length > 0) return hit
+			}
+		}
+	} catch (eL) {}
+	try {
+		const histRaw = data['history']
+		if (histRaw != null) {
+			const hist = histRaw as Array<UTSJSONObject>
+			if (hist.length > 0) return parseSubscriptionObj(hist[0])
+		}
+	} catch (eH) {}
+	try {
+		const itemsRaw = data['items']
+		if (itemsRaw != null) {
+			const items = itemsRaw as Array<UTSJSONObject>
+			if (items.length > 0) return parseSubscriptionObj(items[0])
+		}
+	} catch (eI) {}
+	return parseSubscriptionObj(data)
+}
+
+/** 套餐：GET /api/v1/roles/plans */
+export type RolePlan = {
+	plan_code: string
+	role_code: string
+	name: string
+	price: number
+	currency: string
+	duration_days: number
+	weigh: number
+}
+
+export type BillingOrder = {
+	order_no: string
+	status: string
+	plan_code: string
+	amount: string
+	msg: string
+}
+
+function parseRolePlan(obj: UTSJSONObject): RolePlan {
+	const out: RolePlan = {
+		plan_code: pickStrAny(obj, ['plan_code', 'planCode', 'code']),
+		role_code: pickStrAny(obj, ['role_code', 'roleCode', 'role']),
+		name: pickStrAny(obj, ['name', 'title', 'plan_name', 'planName']),
+		price: pickNumAny(obj, ['price', 'amount', 'fee']),
+		currency: pickStrAny(obj, ['currency', 'coin', 'unit']),
+		duration_days: pickNumAny(obj, ['duration_days', 'durationDays', 'days', 'duration']),
+		weigh: pickNumAny(obj, ['weigh', 'weight', 'sort'])
+	}
+	if (out.currency.length == 0) out.currency = 'USD'
+	return out
+}
+
+/** 套餐列表（公开接口，可无 token） */
+export async function fetchRolePlans(): Promise<Array<RolePlan>> {
+	const root = await httpGet('/api/v1/roles/plans', false)
+	logJson('[platform] roles/plans raw', root)
+	const data = assertOk(root, '获取套餐失败')
+	const list: Array<RolePlan> = []
+	try {
+		const rawList = data['list']
+		if (rawList != null) {
+			const arr = rawList as Array<UTSJSONObject>
+			for (let i = 0; i < arr.length; i++) {
+				const p = parseRolePlan(arr[i])
+				if (p.plan_code.length > 0) list.push(p)
+			}
+		}
+	} catch (e0) {}
+	if (list.length == 0) {
+		try {
+			const arr2 = data as Array<UTSJSONObject>
+			for (let j = 0; j < arr2.length; j++) {
+				const p2 = parseRolePlan(arr2[j])
+				if (p2.plan_code.length > 0) list.push(p2)
+			}
+		} catch (e1) {}
+	}
+	// 按 weigh 降序（高档在前）
+	list.sort((a, b) => b.weigh - a.weigh)
+	console.log('[platform] roles/plans count=', list.length)
+	return list
+}
+
+/**
+ * 创建订单（余额等）
+ * POST /api/v1/billing/orders  plan_code
+ */
+export async function createBillingOrder(planCode: string, couponCode: string = ''): Promise<BillingOrder> {
+	if (planCode.length == 0) throw new Error('请选择套餐')
+	if (platformToken().length == 0) throw new Error('请先登录平台账号')
+	const fields: UTSJSONObject = {
+		plan_code: planCode
+	}
+	if (couponCode.length > 0) fields['coupon_code'] = couponCode
+	const root = await httpPostForm('/api/v1/billing/orders', fields, true)
+	logJson('[platform] billing/orders create', root)
+	const data = assertOk(root, '下单失败')
+	const order: BillingOrder = {
+		order_no: pickStrAny(data, ['order_no', 'orderNo', 'order_id', 'id']),
+		status: pickStrAny(data, ['status', 'state', 'pay_status']),
+		plan_code: pickStrAny(data, ['plan_code', 'planCode']),
+		amount: pickStrAny(data, ['amount', 'price', 'pay_amount', 'money']),
+		msg: pickStr(root, 'msg')
+	}
+	if (order.plan_code.length == 0) order.plan_code = planCode
+	if (order.amount.length == 0) {
+		const n = pickNumAny(data, ['amount', 'price', 'pay_amount', 'money'])
+		if (n > 0) order.amount = '' + n
+	}
+	return order
+}
+
+/** 续费（有效期顺延）POST /api/v1/billing/subscription/renew */
+export async function renewBillingSubscription(planCode: string = ''): Promise<BillingOrder> {
+	if (platformToken().length == 0) throw new Error('请先登录平台账号')
+	const fields: UTSJSONObject = {}
+	if (planCode.length > 0) fields['plan_code'] = planCode
+	const root = await httpPostForm('/api/v1/billing/subscription/renew', fields, true)
+	logJson('[platform] billing/renew', root)
+	const data = assertOk(root, '续费失败')
+	const order: BillingOrder = {
+		order_no: pickStrAny(data, ['order_no', 'orderNo', 'order_id', 'id']),
+		status: pickStrAny(data, ['status', 'state', 'pay_status']),
+		plan_code: pickStrAny(data, ['plan_code', 'planCode']),
+		amount: pickStrAny(data, ['amount', 'price', 'pay_amount', 'money']),
+		msg: pickStr(root, 'msg')
+	}
+	if (order.plan_code.length == 0) order.plan_code = planCode
+	return order
+}
+
+/**
+ * 当前订阅：优先 billing（含剩余天数），再 users/me/subscription
+ */
+export async function fetchPlatformSubscription(): Promise<PlatformSubscription> {
+	try {
+		const root = await httpGet('/api/v1/billing/subscription', true)
+		logJson('[platform] billing/subscription raw', root)
+		if (pickNum(root, 'code') == 1) {
+			const s = parseSubscriptionResponse(root)
+			console.log('[platform] billing parsed', s.plan_name, s.plan_code, s.end_at, 'remain=', s.remain_days)
+			if (s.plan_name.length > 0 || s.end_at.length > 0 || s.remain_days > 0 || s.plan_code.length > 0) {
+				return s
+			}
+		}
+	} catch (e1) {
+		console.warn('[platform] billing/subscription fail', e1)
+	}
+	const root2 = await httpGet('/api/v1/users/me/subscription', true)
+	logJson('[platform] me/subscription raw', root2)
+	const data2 = assertOk(root2, '获取订阅信息失败')
+	logJson('[platform] me/subscription data', data2)
+	const wrap: UTSJSONObject = { code: 1, data: data2 }
+	const s2 = parseSubscriptionResponse(wrap)
+	console.log('[platform] me/subscription parsed', s2.plan_name, s2.plan_code, s2.end_at, 'remain=', s2.remain_days)
+	return s2
 }
 
 /**
@@ -623,11 +1088,267 @@ export async function walletVerify(address: string, signature: string, inviteCod
 	}
 	const inv = inviteCode.trim()
 	if (inv.length > 0) body['invite_code'] = inv
+	console.log('[platform] wallet/verify', address, 'sigLen=', signature.length)
 	const root = await httpPostJson('/api/v1/auth/wallet/verify', body, false)
+	console.log('[platform] wallet/verify resp code=', pickNum(root, 'code'), 'msg=', pickStr(root, 'msg'))
 	const data = assertOk(root, '钱包登录失败')
 	const session = parseSession(data, address)
 	savePlatformSession(session)
 	return session
+}
+
+/** 与 https://m.itiklink.com/tp-login-demo.html 一致的 TP DeepLink 登录 */
+export type TpLoginInit = {
+	ticket: string
+	deeplink: string
+	message: string
+	expire: number
+}
+
+function sleepMs(ms: number): Promise<void> {
+	return new Promise<void>((resolve, _reject) => {
+		setTimeout(() => {
+			resolve()
+		}, ms)
+	})
+}
+
+/**
+ * 给官方 deeplink 补上 callbackSchema（回 App），
+ * 但绝不能改掉 HTTPS callbackUrl（那是服务器收 TP 结果用的）。
+ *
+ * 注意：init 时若把 itiklink:// 传给 callback_url，服务端会把它写成
+ * TP 的 callbackUrl，结果永远到不了服务器 → ticket 一直 pending。
+ */
+export function injectTpCallbackSchema(deeplink: string, schema: string): string {
+	if (deeplink.length == 0 || schema.length == 0) return deeplink
+	const marker = 'param='
+	const idx = deeplink.indexOf(marker)
+	if (idx < 0) return deeplink
+	const prefix = deeplink.substring(0, idx + marker.length)
+	let enc = deeplink.substring(idx + marker.length)
+	// 去掉可能的后续 query
+	const amp = enc.indexOf('&')
+	if (amp >= 0) enc = enc.substring(0, amp)
+	let jsonText = ''
+	try {
+		const decoded = decodeURIComponent(enc)
+		if (decoded != null) jsonText = decoded
+	} catch (e0) {
+		return deeplink
+	}
+	if (jsonText.length < 2) return deeplink
+	try {
+		const o = JSON.parse(jsonText) as UTSJSONObject
+		o['callbackSchema'] = schema
+		// 强制保留/恢复 HTTPS 回调，防止被 scheme 污染
+		const cb = pickStr(o, 'callbackUrl')
+		if (cb.indexOf('http') != 0) {
+			o['callbackUrl'] = API_HOST + '/api/v1/auth/wallet/tp-login'
+		}
+		// 服务端 deeplink 常缺 signType，不补齐时 TP 可能只打开 App 不弹签名窗
+		const st = pickStr(o, 'signType')
+		if (st.length == 0 && pickStr(o, 'action') == 'sign') {
+			o['signType'] = 'ethPersonalSign'
+			o['hash'] = false
+		}
+		const next = JSON.stringify(o)
+		return prefix + encodeURIComponent(next)
+	} catch (e1) {
+		return deeplink
+	}
+}
+
+/**
+ * POST /api/v1/auth/wallet/tp-login  action=init
+ * callback_url 必须留空或 https，才能让 TP 把结果 POST 回服务器。
+ * App 回跳用 callbackSchema，在 injectTpCallbackSchema 里补。
+ */
+function isTransientHttpErr(e: any): boolean {
+	const s = '' + e
+	// Cloudflare / 网关临时错误
+	const codes = ['HTTP_502', 'HTTP_503', 'HTTP_504', 'HTTP_520', 'HTTP_521', 'HTTP_522', 'HTTP_523', 'HTTP_524', 'HTTP_525', 'HTTP_526']
+	for (let i = 0; i < codes.length; i++) {
+		if (s.indexOf(codes[i]) >= 0) return true
+	}
+	return false
+}
+
+export async function tpLoginInit(inviteCode: string = '', address: string = ''): Promise<TpLoginInit> {
+	const fields: UTSJSONObject = {
+		action: 'init',
+		invite_code: inviteCode,
+		address: address
+		// 故意不传 callback_url：避免服务端把 App scheme 写成 TP callbackUrl
+	}
+	console.log('[platform] tp-login init')
+	let root: UTSJSONObject | null = null
+	let lastErrMsg = ''
+	for (let i = 0; i < 3; i++) {
+		try {
+			if (i > 0) {
+				console.warn('[platform] tp-login init retry', i)
+				await sleepMs(800 * i)
+			}
+			root = await httpPostForm('/api/v1/auth/wallet/tp-login', fields, false)
+			lastErrMsg = ''
+			break
+		} catch (e) {
+			try { lastErrMsg = '' + e } catch (e2) { lastErrMsg = '获取 TP 登录协议失败' }
+			if (!isTransientHttpErr(e)) break
+		}
+	}
+	if (root == null) {
+		if (isTransientHttpErr(lastErrMsg)) {
+			throw new Error('网络暂时不可用(CDN)，请稍后重试')
+		}
+		throw new Error(lastErrMsg.length > 0 ? lastErrMsg : '获取 TP 登录协议失败')
+	}
+	const data = assertOk(root!, '获取 TP 登录协议失败')
+	const ticket = pickStr(data, 'ticket')
+	let deeplink = pickStr(data, 'deeplink')
+	const message = pickStr(data, 'message')
+	if (ticket.length == 0 || deeplink.length == 0) {
+		throw new Error('TP 登录协议不完整')
+	}
+	let expire = pickNum(data, 'expire')
+	if (expire <= 0) expire = 300
+	const out: TpLoginInit = {
+		ticket: ticket,
+		deeplink: deeplink,
+		message: message,
+		expire: expire
+	}
+	return out
+}
+
+const TP_TICKET_KEY = 'tp_login_ticket_v1'
+
+export function saveTpLoginTicket(ticket: string, expireSec: number): void {
+	try {
+		const row: UTSJSONObject = {
+			ticket: ticket,
+			expireAt: Date.now() + expireSec * 1000
+		}
+		uni.setStorageSync(TP_TICKET_KEY, JSON.stringify(row))
+	} catch (e) {}
+}
+
+export function loadTpLoginTicket(): string {
+	try {
+		const raw = uni.getStorageSync(TP_TICKET_KEY)
+		if (raw == null) return ''
+		const text = ('' + raw).trim()
+		if (text.length < 2 || text == 'null' || text == 'undefined') return ''
+		const o = JSON.parse(text) as UTSJSONObject
+		if (o == null) return ''
+		const ticket = pickStr(o, 'ticket')
+		const expireAt = pickNum(o, 'expireAt')
+		if (ticket.length == 0) return ''
+		if (expireAt > 0 && Date.now() > expireAt) {
+			clearTpLoginTicket()
+			return ''
+		}
+		return ticket
+	} catch (e) {
+		try { clearTpLoginTicket() } catch (e2) {}
+		return ''
+	}
+}
+
+export function clearTpLoginTicket(): void {
+	try { uni.removeStorageSync(TP_TICKET_KEY) } catch (e) {}
+}
+
+/**
+ * 查一次 ticket。
+ * 返回 session=成功；null=仍 pending；抛错=过期/失败
+ */
+/**
+ * TP 走 SDK Assist 回传时往往不再 POST callbackUrl。
+ * App 拿到 Assist JSON 后主动提交，完成 ticket。
+ */
+export async function tpLoginSubmitAssistResult(rawJson: string): Promise<void> {
+	if (rawJson.length < 2) return
+	let body: UTSJSONObject | null = null
+	try {
+		body = JSON.parse(rawJson) as UTSJSONObject
+	} catch (e0) {
+		console.warn('[platform] tp-login submit parse fail')
+		return
+	}
+	if (body == null) return
+	// 兼容字段
+	const sign = pickStr(body, 'sign')
+	if (sign.length > 0 && pickStr(body, 'signature').length == 0) {
+		body['signature'] = sign
+	}
+	console.log('[platform] tp-login submit assist actionId=', pickStr(body, 'actionId'))
+	try {
+		await httpPostJson('/api/v1/auth/wallet/tp-login', body, false)
+	} catch (e1) {
+		console.warn('[platform] tp-login submit fail', e1)
+		// 部分网关要 form
+		const fields: UTSJSONObject = {
+			action: 'callback',
+			actionId: pickStr(body, 'actionId'),
+			wallet: pickStr(body, 'wallet'),
+			sign: sign,
+			signature: sign,
+			result: '1'
+		}
+		try {
+			await httpPostForm('/api/v1/auth/wallet/tp-login', fields, false)
+		} catch (e2) {
+			console.warn('[platform] tp-login submit form fail', e2)
+		}
+	}
+}
+
+export async function tpLoginCheckOnce(ticket: string): Promise<PlatformSession | null> {
+	const path = '/api/v1/auth/wallet/tp-login?ticket=' + encodeURIComponent(ticket)
+	const root = await httpGet(path, false)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '查询授权失败')
+	}
+	const data = pickObj(root, 'data')
+	let status = 'pending'
+	if (data != null) status = pickStr(data!, 'status')
+	if (status.length == 0) status = 'pending'
+	console.log('[platform] tp-login check', status)
+	if (status == 'pending') return null
+	if (status == 'expired') throw new Error('授权已过期，请重试')
+	if (status != 'success') return null
+	if (data == null) throw new Error('登录成功但无数据')
+	let user = pickObj(data!, 'data')
+	if (user == null) user = data
+	if (user == null) throw new Error('登录成功但无用户信息')
+	let addr = pickStr(user!, 'wallet_address')
+	if (addr.length == 0) addr = pickStr(user!, 'address')
+	const session = parseSession(user!, addr)
+	savePlatformSession(session)
+	clearTpLoginTicket()
+	console.log('[platform] tp-login ok', addr, 'uid=', session.user_id)
+	return session
+}
+
+/**
+ * 轮询直到 success（前台定时；切到 TP 后台时定时器可能暂停，需配合页面 onShow 再查）
+ */
+export async function tpLoginWait(ticket: string, expireSec: number): Promise<PlatformSession> {
+	const interval = 2000
+	let maxTimes = Math.floor((expireSec * 1000) / interval) + 5
+	if (maxTimes < 15) maxTimes = 15
+	if (maxTimes > 120) maxTimes = 120
+	console.log('[platform] tp-login poll start', ticket, 'max=', maxTimes)
+	for (let i = 0; i < maxTimes; i++) {
+		const session = await tpLoginCheckOnce(ticket)
+		if (session != null) return session
+		await sleepMs(interval)
+	}
+	throw new Error('等待授权超时。若已在 TP 确认，请回到本页再点一次「检查结果」')
 }
 
 /** 平台查找好友（username 精准匹配） */
@@ -659,12 +1380,20 @@ function parseFindFriendItem(obj: UTSJSONObject): FindFriendItem | null {
 
 function dataObjectKeys(obj: UTSJSONObject): Array<string> {
 	const out: Array<string> = [] as string[]
+	// App 端无 Object.keys，用 UTSJSONObject.keys / toMap
 	try {
-		const text = JSON.stringify(obj)
-		if (text != null && text.charAt(0) == '{') {
-			const parsed = JSON.parse(text)
-			const ks = Object.keys(parsed)
-			for (let i = 0; i < ks.length; i++) out.push(ks[i])
+		const ks = UTSJSONObject.keys(obj)
+		for (let i = 0; i < ks.length; i++) {
+			out.push('' + ks[i])
+		}
+		if (out.length > 0) return out
+	} catch (eKeys) {}
+	try {
+		const m = obj.toMap()
+		if (m != null) {
+			m.forEach((_v: any | null, k: string) => {
+				out.push(k)
+			})
 		}
 	} catch (e0) {}
 	return out

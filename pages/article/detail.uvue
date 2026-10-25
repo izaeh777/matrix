@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="detail-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="topbar">
 			<view class="back-btn" @click="goBack">
 				<text class="back-text">‹</text>
@@ -159,12 +162,6 @@
 		openCmsLink(d.outlink)
 	}
 
-	function openSibling(id: number): void {
-		if (id <= 0) return
-		articleId.value = id
-		loadDetail()
-	}
-
 	async function loadDetail(): Promise<void> {
 		const id = articleId.value
 		if (id <= 0) {
@@ -182,6 +179,12 @@
 			console.warn('加载资讯详情失败', e)
 		}
 		loading.value = false
+	}
+
+	function openSibling(id: number): void {
+		if (id <= 0) return
+		articleId.value = id
+		loadDetail()
 	}
 
 	onLoad((options: UTSJSONObject) => {

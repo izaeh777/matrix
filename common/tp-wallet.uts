@@ -1,0 +1,535 @@
+/**
+ * TokenPocket App 钱包：优先 Mobile-SDK（authorize / ethPersonalSign）
+ * DeepLink 仅作兜底（需 callbackUrl + 自定义 scheme）
+ *
+ * SDK 文档: https://help.tokenpocket.pro/developer-cn/mobile-wallet/mobile-sdk/android
+ */
+import {
+	tpAuthorize as sdkAuthorize,
+	tpPersonalSign as sdkPersonalSign,
+	tpIsInstalled as sdkIsInstalled,
+	tpDeliverSchema as sdkDeliverSchema,
+	TpSdkResult
+} from '@/uni_modules/tp-wallet-sdk'
+
+// #ifdef APP-ANDROID
+import Intent from 'android.content.Intent'
+import Uri from 'android.net.Uri'
+// #endif
+
+const TP_PKG = 'vip.mytokenpocket'
+const ASSIST_CLASS = 'uts.sdk.modules.tpWalletSdk.TpAssistActivity'
+
+const DAPP_NAME = 'i-tiklink'
+const DAPP_ICON = 'https://m.itiklink.com/favicon.ico'
+export const TP_CALLBACK_SCHEMA = 'itiklink://tp-wallet'
+/** DeepLink 兜底用；SDK 主路径不依赖它 */
+export const TP_CALLBACK_URL = 'https://m.itiklink.com/api/v1/auth/wallet/tp-callback'
+const PENDING_KEY = 'tp_wallet_pending'
+const LAST_CB_KEY = 'tp_last_callback_uri'
+
+export type TpPending = {
+	step: string
+	actionId: string
+	address: string
+	message: string
+	nonce: string
+	createdAt: number
+}
+
+export type TpCallbackResult = {
+	ok: boolean
+	action: string
+	actionId: string
+	wallet: string
+	signature: string
+	raw: string
+}
+
+function pickStr(obj: UTSJSONObject, key: string): string {
+	try {
+		const v = obj[key]
+		if (v != null) {
+			const s = '' + v
+			if (s.length > 0 && s != 'null' && s != 'undefined') return s
+		}
+	} catch (e0) {}
+	return ''
+}
+
+function sdkToCallback(r: TpSdkResult): TpCallbackResult {
+	const out: TpCallbackResult = {
+		ok: r.code == 0 && (r.wallet.length > 0 || r.signature.length > 0 || r.raw.length > 0),
+		action: r.action,
+		actionId: r.actionId,
+		wallet: r.wallet,
+		signature: r.signature,
+		raw: r.raw
+	}
+	return out
+}
+
+export function newActionId(): string {
+	return 'itik-' + Date.now() + '-' + Math.floor(Math.random() * 100000)
+}
+
+export function saveTpPending(p: TpPending): void {
+	try {
+		const row: UTSJSONObject = {
+			step: p.step,
+			actionId: p.actionId,
+			address: p.address,
+			message: p.message,
+			nonce: p.nonce,
+			createdAt: p.createdAt
+		}
+		uni.setStorageSync(PENDING_KEY, JSON.stringify(row))
+	} catch (e) {}
+}
+
+export function loadTpPending(): TpPending | null {
+	try {
+		const raw = uni.getStorageSync(PENDING_KEY)
+		if (raw == null) return null
+		const text = '' + raw
+		if (text.length < 2) return null
+		const o = JSON.parse(text) as UTSJSONObject
+		const step = pickStr(o, 'step')
+		const actionId = pickStr(o, 'actionId')
+		if (step.length == 0 || actionId.length == 0) return null
+		let createdAt = 0
+		try {
+			const n = o['createdAt']
+			if (n != null) createdAt = parseFloat('' + n)
+		} catch (e1) {}
+		const out: TpPending = {
+			step: step,
+			actionId: actionId,
+			address: pickStr(o, 'address'),
+			message: pickStr(o, 'message'),
+			nonce: pickStr(o, 'nonce'),
+			createdAt: createdAt
+		}
+		return out
+	} catch (e) {
+		return null
+	}
+}
+
+export function clearTpPending(): void {
+	try { uni.removeStorageSync(PENDING_KEY) } catch (e) {}
+}
+
+export function isTpSdkAvailable(): boolean {
+	// #ifdef APP-ANDROID
+	try {
+		return true
+	} catch (e) {}
+	// #endif
+	return false
+}
+
+export function isTpAppInstalled(): boolean {
+	try {
+		return sdkIsInstalled()
+	} catch (e) {
+		return false
+	}
+}
+
+/** Mobile-SDK 授权登录 → 钱包地址（chain 与服务端 SIWE 一致用 56） */
+export async function tpSdkAuthorize(): Promise<TpCallbackResult> {
+	const actionId = newActionId()
+	const r = await sdkAuthorize(actionId, '56', DAPP_NAME, DAPP_ICON, 'itiklink-auth-login')
+	return sdkToCallback(r)
+}
+
+/** Mobile-SDK ethPersonalSign（用于 SIWE challenge.message） */
+export async function tpSdkPersonalSign(message: string): Promise<TpCallbackResult> {
+	const actionId = newActionId()
+	const r = await sdkPersonalSign(message, actionId, '56', DAPP_NAME, DAPP_ICON, 'itiklink-siwe', 'ethPersonalSign')
+	return sdkToCallback(r)
+}
+
+/** tp-login：用 ticket 作 actionId，挂 pendingCb 等 Assist 回传签名 */
+export async function tpSdkSignTicket(message: string, ticket: string): Promise<TpCallbackResult> {
+	if (message.length == 0 || ticket.length == 0) {
+		const empty: TpCallbackResult = { ok: false, action: '', actionId: '', wallet: '', signature: '', raw: '' }
+		return empty
+	}
+	const r = await sdkPersonalSign(message, ticket, '56', DAPP_NAME, DAPP_ICON, 'itiklink-tp-login', 'ethPersonalSign')
+	return sdkToCallback(r)
+}
+
+/** 解析服务端 deeplink 的 param JSON（兼容 + 表示空格） */
+export function parseTpDeeplinkParam(deeplink: string): UTSJSONObject | null {
+	const marker = 'param='
+	const idx = deeplink.indexOf(marker)
+	if (idx < 0) return null
+	let enc = deeplink.substring(idx + marker.length)
+	const amp = enc.indexOf('&')
+	if (amp >= 0) enc = enc.substring(0, amp)
+	// application/x-www-form-urlencoded：+ = 空格
+	const fixed = enc.split('+').join('%20')
+	try {
+		const decoded = decodeURIComponent(fixed)
+		if (decoded == null || decoded.length < 2) return null
+		return JSON.parse(decoded) as UTSJSONObject
+	} catch (e) {
+		return null
+	}
+}
+
+/**
+ * 只补 signType（服务端常缺），尽量不改其它字段。
+ * 不注入 callbackSchema：部分 TP 校验失败时会只进首页不弹窗；票务流靠 HTTPS callbackUrl。
+ */
+export function enrichTpLoginDeeplink(deeplink: string): string {
+	if (deeplink.length == 0) return deeplink
+	const o = parseTpDeeplinkParam(deeplink)
+	if (o == null) {
+		console.warn('[tp] enrich parse fail, use raw')
+		return deeplink
+	}
+	try {
+		const action = pickStr(o, 'action')
+		const st0 = pickStr(o, 'signType')
+		if (st0.length == 0 && action == 'sign') {
+			o['signType'] = 'ethPersonalSign'
+			o['hash'] = false
+		}
+		// 保留 HTTPS 给服务端验票；schema 仅用于签完跳回 App
+		o['callbackSchema'] = TP_CALLBACK_SCHEMA
+		const cb = pickStr(o, 'callbackUrl')
+		if (cb.indexOf('http') != 0) {
+			o['callbackUrl'] = 'https://m.itiklink.com/api/v1/auth/wallet/tp-login'
+		}
+		const msg = pickStr(o, 'message')
+		console.log(
+			'[tp] enrich action=', action,
+			'signType=', pickStr(o, 'signType'),
+			'msgLen=', msg.length,
+			'cb=', cb.substring(0, 40)
+		)
+		const json = JSON.stringify(o)
+		// 文档要求 encodeURIComponent（H5 同款）；勿用 URLEncoder 的 + 空格
+		return 'tpoutside://pull.activity?param=' + encodeURIComponent(json)
+	} catch (e) {
+		return deeplink
+	}
+}
+
+/**
+ * 拉起 TP PullUpActivity（官方 SDK 同款 extras）。
+ */
+export function openTpPullUri(deeplink: string): boolean {
+	if (deeplink.length == 0) return false
+	console.log('[tp] openPull len=', deeplink.length, 'head=', deeplink.substring(0, 48))
+	// #ifdef APP-ANDROID
+	try {
+		const act = UTSAndroid.getUniActivity()
+		if (act == null) return false
+		const intent = new Intent(Intent.ACTION_VIEW, Uri.parse(deeplink))
+		intent.setClassName(TP_PKG, 'com.tokenbank.pull.PullUpActivity')
+		intent.putExtra('packageName', act.getPackageName())
+		intent.putExtra('className', ASSIST_CLASS)
+		intent.putExtra('appName', DAPP_NAME)
+		try {
+			const ri = intent.resolveActivity(act.getPackageManager())
+			console.log('[tp] resolve=', ri != null ? ('' + ri) : 'null')
+		} catch (eR) {}
+		act.startActivity(intent)
+		return true
+	} catch (e1) {
+		console.warn('[tp] openPull className fail', e1)
+		try {
+			const act2 = UTSAndroid.getUniActivity()
+			if (act2 == null) return false
+			const intent2 = new Intent(Intent.ACTION_VIEW, Uri.parse(deeplink))
+			intent2.putExtra('packageName', act2.getPackageName())
+			intent2.putExtra('className', ASSIST_CLASS)
+			intent2.putExtra('appName', DAPP_NAME)
+			act2.startActivity(intent2)
+			return true
+		} catch (e2) {
+			console.warn('[tp] openPull retry fail', e2)
+			return false
+		}
+	}
+	// #endif
+	return openExternalUrl(deeplink)
+}
+
+/** 走官方 applink 页（文档写明 DeepLink 面向系统浏览器；App 内直调常只进首页） */
+export function openTpUniversalLink(deeplink: string): boolean {
+	const p = parseTpDeeplinkParam(deeplink)
+	if (p == null) return false
+	const st = pickStr(p, 'signType')
+	if (st.length == 0 && pickStr(p, 'action') == 'sign') {
+		p['signType'] = 'ethPersonalSign'
+		p['hash'] = false
+	}
+	const enc = encodeURIComponent(JSON.stringify(p))
+	const link = 'https://tokenpocket.github.io/applink?param=' + enc
+	console.log('[tp] open universal len=', link.length)
+	// #ifdef APP-ANDROID
+	try {
+		const act = UTSAndroid.getUniActivity()
+		if (act == null) return false
+		const intent = new Intent(Intent.ACTION_VIEW, Uri.parse(link))
+		act.startActivity(intent)
+		return true
+	} catch (e) {
+		console.warn('[tp] universal fail', e)
+		return false
+	}
+	// #endif
+	return openExternalUrl(link)
+}
+
+/**
+ * 无服务端 deeplink 时：本地拼 sign 协议再拉起
+ */
+export function openTpTicketSign(
+	message: string,
+	actionId: string,
+	callbackUrl: string,
+	chainId: string
+): boolean {
+	if (message.length == 0 || actionId.length == 0) return false
+	const cb = callbackUrl.length > 0 ? callbackUrl : 'https://m.itiklink.com/api/v1/auth/wallet/tp-login'
+	const cid = chainId.length > 0 ? chainId : '56'
+	const chains: Array<UTSJSONObject> = []
+	const c1: UTSJSONObject = { chainId: cid, network: 'ethereum' }
+	chains.push(c1)
+	const param: UTSJSONObject = {
+		protocol: 'TokenPocket',
+		version: '1.0',
+		dappName: 'ITIK',
+		dappIcon: 'https://m.itiklink.com/assets/img/logo.png',
+		action: 'sign',
+		actionId: actionId,
+		message: message,
+		signType: 'ethPersonalSign',
+		hash: false,
+		callbackUrl: cb,
+		callbackSchema: TP_CALLBACK_SCHEMA,
+		blockchains: chains
+	}
+	const json = JSON.stringify(param)
+	console.log('[tp] pullTicketSign jsonLen=', json.length, 'chain=', cid)
+	const link = 'tpoutside://pull.activity?param=' + encodeURIComponent(json)
+	return openTpUniversalLink(link) || openTpPullUri(link)
+}
+
+function buildPullUrl(paramObj: UTSJSONObject): string {
+	const json = JSON.stringify(paramObj)
+	return 'tpoutside://pull.activity?param=' + encodeURIComponent(json)
+}
+
+export function buildTpLoginUrl(actionId: string): string {
+	const chains: Array<UTSJSONObject> = []
+	const c1: UTSJSONObject = { chainId: '1', network: 'ethereum' }
+	chains.push(c1)
+	const param: UTSJSONObject = {
+		protocol: 'TokenPocket',
+		version: '2.0',
+		dappName: DAPP_NAME,
+		dappIcon: DAPP_ICON,
+		action: 'login',
+		actionId: actionId,
+		memo: 'itiklink-auth-login',
+		callbackUrl: TP_CALLBACK_URL,
+		callbackSchema: TP_CALLBACK_SCHEMA,
+		blockchains: chains
+	}
+	return buildPullUrl(param)
+}
+
+export function buildTpSignUrl(actionId: string, message: string): string {
+	const chains: Array<UTSJSONObject> = []
+	const c1: UTSJSONObject = { chainId: '1', network: 'ethereum' }
+	chains.push(c1)
+	const param: UTSJSONObject = {
+		protocol: 'TokenPocket',
+		version: '2.0',
+		dappName: DAPP_NAME,
+		dappIcon: DAPP_ICON,
+		action: 'sign',
+		actionId: actionId,
+		signType: 'ethPersonalSign',
+		hash: false,
+		memo: 'itiklink-siwe',
+		message: message,
+		callbackUrl: TP_CALLBACK_URL,
+		callbackSchema: TP_CALLBACK_SCHEMA,
+		blockchains: chains
+	}
+	return buildPullUrl(param)
+}
+
+export function openExternalUrl(url: string): boolean {
+	if (url.length == 0) return false
+	if (url.indexOf('tpoutside://') == 0 || url.indexOf('tp://') == 0) {
+		return openTpPullUri(url)
+	}
+	// #ifdef APP-ANDROID
+	try {
+		const act = UTSAndroid.getUniActivity()
+		if (act == null) return false
+		const intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url))
+		act.startActivity(intent)
+		return true
+	} catch (eAd) {
+		console.warn('[tp] open android fail', eAd)
+		return false
+	}
+	// #endif
+	// #ifdef H5
+	try {
+		const w = window as any
+		if (w != null && w.location != null) {
+			w.location.href = url
+			return true
+		}
+	} catch (eH5) {}
+	// #endif
+	return false
+}
+
+function parseQuery(url: string): UTSJSONObject {
+	const out: UTSJSONObject = {}
+	let q = ''
+	const qi = url.indexOf('?')
+	if (qi >= 0) q = url.substring(qi + 1)
+	else if (url.indexOf('=') > 0 && url.indexOf('://') < 0) q = url
+	if (q.length == 0) return out
+	const parts = q.split('&')
+	for (let i = 0; i < parts.length; i++) {
+		const p = parts[i]
+		const ei = p.indexOf('=')
+		if (ei <= 0) continue
+		let k = p.substring(0, ei)
+		let v = p.substring(ei + 1)
+		try {
+			const dk = decodeURIComponent(k)
+			if (dk != null && dk.length > 0) k = dk
+		} catch (e1) {}
+		try {
+			const dv = decodeURIComponent(v)
+			if (dv != null) v = dv
+		} catch (e2) {}
+		out[k] = v
+	}
+	return out
+}
+
+function extractSignature(signField: string): string {
+	if (signField.length == 0) return ''
+	if (signField.indexOf('0x') == 0 && signField.indexOf('{') < 0) return signField
+	try {
+		const o = JSON.parse(signField) as UTSJSONObject
+		const s1 = pickStr(o, 'signature')
+		if (s1.length > 0) return s1
+		const s2 = pickStr(o, 'sign')
+		if (s2.length > 0) return s2
+	} catch (e) {}
+	return signField
+}
+
+export function parseTpCallback(urlOrQuery: string): TpCallbackResult {
+	const empty: TpCallbackResult = {
+		ok: false,
+		action: '',
+		actionId: '',
+		wallet: '',
+		signature: '',
+		raw: urlOrQuery
+	}
+	if (urlOrQuery.length == 0) return empty
+	const q = parseQuery(urlOrQuery)
+	let wallet = pickStr(q, 'wallet')
+	if (wallet.length == 0) wallet = pickStr(q, 'account')
+	if (wallet.length == 0) wallet = pickStr(q, 'publickey')
+	const action = pickStr(q, 'action')
+	const actionId = pickStr(q, 'actionId')
+	let signature = extractSignature(pickStr(q, 'sign'))
+	if (signature.length == 0) signature = extractSignature(pickStr(q, 'signature'))
+	const resultRaw = pickStr(q, 'result')
+	const ok = resultRaw == '1' || resultRaw.toLowerCase() == 'true' || wallet.length > 0 || signature.length > 0
+	const out: TpCallbackResult = {
+		ok: ok,
+		action: action,
+		actionId: actionId,
+		wallet: wallet,
+		signature: signature,
+		raw: urlOrQuery
+	}
+	return out
+}
+
+export function readAndroidLaunchUri(): string {
+	// #ifdef APP-ANDROID
+	try {
+		const act = UTSAndroid.getUniActivity()
+		if (act == null) return ''
+		const intent = act.getIntent()
+		if (intent == null) return ''
+		try {
+			const data = intent.getData()
+			if (data != null) {
+				const s = data.toString()
+				if (s != null && ('' + s).length > 0) return '' + s
+			}
+		} catch (e0) {}
+		try {
+			const ds = intent.getDataString()
+			if (ds != null && ('' + ds).length > 0) return '' + ds
+		} catch (e1) {}
+	} catch (e) {
+		console.warn('[tp] read intent fail', e)
+	}
+	// #endif
+	return ''
+}
+
+export function captureTpCallbackFromIntent(): string {
+	const uri = readAndroidLaunchUri()
+	if (uri.length > 0 && uri.indexOf('itiklink://') >= 0) {
+		try { uni.setStorageSync(LAST_CB_KEY, uri) } catch (e) {}
+		// 若 SDK Promise 还在等，把 schema 结果喂回去
+		try { sdkDeliverSchema(uri) } catch (e0) {}
+		return uri
+	}
+	return ''
+}
+
+export function loadCapturedTpCallback(): string {
+	try {
+		const raw = uni.getStorageSync(LAST_CB_KEY)
+		if (raw == null) return ''
+		return '' + raw
+	} catch (e) {
+		return ''
+	}
+}
+
+export function clearCapturedTpCallback(): void {
+	try { uni.removeStorageSync(LAST_CB_KEY) } catch (e) {}
+}
+
+export function takeTpCallbackUri(): string {
+	const live = captureTpCallbackFromIntent()
+	if (live.length > 0) return live
+	return loadCapturedTpCallback()
+}
+
+/** @deprecated 主路径已改 SDK；保留 DeepLink 兜底 */
+export function openTpLogin(actionId: string): boolean {
+	return openExternalUrl(buildTpLoginUrl(actionId))
+}
+
+/** @deprecated 主路径已改 SDK */
+export function openTpSign(actionId: string, message: string): boolean {
+	return openExternalUrl(buildTpSignUrl(actionId, message))
+}

@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="group-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="topbar">
 			<view class="back-btn" @click="goBack">
 				<image class="back-icon" src="/static/login/f.png" mode="aspectFit"></image>
@@ -142,6 +145,16 @@
 		return '/static/login/tiki.png'
 	}
 
+	function applySummary(summary: MatrixRoom): void {
+		isGroup.value = roomIsGroup(summary)
+		const n = summary.name
+		if (n != null && n.length > 0) roomName.value = n
+		const t = summary.topic
+		if (t != null) topic.value = t
+		if (summary.favourite == true) pinned.value = true
+		if (summary.muted == true) muted.value = true
+	}
+
 	async function loadInfo(): Promise<void> {
 		const matrix = getMatrix()
 		if (matrix == null) return
@@ -185,16 +198,6 @@
 		}
 	}
 
-	function applySummary(summary: MatrixRoom): void {
-		isGroup.value = roomIsGroup(summary)
-		const n = summary.name
-		if (n != null && n.length > 0) roomName.value = n
-		const t = summary.topic
-		if (t != null) topic.value = t
-		if (summary.favourite == true) pinned.value = true
-		if (summary.muted == true) muted.value = true
-	}
-
 	function onInvite(): void {
 		openGroupPick('invite', roomId.value)
 	}
@@ -210,6 +213,34 @@
 			content: names.join('\n'),
 			showCancel: false
 		})
+	}
+
+	async function kickNow(userId: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		uni.showLoading({ title: '处理中…' })
+		try {
+			await matrix.kickMember(roomId.value, userId, '')
+			uni.hideLoading()
+			uni.showToast({ title: '已移出', icon: 'success' })
+			removing.value = false
+			loadInfo()
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: errText(e, '无权移出'), icon: 'none' })
+		}
+	}
+
+	async function saveName(name: string): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			await matrix.setRoomName(roomId.value, name)
+			roomName.value = name
+			uni.showToast({ title: '已修改', icon: 'success' })
+		} catch (e) {
+			uni.showToast({ title: errText(e, '修改失败'), icon: 'none' })
+		}
 	}
 
 	function onMemberTap(m: RoomMember): void {
@@ -231,22 +262,6 @@
 		}
 	}
 
-	async function kickNow(userId: string): Promise<void> {
-		const matrix = getMatrix()
-		if (matrix == null) return
-		uni.showLoading({ title: '处理中…' })
-		try {
-			await matrix.kickMember(roomId.value, userId, '')
-			uni.hideLoading()
-			uni.showToast({ title: '已移出', icon: 'success' })
-			removing.value = false
-			loadInfo()
-		} catch (e) {
-			uni.hideLoading()
-			uni.showToast({ title: errText(e, '无权移出'), icon: 'none' })
-		}
-	}
-
 	function editName(): void {
 		uni.showModal({
 			title: '群聊名称',
@@ -262,12 +277,12 @@
 		})
 	}
 
-	async function saveName(name: string): Promise<void> {
+	async function saveTopic(text: string): Promise<void> {
 		const matrix = getMatrix()
 		if (matrix == null) return
 		try {
-			await matrix.setRoomName(roomId.value, name)
-			roomName.value = name
+			await matrix.setRoomTopic(roomId.value, text)
+			topic.value = text
 			uni.showToast({ title: '已修改', icon: 'success' })
 		} catch (e) {
 			uni.showToast({ title: errText(e, '修改失败'), icon: 'none' })
@@ -286,18 +301,6 @@
 				saveTopic(text)
 			}
 		})
-	}
-
-	async function saveTopic(text: string): Promise<void> {
-		const matrix = getMatrix()
-		if (matrix == null) return
-		try {
-			await matrix.setRoomTopic(roomId.value, text)
-			topic.value = text
-			uni.showToast({ title: '已修改', icon: 'success' })
-		} catch (e) {
-			uni.showToast({ title: errText(e, '修改失败'), icon: 'none' })
-		}
 	}
 
 	function onSearchChat(): void {
@@ -328,18 +331,6 @@
 		}
 	}
 
-	function onLeave(): void {
-		const title = isGroup.value ? '删除并退出' : '删除聊天'
-		const content = isGroup.value ? '退出后不会通知群聊中其他成员，且不会再接收此群聊消息' : '将删除此聊天，可在通讯录再次发起'
-		uni.showModal({
-			title: title,
-			content: content,
-			success: (res) => {
-				if (res.confirm) leaveNow()
-			}
-		})
-	}
-
 	async function leaveNow(): Promise<void> {
 		const matrix = getMatrix()
 		if (matrix == null) return
@@ -357,6 +348,18 @@
 		}
 	}
 
+	function onLeave(): void {
+		const title = isGroup.value ? '删除并退出' : '删除聊天'
+		const content = isGroup.value ? '退出后不会通知群聊中其他成员，且不会再接收此群聊消息' : '将删除此聊天，可在通讯录再次发起'
+		uni.showModal({
+			title: title,
+			content: content,
+			success: (res) => {
+				if (res.confirm) leaveNow()
+			}
+		})
+	}
+
 	function optStr(obj: UTSJSONObject, key: string): string {
 		try {
 			const v = obj[key]
@@ -372,7 +375,8 @@
 		const rid = optStr(options, 'roomId')
 		if (rid.length > 0) {
 			try {
-				roomId.value = decodeURIComponent(rid)
+				const decoded = decodeURIComponent(rid)
+				roomId.value = decoded != null && decoded.length > 0 ? decoded : rid
 			} catch (e) {
 				roomId.value = rid
 			}

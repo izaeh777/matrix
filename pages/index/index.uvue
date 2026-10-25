@@ -1,5 +1,6 @@
-<template>
+﻿<template>
 	<view class="splash">
+		<!-- 启动页全屏，不加状态栏占位 -->
 		<image class="logo" src="/static/logo.png"></image>
 		<text class="title">{{ title }}</text>
 	</view>

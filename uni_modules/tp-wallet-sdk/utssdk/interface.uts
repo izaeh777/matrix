@@ -1,0 +1,26 @@
+/**
+ * TokenPocket Mobile-SDK 统一接口
+ * 跨模块传参用基本类型，避免对象字面量 JSON 序列化异常
+ * @see https://help.tokenpocket.pro/developer-cn/mobile-wallet/mobile-sdk/android
+ */
+
+export type TpSdkResult = {
+	/** 0=成功 1=失败 2=取消 */
+	code: number
+	/** 原始 JSON / 错误信息 */
+	raw: string
+	wallet: string
+	signature: string
+	action: string
+	actionId: string
+}
+
+/** actionId, chainId, dappName, dappIcon, memo — 空串用默认值 */
+export type TpAuthorize = (actionId: string, chainId: string, dappName: string, dappIcon: string, memo: string) => Promise<TpSdkResult>
+
+/** message, actionId, chainId, dappName, dappIcon, memo, signType */
+export type TpPersonalSign = (message: string, actionId: string, chainId: string, dappName: string, dappIcon: string, memo: string, signType: string) => Promise<TpSdkResult>
+
+export type TpIsInstalled = () => boolean
+/** callbackSchema 兜底：把 itiklink:// 回跳交给 SDK Promise */
+export type TpDeliverSchema = (urlOrQuery: string) => boolean

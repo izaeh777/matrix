@@ -1,9 +1,9 @@
 {
 	"name": "itiklink",
-	"appid": "__UNI__E35CC00",
+	"appid": "__UNI__ED028E7",
 	"description": "",
-	"versionName": "1.0.0",
-	"versionCode": "100",
+	"versionName": "1.0.2",
+	"versionCode": "102",
 	"uni-app-x": {
 		"styleIsolationVersion": "2"
 	},

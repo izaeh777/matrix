@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="settings-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<!-- 顶部导航 -->
 		<view class="topbar">
 			<view class="topbar-back" @click="goBack">
@@ -386,19 +389,6 @@
 		}
 	}
 
-	function onEditAvatar(): void {
-		uni.chooseImage({
-			count: 1,
-			sizeType: ['compressed'],
-			sourceType: ['album', 'camera'],
-			success: (res) => {
-				const paths = res.tempFilePaths
-				if (paths == null || paths.length == 0) return
-				uploadAvatarNow(paths[0])
-			}
-		})
-	}
-
 	async function uploadAvatarNow(localPath: string): Promise<void> {
 		if (savingProfile.value) return
 		savingProfile.value = true
@@ -449,6 +439,19 @@
 			uni.showToast({ title: errText(e, '上传失败'), icon: 'none' })
 		}
 		savingProfile.value = false
+	}
+
+	function onEditAvatar(): void {
+		uni.chooseImage({
+			count: 1,
+			sizeType: ['compressed'],
+			sourceType: ['album', 'camera'],
+			success: (res) => {
+				const paths = res.tempFilePaths
+				if (paths == null || paths.length == 0) return
+				uploadAvatarNow(paths[0])
+			}
+		})
 	}
 	function closeDeviceModal(): void {
 		showDeviceModal.value = false

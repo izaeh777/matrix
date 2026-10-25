@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="chat-page" :style="chatPageStyle">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<!-- 效果图：顶栏白色 + 底部弧形，下方聊天区浅蓝 -->
 		<view class="chat-header" :style="chatHeaderStyle">
 			<view class="topbar">
@@ -524,6 +527,28 @@
 	const alertTick = ref<number>(0)
 	let switchingRoom: boolean = false
 
+	function safeDecode(raw: string): string {
+		try {
+			const d = decodeURIComponent(raw)
+			if (d == null || d.length == 0) return raw
+			return d
+		} catch (eDec) {
+			return raw
+		}
+	}
+
+	function getMxcUrl(mxc: string, w: number, h: number): string {
+		const matrix = getMatrix()
+		if (matrix == null || mxc.length == 0) return ''
+		let url = matrix.mxcToHttp(mxc, w, h)
+		if (url.length == 0) return ''
+		const token = matrix.accessToken
+		if (token.length > 0 && url.indexOf('access_token=') < 0) {
+			url = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'access_token=' + encodeURIComponent(token)
+		}
+		return url
+	}
+
 	function sameRoomId(a: string, b: string): boolean {
 		if (a == b) return true
 		if (a.length == 0 || b.length == 0) return false
@@ -631,8 +656,13 @@
 
 	function stripChipPx(): number {
 		try {
-			return uni.upx2px(STRIP_CHIP_RPX)
-		} catch (e) {
+			return uni.rpx2px(STRIP_CHIP_RPX)
+		} catch (e0) {
+			try {
+				const sys = uni.getSystemInfoSync()
+				const w = sys.windowWidth
+				if (w > 0) return w / 750 * STRIP_CHIP_RPX
+			} catch (e1) {}
 			return 48
 		}
 	}
@@ -692,68 +722,12 @@
 		} catch (e) {}
 	}
 
+	// UTS 无提升：实现挂到后面（persist/loadHistory 等定义之后）
+	let switchToStripRoomImpl: ((nextId: string) => Promise<void>) | null = null
 	async function switchToStripRoom(nextId: string): Promise<void> {
-		if (nextId.length == 0) return
-		if (sameRoomId(nextId, roomId.value)) return
-		if (switchingRoom) return
-		switchingRoom = true
-		console.log('[strip] switch ->', nextId)
-		try {
-			persistRoomChatNow()
-			const pt = persistTimer
-			persistTimer = null
-			if (pt != null) clearTimeout(pt)
-			// 作废进行中的旧房间 messages 请求，防止旧内容写回
-			chatLoadGen = chatLoadGen + 1
-			const gen = chatLoadGen
-			roomId.value = nextId
-			uni.setStorageSync('last_chat_room', nextId)
-			messages.value = []
-			prevBatch = ''
-			lastBufCount = 0
-			replyTo.value = null
-			showAtPicker.value = false
-			inputText.value = ''
-			typingUsers.value = []
-			highlightEventId.value = ''
-			clearRoomAlert(nextId)
-			stripDragX.value = 0
-
-			const list = stripRoomList.value
-			for (let i = 0; i < list.length; i++) {
-				if (sameRoomId(list[i].room_id, nextId)) {
-					list[i].unread_count = 0
-					const n = list[i].name
-					if (n != null && n.length > 0) roomName.value = n
-					break
-				}
-			}
-			stripRoomList.value = list.slice()
-
-			const matrix = getMatrix()
-			if (matrix == null) return
-			if (gen != chatLoadGen) return
-			applyLocalCache()
-			if (gen != chatLoadGen) return
-			loadingHistory.value = messages.value.length == 0
-			await loadRoomMeta(matrix)
-			if (gen != chatLoadGen) return
-			checkRoomEncrypted(matrix)
-			await loadHistory()
-			if (gen != chatLoadGen) return
-			mergeRoomBuffer()
-			refreshMsgTimes()
-			hydrateImages()
-			nextTick(() => scrollToBottom())
-			if (messages.value.length > 0) {
-				const last = messages.value[messages.value.length - 1]
-				matrix.readReceipt(nextId, last.event_id)
-			}
-			getCallManager().replayRoom(nextId)
-		} catch (e) {
-			console.warn('[strip] switch fail', e)
-		} finally {
-			switchingRoom = false
+		const fn = switchToStripRoomImpl
+		if (fn != null) {
+			await fn(nextId)
 		}
 	}
 
@@ -856,50 +830,72 @@
 		stripMoved = false
 	}
 
-	// H5 鼠标拖拽（桌面调试）
-	function onStripMouseDown(e: any): void {
-		const x: number = e.clientX as number
-		const y: number = e.clientY as number
-		stripTouchX = x
-		stripTouchY = y
-		stripMoved = false
-		stripActive = true
-		stripDragging.value = true
-		stripDragX.value = 0
+	// H5 鼠标拖拽（桌面调试）；App 只靠 touch，空实现即可
+	function onStripMouseDown(e: UniTouchEvent): void {
+		// #ifdef H5
+		try {
+			const o = e as UTSJSONObject
+			const xv = o['clientX']
+			const yv = o['clientY']
+			const x: number = xv != null ? parseFloat('' + xv) : 0
+			const y: number = yv != null ? parseFloat('' + yv) : 0
+			stripTouchX = x
+			stripTouchY = y
+			stripMoved = false
+			stripActive = true
+			stripDragging.value = true
+			stripDragX.value = 0
+		} catch (e0) {}
+		// #endif
 	}
-	function onStripMouseMove(e: any): void {
+	function onStripMouseMove(e: UniTouchEvent): void {
+		// #ifdef H5
 		if (!stripActive) return
-		const x: number = e.clientX as number
-		const y: number = e.clientY as number
-		const dx = x - stripTouchX
-		const dy = y - stripTouchY
-		const adx = dx > 0 ? dx : -dx
-		const ady = dy > 0 ? dy : -dy
-		if (adx < 4 && ady < 4) return
-		stripMoved = true
-		stripDragX.value = dx
+		try {
+			const o = e as UTSJSONObject
+			const xv = o['clientX']
+			const yv = o['clientY']
+			const x: number = xv != null ? parseFloat('' + xv) : 0
+			const y: number = yv != null ? parseFloat('' + yv) : 0
+			const dx = x - stripTouchX
+			const dy = y - stripTouchY
+			const adx = dx > 0 ? dx : -dx
+			const ady = dy > 0 ? dy : -dy
+			if (adx < 4 && ady < 4) return
+			stripMoved = true
+			stripDragX.value = dx
+		} catch (e1) {}
+		// #endif
 	}
-	function onStripMouseUp(e: any): void {
+	function onStripMouseUp(e: UniTouchEvent): void {
+		// #ifdef H5
 		if (!stripActive) return
 		stripActive = false
 		stripDragging.value = false
-		const x: number = e.clientX as number
-		const dx = x - stripTouchX
-		const dragSnap = stripDragX.value
-		const th = stripChipPx() * 0.2
-		const adx = dx > 0 ? dx : -dx
-		stripDragX.value = 0
-		if (stripMoved && adx >= th) {
-			if (dx < 0) shiftStrip(1)
-			else shiftStrip(-1)
-		} else {
-			const idx = stripIndexAtX(x, dragSnap)
-			if (idx >= 0 && idx < stripRoomList.value.length) {
-				const room = stripRoomList.value[idx]
-				if (room != null) switchToStripRoom(room.room_id)
+		try {
+			const o = e as UTSJSONObject
+			const xv = o['clientX']
+			const x: number = xv != null ? parseFloat('' + xv) : stripTouchX
+			const dx = x - stripTouchX
+			const dragSnap = stripDragX.value
+			const th = stripChipPx() * 0.2
+			const adx = dx > 0 ? dx : -dx
+			stripDragX.value = 0
+			if (stripMoved && adx >= th) {
+				if (dx < 0) shiftStrip(1)
+				else shiftStrip(-1)
+			} else {
+				const idx = stripIndexAtX(x, dragSnap)
+				if (idx >= 0 && idx < stripRoomList.value.length) {
+					const room = stripRoomList.value[idx]
+					if (room != null) switchToStripRoom(room.room_id)
+				}
 			}
+		} catch (e2) {
+			stripDragX.value = 0
 		}
 		stripMoved = false
+		// #endif
 	}
 
 	const atMembers = computed((): Array<RoomMember> => {
@@ -1005,7 +1001,7 @@
 		const t = typingTimer
 		typingTimer = null
 		if (t != null) {
-			clearTimeout(t)
+			clearTimeout(t as number)
 		}
 	}
 	function bindTimeout(fn: () => void, ms: number): number | null {
@@ -1086,21 +1082,6 @@
 		return ''
 	}
 
-	function senderAvatar(sender: string): string {
-		if (sender.length == 0) return '/static/login/tiki.png'
-		if (sender == currentUserId.value && myAvatarSrc.value.length > 0) {
-			return myAvatarSrc.value
-		}
-		const mxc = resolveMemberMxc(sender)
-		if (mxc.length == 0) {
-			ensureMemberAvatar(sender)
-			return '/static/login/tiki.png'
-		}
-		const url = getMxcUrl(mxc, 96, 96)
-		if (url.length == 0) return '/static/login/tiki.png'
-		return url
-	}
-
 	const avatarFetching: Array<string> = []
 	async function ensureMemberAvatar(uid: string): Promise<void> {
 		if (uid.length == 0) return
@@ -1127,6 +1108,21 @@
 			}
 		} catch (e) {
 		}
+	}
+
+	function senderAvatar(sender: string): string {
+		if (sender.length == 0) return '/static/login/tiki.png'
+		if (sender == currentUserId.value && myAvatarSrc.value.length > 0) {
+			return myAvatarSrc.value
+		}
+		const mxc = resolveMemberMxc(sender)
+		if (mxc.length == 0) {
+			ensureMemberAvatar(sender)
+			return '/static/login/tiki.png'
+		}
+		const url = getMxcUrl(mxc, 96, 96)
+		if (url.length == 0) return '/static/login/tiki.png'
+		return url
 	}
 	function senderInitial(sender: string): string {
 		const local = sender.split(':')[0].replace('@', '')
@@ -1199,12 +1195,6 @@
 			m._showStamp = show
 		}
 	}
-	function safeDecode(raw: string): string {
-		const d = decodeURIComponent(raw)
-		if (d == null || d.length == 0) return raw
-		return d
-	}
-
 	function storageStr(key: string): string {
 		const raw = uni.getStorageSync(key)
 		if (raw == null) return ''
@@ -1213,17 +1203,6 @@
 		if (s == 'null') return ''
 		if (s == 'undefined') return ''
 		return s
-	}
-	function getMxcUrl(mxc: string, w: number, h: number): string {
-		const matrix = matrixRef
-		if (matrix == null || mxc.length == 0) return ''
-		let url = matrix.mxcToHttp(mxc, w, h)
-		if (url.length == 0) return ''
-		const token = matrix.accessToken
-		if (token.length > 0 && url.indexOf('access_token=') < 0) {
-			url = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'access_token=' + encodeURIComponent(token)
-		}
-		return url
 	}
 	function scrollToBottom() {
 		scrollInto.value = ''
@@ -1364,7 +1343,7 @@
 		const old = persistTimer
 		persistTimer = null
 		if (old != null) {
-			clearTimeout(old)
+			clearTimeout(old as number)
 		}
 		persistTimer = bindTimeout(() => {
 			persistTimer = null
@@ -2499,6 +2478,18 @@
 		if (gen == chatLoadGen) loadingHistory.value = false
 	}
 
+	function collectMentionIds(text: string): Array<string> {
+		const ids: Array<string> = []
+		if (isGroup.value == false) return ids
+		const list = groupMembers.value
+		for (let i = 0; i < list.length; i++) {
+			const name = memberDisplayName(list[i])
+			if (name.length == 0) continue
+			if (text.indexOf('@' + name) >= 0) ids.push(list[i].user_id)
+		}
+		return ids
+	}
+
 	async function finishSend(tempId: string, text: string, replyRef: ReplyTarget | null, matrix: MatrixClient): Promise<void> {
 		try {
 			let newId = ''
@@ -2531,18 +2522,6 @@
 				}
 			}
 		}
-	}
-
-	function collectMentionIds(text: string): Array<string> {
-		const ids: Array<string> = []
-		if (isGroup.value == false) return ids
-		const list = groupMembers.value
-		for (let i = 0; i < list.length; i++) {
-			const name = memberDisplayName(list[i])
-			if (name.length == 0) continue
-			if (text.indexOf('@' + name) >= 0) ids.push(list[i].user_id)
-		}
-		return ids
 	}
 
 	function onSend() {
@@ -2587,6 +2566,31 @@
 			finishSend(tempId, text, replyRef, matrix)
 		} catch (e) {
 			uni.showToast({ title: errText(e, '发送失败'), icon: 'none' })
+		}
+	}
+
+	async function loadGroupMembers(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const list = await matrix.getRoomMembers(roomId.value)
+			groupMembers.value = list
+		} catch (e) {}
+	}
+
+	function maybeOpenAtPicker(): void {
+		if (isGroup.value == false) return
+		const text = inputText.value
+		if (text.length == 0) {
+			showAtPicker.value = false
+			return
+		}
+		const last = text.charAt(text.length - 1)
+		if (last == '@') {
+			if (groupMembers.value.length == 0) loadGroupMembers()
+			showAtPicker.value = true
+		} else {
+			showAtPicker.value = false
 		}
 	}
 
@@ -2865,12 +2869,12 @@
 		uni.navigateBack()
 	}
 
-	function showRoomInfo() {
-		openInfo()
-	}
-
 	function openInfo(): void {
 		openGroupInfo(roomId.value)
+	}
+
+	function showRoomInfo() {
+		openInfo()
 	}
 
 	function atName(m: RoomMember): string {
@@ -2899,31 +2903,6 @@
 
 	function pickAtMember(m: RoomMember): void {
 		insertAtToken(memberDisplayName(m))
-	}
-
-	function maybeOpenAtPicker(): void {
-		if (isGroup.value == false) return
-		const text = inputText.value
-		if (text.length == 0) {
-			showAtPicker.value = false
-			return
-		}
-		const last = text.charAt(text.length - 1)
-		if (last == '@') {
-			if (groupMembers.value.length == 0) loadGroupMembers()
-			showAtPicker.value = true
-		} else {
-			showAtPicker.value = false
-		}
-	}
-
-	async function loadGroupMembers(): Promise<void> {
-		const matrix = getMatrix()
-		if (matrix == null) return
-		try {
-			const list = await matrix.getRoomMembers(roomId.value)
-			groupMembers.value = list
-		} catch (e) {}
 	}
 
 	async function sendChatInvite(userId: string): Promise<void> {
@@ -3122,6 +3101,72 @@
 			ingestTimelineEvent(buf[i], roomId.value)
 		}
 		lastBufCount = buf.length
+	}
+
+	switchToStripRoomImpl = async (nextId: string): Promise<void> => {
+		if (nextId.length == 0) return
+		if (sameRoomId(nextId, roomId.value)) return
+		if (switchingRoom) return
+		switchingRoom = true
+		console.log('[strip] switch ->', nextId)
+		try {
+			persistRoomChatNow()
+			const pt = persistTimer
+			persistTimer = null
+			if (pt != null) {
+				clearTimeout(pt as number)
+			}
+			chatLoadGen = chatLoadGen + 1
+			const gen = chatLoadGen
+			roomId.value = nextId
+			uni.setStorageSync('last_chat_room', nextId)
+			messages.value = []
+			prevBatch = ''
+			lastBufCount = 0
+			replyTo.value = null
+			showAtPicker.value = false
+			inputText.value = ''
+			typingUsers.value = []
+			highlightEventId.value = ''
+			clearRoomAlert(nextId)
+			stripDragX.value = 0
+
+			const list = stripRoomList.value
+			for (let i = 0; i < list.length; i++) {
+				if (sameRoomId(list[i].room_id, nextId)) {
+					list[i].unread_count = 0
+					const n = list[i].name
+					if (n != null && n.length > 0) roomName.value = n
+					break
+				}
+			}
+			stripRoomList.value = list.slice()
+
+			const matrix = getMatrix()
+			if (matrix == null) return
+			if (gen != chatLoadGen) return
+			applyLocalCache()
+			if (gen != chatLoadGen) return
+			loadingHistory.value = messages.value.length == 0
+			await loadRoomMeta(matrix)
+			if (gen != chatLoadGen) return
+			checkRoomEncrypted(matrix)
+			await loadHistory()
+			if (gen != chatLoadGen) return
+			mergeRoomBuffer()
+			refreshMsgTimes()
+			hydrateImages()
+			nextTick(() => scrollToBottom())
+			if (messages.value.length > 0) {
+				const last = messages.value[messages.value.length - 1]
+				matrix.readReceipt(nextId, last.event_id)
+			}
+			getCallManager().replayRoom(nextId)
+		} catch (e) {
+			console.warn('[strip] switch fail', e)
+		} finally {
+			switchingRoom = false
+		}
 	}
 
 	async function pullLatestLive(): Promise<void> {
@@ -3389,7 +3434,7 @@
 			const pt = persistTimer
 			persistTimer = null
 			if (pt != null) {
-				clearTimeout(pt)
+				clearTimeout(pt as number)
 			}
 			persistRoomChatNow()
 			stopOff(offTimeline)
@@ -3498,13 +3543,9 @@
 </script>
 
 <style>
-	page {
-		background-color: #F3F8FE;
-	}
 	.chat-page {
 		flex: 1;
 		width: 100%;
-		min-height: 100%;
 		background-color: #F3F8FE;
 		background-image: linear-gradient(180deg, #F3F8FE 0%, #FFFFFF 100%);
 		display: flex;
@@ -3578,7 +3619,6 @@
 		overflow: hidden;
 		white-space: nowrap;
 		text-align: center;
-		max-width: 100%;
 		height: 44rpx;
 		line-height: 44rpx;
 	}
@@ -3742,7 +3782,7 @@
 	.at-panel {
 		background-color: #ffffff;
 		border-radius: 24rpx 24rpx 0 0;
-		max-height: 60%;
+		max-height: 840rpx;
 		padding-bottom: 24rpx;
 	}
 	.at-list {

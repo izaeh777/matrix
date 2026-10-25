@@ -1853,9 +1853,11 @@ export class CallManager {
 				resolve(true)
 				return
 			}
+			// #ifdef H5
 			preloadH5EngineJs()
 			let n = 0
-			const tick = (): void => {
+			let tickFn: (() => void) | null = null
+			tickFn = (): void => {
 				if (this.engineReady()) {
 					resolve(true)
 					return
@@ -1865,9 +1867,15 @@ export class CallManager {
 					resolve(false)
 					return
 				}
-				setTimeout(tick, 200)
+				const again = tickFn
+				setTimeout(() => {
+					if (again != null) again()
+				}, 200)
 			}
-			tick()
+			tickFn()
+			return
+			// #endif
+			resolve(this.engineReady())
 		})
 	}
 

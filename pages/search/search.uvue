@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="search-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<!-- 顶部搜索栏 -->
 		<view class="topbar">
 			<text class="topbar-back" @click="goBack">←</text>
@@ -71,7 +74,7 @@
 </template>
 
 <script setup lang="uts">
-	import { ref, computed, onMounted } from 'vue'
+	import { ref, computed } from 'vue'
 	import { getMatrix, errText, SearchHit } from '@/common/matrix.uts'
 	import { openChat } from '@/common/app.uts'
 
@@ -284,14 +287,8 @@
 		openChat(item.room_id, item.event_id)
 	}
 
-	onMounted(() => {
-		// 可选：从上一个页面传入房间 ID
-		const pages = getCurrentPages()
-		if (pages.length == 0) return
-		const cur = pages[pages.length - 1] as UTSJSONObject
-		const opts = cur['options'] as UTSJSONObject
-		if (opts == null) return
-		const rid = opts['roomId'] as string
+	onLoad((options: UTSJSONObject) => {
+		const rid = options['roomId'] as string
 		if (rid != null && rid.length > 0) {
 			currentRoomId.value = rid
 			filterScope.value = 'room'

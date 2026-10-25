@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="pick-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="topbar">
 			<view class="back-btn" @click="goBack">
 				<text class="back-text">‹</text>
@@ -299,7 +302,8 @@
 		const rid = optStr(options, 'roomId')
 		if (rid.length > 0) {
 			try {
-				roomId.value = decodeURIComponent(rid)
+				const decoded = decodeURIComponent(rid)
+				roomId.value = decoded != null && decoded.length > 0 ? decoded : rid
 			} catch (e) {
 				roomId.value = rid
 			}

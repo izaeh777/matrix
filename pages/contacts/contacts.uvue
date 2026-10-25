@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="contacts-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="wx-nav">
 			<text class="wx-nav-title">通讯录</text>
 			<text class="wx-nav-btn" @click="onOpenSettings">+</text>

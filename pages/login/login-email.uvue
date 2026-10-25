@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="top-bar">
 			<view class="back-btn" @click="onBack">
 				<text class="back-icon">‹</text>
@@ -8,7 +11,7 @@
 			<view class="top-spacer"></view>
 		</view>
 
-		<text class="brand">i-tiklink</text>
+		<image class="brand-logo" src="/static/login/logo.png" mode="aspectFit"></image>
 		<text class="card-title">欢迎回来</text>
 		<text class="card-subtitle">使用账号密码登录</text>
 
@@ -156,11 +159,10 @@
 		height: 72rpx;
 	}
 
-	.brand {
-		font-size: 40rpx;
-		font-weight: 700;
-		color: #1e7dff;
-		margin-bottom: 12rpx;
+	.brand-logo {
+		width: 280rpx;
+		height: 64rpx;
+		margin-bottom: 20rpx;
 	}
 	.card-title {
 		font-size: 48rpx;

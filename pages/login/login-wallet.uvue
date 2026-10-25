@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="top-bar">
 			<view class="back-btn" @click="onBack">
 				<text class="back-icon">‹</text>
@@ -10,56 +13,103 @@
 
 		<text class="brand">i-tiklink</text>
 		<text class="card-title">钱包授权登录</text>
-		<text class="card-subtitle">支持 TokenPocket / DeBox / MetaMask 等（EIP-4361）</text>
+		<text class="card-subtitle">{{ subTitle }}</text>
 
 		<view class="status-card">
-			<view class="status-dot" :class="address.length > 0 ? 'status-on' : ''"></view>
-			<text class="status-text">{{ address.length > 0 ? shortAddr : '未连接钱包' }}</text>
+			<view class="status-dot" :class="(address.length > 0 || waiting) ? 'status-on' : ''"></view>
+			<text class="status-text">{{ statusText }}</text>
 		</view>
 
-		<view class="field">
-			<text class="field-label">钱包地址</text>
-			<view class="input-box">
-				<input
-					class="input"
-					type="text"
-					:value="address"
-					disabled
-					placeholder="点击下方连接钱包自动读取"
-					placeholder-class="placeholder"
-				/>
-			</view>
+		<view class="btn-login" :class="busy ? 'btn-login-off' : ''" @click="onOneTapLogin">
+			<text class="btn-login-text">{{ mainBtnText }}</text>
 		</view>
 
-		<view class="btn-login" :class="loading ? 'btn-login-off' : ''" @click="onConnect">
-			<text class="btn-login-text">{{ address.length > 0 ? '重新连接钱包' : '连接钱包' }}</text>
-		</view>
-
-		<view
-			class="btn-login btn-sign"
-			:class="(loading || address.length == 0) ? 'btn-login-off' : ''"
-			@click="onSignLogin"
-		>
-			<text class="btn-login-text">{{ loading ? '请稍候…' : '一键签名登录/注册' }}</text>
-		</view>
-
-		<text class="hint">流程：连接钱包 → 获取挑战 → personal_sign → 校验登录</text>
+		<text class="hint">{{ hintText }}</text>
 	</view>
 </template>
 
 <script setup lang="uts">
 	import { ref, computed } from 'vue'
-	import { walletChallenge, walletVerify } from '@/common/platform.uts'
+	import {
+		walletChallenge,
+		walletVerify,
+		loadTpLoginTicket,
+		clearTpLoginTicket,
+		PlatformSession
+	} from '@/common/platform.uts'
 	import { startMatrixFromPlatform } from '@/common/app.uts'
+	import {
+		clearTpPending,
+		tpSdkAuthorize,
+		tpSdkPersonalSign
+	} from '@/common/tp-wallet.uts'
+
+	const LAST_WALLET_KEY = 'tp_last_wallet_v1'
 
 	const address = ref<string>('')
 	const loading = ref<boolean>(false)
+	const checking = ref<boolean>(false)
+	const waiting = ref<boolean>(false)
+	const waitTip = ref<string>('')
+	const appMode = ref<boolean>(false)
+	// #ifdef APP
+	appMode.value = true
+	// #endif
+	let loginDone = false
+	let starting = false
+
+	function loadLastWallet(): string {
+		try {
+			const raw = uni.getStorageSync(LAST_WALLET_KEY)
+			if (raw == null) return ''
+			const s = ('' + raw).trim()
+			if (s.indexOf('0x') == 0 && s.length >= 42) return s
+		} catch (e) {}
+		return ''
+	}
+
+	function saveLastWallet(addr: string): void {
+		if (addr.length < 10) return
+		try { uni.setStorageSync(LAST_WALLET_KEY, addr) } catch (e) {}
+	}
+
+	const busy = computed((): boolean => {
+		return loading.value || starting
+	})
 
 	const shortAddr = computed((): string => {
 		const a = address.value
 		if (a.length < 12) return a
 		return a.substring(0, 6) + '...' + a.substring(a.length - 4)
 	})
+
+	const subTitle = computed((): string => {
+		if (appMode.value) return '与官网 tp-login 一致：一次签名即可登录'
+		return '支持 TokenPocket / DeBox / MetaMask 等（EIP-4361）'
+	})
+
+	const statusText = computed((): string => {
+		if (waitTip.value.length > 0) return waitTip.value
+		if (address.value.length > 0) return shortAddr.value
+		return '未连接钱包'
+	})
+
+	const mainBtnText = computed((): string => {
+		if (loading.value) return '请稍候…'
+		return appMode.value ? '授权登录' : '一键签名登录/注册'
+	})
+
+	const hintText = computed((): string => {
+		if (appMode.value) {
+			return '点「授权登录」：首次会先连接钱包再签名；之后只需确认一次签名即可登录。'
+		}
+		return '流程：连接钱包 → 获取挑战 → personal_sign → 校验登录'
+	})
+
+	type WalletBridge = {
+		connect: () => Promise<string>
+		personalSign: (message: string, addr: string) => Promise<string>
+	}
 
 	function onBack(): void {
 		uni.navigateBack({})
@@ -69,17 +119,19 @@
 		let msg = '操作失败'
 		try { msg = '' + e } catch (e2) {}
 		if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+		if (msg.indexOf('HTTP_525') >= 0 || msg.indexOf('CDN') >= 0) {
+			return '网络暂时不可用，请再点一次授权登录'
+		}
 		return msg.length > 0 ? msg : '操作失败'
 	}
 
-	function ensureWalletBridge(): any | null {
+	function ensureWalletBridge(): WalletBridge | null {
 		// #ifdef H5
 		try {
 			const w = window as any
 			if (w == null) return null
-			if (w.__itikWallet != null) return w.__itikWallet
-			// 线上 static 脚本未加载时，现场补一个桥接（直接读 TP/DeBox/ethereum）
-			const makeBridge = (): any => {
+			if (w.__itikWallet != null) return w.__itikWallet as WalletBridge
+			const makeBridge = (): WalletBridge => {
 				const provider = (): any | null => {
 					try {
 						if (w.tokenpocket != null && w.tokenpocket.ethereum != null) return w.tokenpocket.ethereum
@@ -92,7 +144,7 @@
 					} catch (e2) {}
 					return null
 				}
-				const bridge: any = {
+				const bridge: WalletBridge = {
 					connect: async (): Promise<string> => {
 						const eth = provider()
 						if (eth == null) throw new Error('未检测到钱包，请在 TokenPocket / DeBox / MetaMask 等钱包浏览器内打开')
@@ -115,57 +167,145 @@
 		return null
 	}
 
-	async function onConnect(): Promise<void> {
-		if (loading.value) return
-		const bridge = ensureWalletBridge()
-		if (bridge == null) {
-			uni.showToast({ title: '当前环境无法调用钱包，请用 H5 钱包浏览器打开', icon: 'none' })
-			return
-		}
-		loading.value = true
-		try {
-			const addr = await bridge.connect() as string
-			address.value = addr != null ? ('' + addr) : ''
-			uni.showToast({ title: '钱包已连接', icon: 'none' })
-		} catch (e) {
-			uni.showToast({ title: errMsg(e), icon: 'none', duration: 3000 })
-		}
+	async function afterLoginOk(session: PlatformSession): Promise<void> {
+		if (loginDone) return
+		loginDone = true
+		waiting.value = false
+		const addr = session.email
+		if (addr.length > 0) address.value = addr
+		clearTpPending()
+		clearTpLoginTicket()
+		waitTip.value = ''
+		uni.hideLoading()
 		loading.value = false
+		try {
+			startMatrixFromPlatform()
+		} catch (eMx) {
+			console.warn('[wallet] matrix start fail', eMx)
+		}
+		uni.showToast({ title: '登录成功', icon: 'success' })
+		setTimeout(() => {
+			uni.reLaunch({ url: '/pages/home/home' })
+		}, 500)
 	}
 
-	async function onSignLogin(): Promise<void> {
-		if (loading.value) return
-		const addr = address.value.trim()
-		if (addr.length == 0) {
-			uni.showToast({ title: '请先连接钱包', icon: 'none' })
-			return
+	async function finishLoginSiwe(addr: string, signature: string): Promise<void> {
+		console.log('[wallet] verify start', addr, 'sigLen=', signature.length)
+		const session = await walletVerify(addr, signature, '')
+		await afterLoginOk(session)
+	}
+
+	/**
+	 * App（Mobile-SDK）：challenge + personalSign + verify
+	 * 不用 tp-login ticket（SDK Assist 回传不会走 HTTPS callback，ticket 会一直 pending）
+	 * - 有缓存地址：只弹一次签名
+	 * - 无缓存：先授权取地址，再签名
+	 */
+	async function onOneTapApp(): Promise<void> {
+		if (starting || loading.value) return
+		starting = true
+		loginDone = false
+		loading.value = true
+		waiting.value = false
+		clearTpLoginTicket()
+		try {
+			let wallet = loadLastWallet()
+			if (wallet.length < 10) {
+				waitTip.value = '请在 TokenPocket 中授权连接钱包'
+				uni.showLoading({ title: '打开 TokenPocket…' })
+				console.log('[wallet] authorize for address')
+				const auth = await tpSdkAuthorize()
+				wallet = auth.wallet
+				if (!auth.ok || wallet.length < 10) {
+					throw new Error('未获取到钱包地址，请在 TP 中确认授权')
+				}
+				saveLastWallet(wallet)
+				console.log('[wallet] authorize ok', wallet)
+			} else {
+				console.log('[wallet] use cached wallet', wallet)
+			}
+			address.value = wallet
+
+			waitTip.value = '正在获取签名消息…'
+			uni.showLoading({ title: '准备签名…' })
+			const challenge = await walletChallenge(wallet)
+			console.log('[wallet] challenge msgLen=', challenge.message.length)
+			waiting.value = true
+			waitTip.value = '请在 TokenPocket 中确认签名'
+			uni.showLoading({ title: '打开签名…' })
+			const signed = await tpSdkPersonalSign(challenge.message)
+			console.log('[wallet] signed ok=', signed.ok, 'wallet=', signed.wallet, 'sigLen=', signed.signature.length)
+			if (!signed.ok || signed.signature.length == 0) {
+				throw new Error('签名失败或已取消')
+			}
+			const useWallet = signed.wallet.length > 10 ? signed.wallet : wallet
+			address.value = useWallet
+			saveLastWallet(useWallet)
+			waitTip.value = '正在完成登录…'
+			uni.showLoading({ title: '登录中…' })
+			const session = await walletVerify(useWallet, signed.signature, '')
+			await afterLoginOk(session)
+			starting = false
+		} catch (e) {
+			console.warn('[wallet] app login fail', e)
+			starting = false
+			waiting.value = false
+			uni.hideLoading()
+			loading.value = false
+			waitTip.value = ''
+			clearTpLoginTicket()
+			uni.showToast({ title: errMsg(e), icon: 'none', duration: 3500 })
 		}
+	}
+
+	/** H5：仍走 challenge + verify */
+	async function onOneTapH5(): Promise<void> {
 		const bridge = ensureWalletBridge()
 		if (bridge == null) {
-			uni.showToast({ title: '当前环境无法调用钱包，请用 H5 钱包浏览器打开', icon: 'none' })
+			uni.showToast({ title: '请在 TokenPocket / DeBox / MetaMask 等钱包浏览器内打开', icon: 'none' })
 			return
 		}
 		loading.value = true
 		uni.showLoading({ title: '签名登录中…' })
 		try {
-			const challenge = await walletChallenge(addr)
-			const signature = await bridge.personalSign(challenge.message, addr) as string
+			const addr = await bridge.connect()
+			const useAddr = addr != null ? ('' + addr) : ''
+			if (useAddr.length == 0) throw new Error('未获取到钱包地址')
+			address.value = useAddr
+			const challenge = await walletChallenge(useAddr)
+			const signature = await bridge.personalSign(challenge.message, useAddr)
 			if (signature == null || ('' + signature).length == 0) {
 				throw new Error('签名失败')
 			}
-			await walletVerify(addr, '' + signature, '')
-			startMatrixFromPlatform()
-			uni.hideLoading()
-			uni.showToast({ title: '登录成功', icon: 'success' })
-			setTimeout(() => {
-				uni.reLaunch({ url: '/pages/home/home' })
-			}, 500)
+			await finishLoginSiwe(useAddr, '' + signature)
 		} catch (e) {
 			uni.hideLoading()
 			loading.value = false
+			waitTip.value = ''
 			uni.showToast({ title: errMsg(e), icon: 'none', duration: 3000 })
 		}
 	}
+
+	async function onOneTapLogin(): Promise<void> {
+		if (busy.value) return
+		if (appMode.value) {
+			await onOneTapApp()
+			return
+		}
+		await onOneTapH5()
+	}
+
+	onShow(() => {
+		if (!appMode.value) return
+		if (loginDone || starting) return
+		const ticket = loadTpLoginTicket()
+		if (ticket.length == 0) return
+		// 旧 ticket 残留：App 主路径已改 challenge/verify，直接清掉避免空轮询
+		console.log('[wallet] onShow clear stale ticket', ticket)
+		clearTpLoginTicket()
+		waiting.value = false
+		waitTip.value = ''
+	})
 </script>
 
 <style>
@@ -178,12 +318,12 @@
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
-		padding-top: 40rpx;
-		margin-bottom: 36rpx;
+		height: 88rpx;
+		margin-bottom: 40rpx;
 	}
 	.back-btn {
-		width: 64rpx;
-		height: 64rpx;
+		width: 72rpx;
+		height: 72rpx;
 		align-items: center;
 		justify-content: center;
 	}
@@ -193,105 +333,80 @@
 		line-height: 56rpx;
 	}
 	.top-title {
-		font-size: 32rpx;
-		font-weight: 700;
+		font-size: 34rpx;
+		font-weight: 600;
 		color: #1a1a1a;
 	}
-	.top-spacer { width: 64rpx; }
+	.top-spacer {
+		width: 72rpx;
+	}
 	.brand {
-		font-size: 40rpx;
-		font-weight: 800;
-		color: #1861c8;
-		margin-bottom: 20rpx;
+		font-size: 48rpx;
+		font-weight: 700;
+		color: #0b6bcb;
+		margin-bottom: 12rpx;
 	}
 	.card-title {
-		font-size: 40rpx;
-		font-weight: 800;
-		color: #111111;
-		margin-bottom: 10rpx;
+		font-size: 36rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+		margin-top: 24rpx;
 	}
 	.card-subtitle {
 		font-size: 26rpx;
 		color: #6b7280;
+		margin-top: 8rpx;
 		margin-bottom: 36rpx;
+		lines: 2;
 	}
 	.status-card {
 		flex-direction: row;
 		align-items: center;
-		background-color: #f3f6fb;
+		background-color: #f3f8fe;
 		border-radius: 16rpx;
-		padding: 20rpx 24rpx;
-		margin-bottom: 28rpx;
+		padding: 24rpx 28rpx;
+		margin-bottom: 32rpx;
 	}
 	.status-dot {
 		width: 16rpx;
 		height: 16rpx;
 		border-radius: 8rpx;
-		background-color: #f59e0b;
-		margin-right: 12rpx;
+		background-color: #9ca3af;
+		margin-right: 16rpx;
 	}
 	.status-on {
-		background-color: #10b981;
+		background-color: #07c160;
 	}
 	.status-text {
-		font-size: 26rpx;
-		color: #374151;
-	}
-	.field {
-		margin-bottom: 24rpx;
-	}
-	.field-label {
-		font-size: 26rpx;
-		color: #4b5563;
-		margin-bottom: 12rpx;
-		font-weight: 600;
-	}
-	.input-box {
-		background-color: #ffffff;
-		border-radius: 16rpx;
-		border-width: 1rpx;
-		border-style: solid;
-		border-color: #e5e7eb;
-		padding: 0 24rpx;
-		height: 96rpx;
-		justify-content: center;
-	}
-	.input {
+		flex: 1;
 		font-size: 28rpx;
-		color: #1a1a1a;
-		height: 96rpx;
-	}
-	.placeholder {
-		color: #9aa3af;
+		color: #374151;
+		lines: 2;
 	}
 	.btn-login {
-		height: 112rpx;
-		background-color: #1861c8;
+		height: 96rpx;
 		border-radius: 48rpx;
-		margin-top: 12rpx;
-		justify-content: center;
+		background-color: #0b6bcb;
 		align-items: center;
-		border-width: 2rpx;
-		border-style: solid;
-		border-color: #1454b0;
+		justify-content: center;
+		margin-top: 12rpx;
 	}
-	.btn-sign {
+	.btn-check {
+		background-color: #374151;
 		margin-top: 20rpx;
 	}
 	.btn-login-off {
-		background-color: #8fb4ff;
-		border-color: #7aa6f0;
+		opacity: 0.55;
 	}
 	.btn-login-text {
-		color: #ffffff;
 		font-size: 32rpx;
 		font-weight: 600;
+		color: #ffffff;
 	}
 	.hint {
 		margin-top: 28rpx;
-		font-size: 22rpx;
-		color: #9aa3af;
-		text-align: center;
-		line-height: 34rpx;
+		font-size: 24rpx;
+		color: #9ca3af;
+		lines: 4;
 	}
 </style>

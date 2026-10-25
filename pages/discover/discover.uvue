@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="discover-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="search-wrap">
 			<view class="search-box" @click="onSearchBoxTap">
 				<view v-if="keyword.length == 0 && !searchFocused" class="search-placeholder">
@@ -292,28 +295,6 @@
 		uni.navigateTo({ url: '/pages/project/publish' })
 	}
 
-	function onTab(tab: string): void {
-		activeTab.value = tab
-		loadData()
-	}
-
-	async function onSearch(): Promise<void> {
-		const kw = keyword.value.trim()
-		if (kw.length == 0) {
-			loadData()
-			return
-		}
-		loading.value = true
-		try {
-			const list = await searchCmsArchives(kw)
-			hotList.value = list
-			latestList.value = list
-		} catch (e) {
-			console.warn('搜索失败', e)
-		}
-		loading.value = false
-	}
-
 	async function loadData(): Promise<void> {
 		loading.value = true
 		try {
@@ -351,6 +332,28 @@
 			latestList.value = latest
 		} catch (e) {
 			console.warn('加载发现失败', e)
+		}
+		loading.value = false
+	}
+
+	function onTab(tab: string): void {
+		activeTab.value = tab
+		loadData()
+	}
+
+	async function onSearch(): Promise<void> {
+		const kw = keyword.value.trim()
+		if (kw.length == 0) {
+			loadData()
+			return
+		}
+		loading.value = true
+		try {
+			const list = await searchCmsArchives(kw)
+			hotList.value = list
+			latestList.value = list
+		} catch (e) {
+			console.warn('搜索失败', e)
 		}
 		loading.value = false
 	}

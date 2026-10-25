@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="profile-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="top-row">
 			<view class="lang-pill" @click="onSoon">
 				<image class="lang-globe" src="/static/login/china.png" mode="aspectFit"></image>
@@ -19,7 +22,7 @@
 				<view class="user-sub">
 					<text class="user-id">ID: {{ accountName }}</text>
 					<view class="vip-badge">
-						<text class="vip-text">VIP1会员</text>
+						<text class="vip-text">{{ vipLabel }}</text>
 					</view>
 				</view>
 			</view>
@@ -33,9 +36,9 @@
 
 		<view class="member-card">
 			<view class="vip-bar">
-				<text class="vip-bar-text">有效期：2026-09-11 至 2026-10-11</text>
-				<view class="renew-btn" @click="onSoon">
-					<text class="renew-text">续费</text>
+				<text class="vip-bar-text">{{ vipPeriod }}</text>
+				<view class="renew-btn" @click="onSubscribe">
+					<text class="renew-text">{{ renewBtnText }}</text>
 				</view>
 			</view>
 			<view class="stat-row">
@@ -139,6 +142,37 @@
 				</view>
 			</view>
 		</view>
+
+		<view v-if="showPlans" class="invite-mask" @click="closePlans">
+			<view class="plan-sheet" @click.stop="">
+				<text class="invite-title">选择套餐</text>
+				<text class="invite-desc">使用 USDT 余额支付，订阅后立即生效</text>
+				<view v-if="plansLoading" class="plan-state">
+					<text class="plan-state-text">加载中…</text>
+				</view>
+				<view v-else-if="planList.length == 0" class="plan-state">
+					<text class="plan-state-text">暂无套餐</text>
+				</view>
+				<scroll-view v-else class="plan-scroll" scroll-y="true">
+					<view
+						v-for="item in planList"
+						:key="item.plan_code"
+						class="plan-card"
+						:class="{ 'plan-card-on': selectedPlanCode == item.plan_code }"
+						@click="selectPlan(item.plan_code)"
+					>
+						<view class="plan-card-top">
+							<text class="plan-name">{{ item.name }}</text>
+							<text class="plan-price">{{ formatPlanPrice(item) }}</text>
+						</view>
+						<text class="plan-meta">{{ formatPlanMeta(item) }}</text>
+					</view>
+				</scroll-view>
+				<view class="invite-btn" :class="{ 'invite-btn-disabled': paying || selectedPlanCode.length == 0 }" @click="onPayPlan">
+					<text class="invite-btn-text">{{ paying ? '支付中…' : '确认支付' }}</text>
+				</view>
+			</view>
+		</view>
 	</view>
 </template>
 
@@ -146,13 +180,31 @@
 	import { ref, computed, onMounted, onUnmounted } from 'vue'
 	import { getMatrix } from '@/common/matrix.uts'
 	import { loadSession, saveSession, SessionInfo } from '@/common/storage.uts'
-	import { loadPlatformSession, PlatformSession, fetchPlatformMe, savePlatformSession } from '@/common/platform.uts'
+	import {
+		loadPlatformSession,
+		PlatformSession,
+		fetchPlatformMe,
+		savePlatformSession,
+		fetchRolePlans,
+		createBillingOrder,
+		renewBillingSubscription,
+		RolePlan
+	} from '@/common/platform.uts'
 	import { friendCodeOf, inviteQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
 	import { openChat } from '@/common/app.uts'
 
 	const session = ref<SessionInfo | null>(loadSession())
 	const platform = ref<PlatformSession | null>(loadPlatformSession())
 	const usdtBalance = ref<string>('--')
+	const vipLabel = ref<string>('普通用户')
+	const vipPeriod = ref<string>('暂无有效订阅')
+	const renewBtnText = computed((): string => {
+		const label = vipLabel.value
+		if (label == '游客' || label == '普通用户' || label.toUpperCase() == 'VISITOR') {
+			return '去订阅'
+		}
+		return '续费'
+	})
 	const displayName = computed(() => {
 		const s = session.value
 		if (s != null) {
@@ -194,6 +246,11 @@
 	const showInvite = ref<boolean>(false)
 	const showCodeInput = ref<boolean>(false)
 	const enterCode = ref<string>('')
+	const showPlans = ref<boolean>(false)
+	const plansLoading = ref<boolean>(false)
+	const paying = ref<boolean>(false)
+	const planList = ref<Array<RolePlan>>([])
+	const selectedPlanCode = ref<string>('')
 	const friendCode = computed((): string => friendCodeOf(userId.value as string))
 	const inviteQr = computed((): string => inviteQrUrl(userId.value as string))
 	let offSync: (() => void) | null = null
@@ -201,6 +258,11 @@
 	function stopOff(handler: (() => void) | null): void {
 		if (handler == null) return
 		try { handler() } catch (e) {}
+	}
+
+	function platformTokenEmpty(): boolean {
+		const p = loadPlatformSession()
+		return p == null || p.token.length == 0
 	}
 
 	async function loadUsdtBalance(): Promise<void> {
@@ -211,6 +273,9 @@
 		try {
 			const me = await fetchPlatformMe()
 			usdtBalance.value = me.money.length > 0 ? me.money : '0'
+			if (me.vip_label.length > 0) vipLabel.value = me.vip_label
+			if (me.vip_period.length > 0) vipPeriod.value = me.vip_period
+			console.log('[profile] vip=', me.vip_label, me.vip_period)
 			// 同步昵称到本地 session，资料页立刻刷新
 			const p = loadPlatformSession()
 			if (p != null && me.nickname.length > 0) {
@@ -225,11 +290,6 @@
 			console.warn('拉取余额失败', e)
 			usdtBalance.value = '--'
 		}
-	}
-
-	function platformTokenEmpty(): boolean {
-		const p = loadPlatformSession()
-		return p == null || p.token.length == 0
 	}
 
 	async function setupProfile(): Promise<void> {
@@ -284,6 +344,101 @@
 	function onSoon() {
 		uni.showToast({ title: '即将开放', icon: 'none' })
 	}
+
+	function formatPlanPrice(item: RolePlan): string {
+		const cur = item.currency.length > 0 ? item.currency : 'USD'
+		return cur + ' ' + item.price
+	}
+
+	function formatPlanMeta(item: RolePlan): string {
+		let days = item.duration_days
+		if (days <= 0) days = 365
+		let tip = '' + days + ' 天'
+		if (days >= 365 && days % 365 == 0) {
+			tip = '' + (days / 365) + ' 年'
+		}
+		return tip + ' · ' + item.plan_code
+	}
+
+	function selectPlan(code: string): void {
+		selectedPlanCode.value = code
+	}
+
+	function closePlans(): void {
+		if (paying.value) return
+		showPlans.value = false
+	}
+
+	async function onSubscribe(): Promise<void> {
+		if (platformTokenEmpty()) {
+			uni.showToast({ title: '请先登录平台账号', icon: 'none' })
+			return
+		}
+		showPlans.value = true
+		plansLoading.value = true
+		planList.value = []
+		selectedPlanCode.value = ''
+		try {
+			const list = await fetchRolePlans()
+			planList.value = list
+			if (list.length > 0) {
+				selectedPlanCode.value = list[0].plan_code
+			}
+		} catch (e) {
+			console.warn('[profile] plans fail', e)
+			uni.showToast({ title: '' + e, icon: 'none' })
+			showPlans.value = false
+		}
+		plansLoading.value = false
+	}
+
+	async function onPayPlan(): Promise<void> {
+		if (paying.value) return
+		const code = selectedPlanCode.value
+		if (code.length == 0) {
+			uni.showToast({ title: '请选择套餐', icon: 'none' })
+			return
+		}
+		let picked: RolePlan | null = null
+		const list = planList.value
+		for (let i = 0; i < list.length; i++) {
+			if (list[i].plan_code == code) {
+				picked = list[i]
+				break
+			}
+		}
+		const priceTip = picked != null ? formatPlanPrice(picked!) : code
+		const ok = await new Promise((resolve: (v: boolean) => void) => {
+			uni.showModal({
+				title: '确认支付',
+				content: '将使用 USDT 余额支付 ' + priceTip + '，是否继续？',
+				success: (res) => {
+					resolve(res.confirm == true)
+				},
+				fail: () => {
+					resolve(false)
+				}
+			})
+		})
+		if (ok != true) return
+		paying.value = true
+		try {
+			const isRenew = renewBtnText.value == '续费'
+			if (isRenew) {
+				await renewBillingSubscription(code)
+			} else {
+				await createBillingOrder(code)
+			}
+			uni.showToast({ title: '支付成功', icon: 'success' })
+			showPlans.value = false
+			await loadUsdtBalance()
+		} catch (e) {
+			console.warn('[profile] pay fail', e)
+			uni.showToast({ title: '' + e, icon: 'none' })
+		}
+		paying.value = false
+	}
+
 	function goStats() {
 		uni.navigateTo({ url: '/pages/stats/stats' })
 	}
@@ -687,5 +842,60 @@
 		color: #ffffff;
 		font-size: 32rpx;
 		font-weight: 600;
+	}
+	.invite-btn-disabled {
+		opacity: 0.55;
+	}
+	.plan-sheet {
+		background-color: #ffffff;
+		border-radius: 36rpx 36rpx 0 0;
+		padding: 40rpx 32rpx 56rpx;
+		align-items: stretch;
+	}
+	.plan-scroll {
+		height: 520rpx;
+		margin-bottom: 28rpx;
+	}
+	.plan-state {
+		padding: 48rpx 0;
+		align-items: center;
+		margin-bottom: 20rpx;
+	}
+	.plan-state-text {
+		font-size: 28rpx;
+		color: #9aa3af;
+	}
+	.plan-card {
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #e5e7eb;
+		border-radius: 20rpx;
+		padding: 24rpx 28rpx;
+		margin-bottom: 16rpx;
+		background-color: #f8fafc;
+	}
+	.plan-card-on {
+		border-color: #2f6ff2;
+		background-color: #eef4ff;
+	}
+	.plan-card-top {
+		flex-direction: row;
+		align-items: center;
+		margin-bottom: 8rpx;
+	}
+	.plan-name {
+		flex: 1;
+		font-size: 30rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.plan-price {
+		font-size: 30rpx;
+		font-weight: 700;
+		color: #1861c8;
+	}
+	.plan-meta {
+		font-size: 22rpx;
+		color: #6b7280;
 	}
 </style>

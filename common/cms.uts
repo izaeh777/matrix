@@ -550,13 +550,17 @@ export function friendCodeOf(userId: string): string {
 		if ((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) out += ch
 	}
 	if (out.length >= 8) return out.substring(0, 8)
-	let n = userId.length * 31
+	let n: number = userId.length * 31
 	for (let j = 0; j < userId.length; j++) {
-		n = n + userId.charCodeAt(j) * (j + 3)
+		const codeRaw = userId.charCodeAt(j)
+		const code: number = codeRaw != null ? (codeRaw as number) : 0
+		n = n + code * (j + 3)
 	}
 	const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 	while (out.length < 8) {
-		const idx = n < 0 ? (-n) % alphabet.length : n % alphabet.length
+		const mod = alphabet.length
+		const idxNum: number = n < 0 ? ((-n) % mod) : (n % mod)
+		const idx: number = idxNum as number
 		out += alphabet.charAt(idx)
 		n = n * 17 + 13
 	}
@@ -588,16 +592,11 @@ export function openCmsLink(url: string): void {
 		}
 	} catch (e0) {}
 	// #endif
-	// #ifdef APP-ANDROID || APP-IOS
-	try {
-		plus.runtime.openURL(url)
-		return
-	} catch (e1) {}
-	// #endif
+	// uni-app x 无 plus；App 暂复制链接，避免 Kotlin 找不到 plus
 	uni.setClipboardData({
 		data: url,
 		success: () => {
-			uni.showToast({ title: '链接已复制', icon: 'none' })
+			uni.showToast({ title: '链接已复制，请到浏览器打开', icon: 'none' })
 		}
 	})
 }

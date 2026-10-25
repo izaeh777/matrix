@@ -2,10 +2,17 @@
 	import { bootstrapMatrix } from '@/common/app.uts'
 	import { getMatrix } from '@/common/matrix.uts'
 	import { bindCallToMatrix } from '@/common/call.uts'
+	import { captureTpCallbackFromIntent } from '@/common/tp-wallet.uts'
 
 	// #ifdef APP-ANDROID || APP-HARMONY
 	let firstBackTime = 0
 	// #endif
+
+	function maybeTpSchema(): void {
+		// #ifdef APP
+		try { captureTpCallbackFromIntent() } catch (e) {}
+		// #endif
+	}
 
 	onLaunch(() => {
 		console.log('App Launch')
@@ -14,6 +21,7 @@
 		if (matrix != null) {
 			matrix.startSync()
 		}
+		maybeTpSchema()
 	})
 
 	onAppShow(() => {
@@ -21,6 +29,7 @@
 		bindCallToMatrix()
 		const m = getMatrix()
 		if (m != null) m.startSync()
+		maybeTpSchema()
 	})
 
 	onAppHide(() => {
@@ -62,4 +71,13 @@
 	.uni-column {
 		flex-direction: column;
 	}
+
+	/* App 自定义导航：避开状态栏，并整体略下移 */
+	/* #ifdef APP */
+	.status-bar-holder {
+		width: 100%;
+		height: var(--status-bar-height);
+		margin-bottom: 4px;
+	}
+	/* #endif */
 </style>

@@ -1,5 +1,6 @@
-<template>
+﻿<template>
 	<view class="call-page">
+		<!-- 通话页全屏，不加状态栏占位 -->
 		<!-- #ifdef H5 -->
 		<view class="call-stage"></view>
 		<!-- #endif -->
@@ -151,12 +152,14 @@
 		push('/static/call-engine.js')
 		push('./static/call-engine.js')
 		push('static/call-engine.js')
+		// #ifdef H5
 		try {
 			const loc = (window as any).location
 			if (loc != null && loc.origin != null) {
 				push('' + loc.origin + '/static/call-engine.js')
 			}
 		} catch (e0) {}
+		// #endif
 		return out
 	}
 	function injectScriptOnce(id: string, src: string, onDone: (ok: boolean) => void): void {
@@ -618,6 +621,8 @@
 	}
 
 	let lastKickKey = ''
+	// App/UTS 无函数提升：互相调用用可空引用，避免「找不到名称 kickEngine」
+	let kickEngineRef: (() => void) | null = null
 	function armHttpsFallback(): void {
 		// #ifndef H5
 		if (httpsFallbackArmed) return
@@ -628,7 +633,8 @@
 			httpsTried = true
 			httpsReady = true
 			try { pageEnsureEngine() } catch (e0) {}
-			kickEngine()
+			const k = kickEngineRef
+			if (k != null) k()
 		}, 2500)
 		// #endif
 	}
@@ -679,6 +685,7 @@
 			runEngineCmd()
 		}
 	}
+	kickEngineRef = kickEngine
 
 	function onWebLoad(_e: UniWebViewLoadEvent): void {
 		const mgr = getCallManager()
@@ -1225,7 +1232,7 @@
 	}
 	.invite-sheet {
 		width: 750rpx;
-		max-height: 70%;
+		max-height: 980rpx;
 		background-color: #1c1c1e;
 		border-top-left-radius: 24rpx;
 		border-top-right-radius: 24rpx;

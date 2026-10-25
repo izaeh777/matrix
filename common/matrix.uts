@@ -2516,15 +2516,16 @@ export class MatrixClient {
 			const result = jsonObj(r, 'result')
 			const ev = jsonObj(result, 'event')
 			const content = jsonObj(ev, 'content')
-			const item = {} as SearchHit
-			item.event_id = jsonStr(ev, 'event_id')
-			item.room_id = jsonStr(result, 'room_id')
-			item.sender = jsonStr(ev, 'sender')
-			item.type = jsonStr(ev, 'type')
-			item.body = jsonStr(content, 'body')
-			item.ts = jsonNum(ev, 'origin_server_ts')
-			item.highlight = jsonStrArr(r, 'highlights')
-			item.context = jsonObj(r, 'context')
+			const item: SearchHit = {
+				event_id: jsonStr(ev, 'event_id'),
+				room_id: jsonStr(result, 'room_id'),
+				sender: jsonStr(ev, 'sender'),
+				type: jsonStr(ev, 'type'),
+				body: jsonStr(content, 'body'),
+				ts: jsonNum(ev, 'origin_server_ts'),
+				highlight: jsonStrArr(r, 'highlights'),
+				context: jsonObj(r, 'context')
+			}
 			results.push(item)
 		}
 		const groups = jsonObj(events, 'groups')
@@ -2532,11 +2533,12 @@ export class MatrixClient {
 		const rawCount = jsonNum(roomGroup, 'count')
 		const nres = results.length
 		const count = rawCount > 0 ? rawCount : nres
-		const out = {} as SearchResult
-		out.results = results
-		out.count = count
-		out.highlights = jsonStrArr(events, 'highlights')
-		out.next_batch = jsonStr(events, 'next_batch')
+		const out: SearchResult = {
+			results: results,
+			count: count,
+			highlights: jsonStrArr(events, 'highlights'),
+			next_batch: jsonStr(events, 'next_batch')
+		}
 		return out
 	}
 

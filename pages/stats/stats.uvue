@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="stats-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="topbar">
 			<view class="back-btn" @click="goBack">
 				<text class="back-text">‹</text>

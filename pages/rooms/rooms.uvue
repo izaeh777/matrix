@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="rooms-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="msg-header">
 			<view class="msg-header-row">
 				<text class="msg-title">聊天</text>
@@ -231,6 +234,22 @@
 	}
 	const roomAction = ref<RoomActionState>({ show: false, room: null })
 
+	function roomHasUnread(room: MatrixRoom): boolean {
+		const c = room.unread_count
+		if (c == null) return false
+		return c > 0
+	}
+	function roomTitle(room: MatrixRoom): string {
+		const n = room.name
+		if (n != null && n.length > 0) return n
+		return room.room_id
+	}
+	function roomTitleShort(room: MatrixRoom): string {
+		const t = roomTitle(room)
+		if (t.length <= 5) return t
+		return t.substring(0, 4) + '…'
+	}
+
 	const filteredRooms = computed((): Array<MatrixRoom> => {
 		const list = rooms.value
 		const tab = filterTab.value
@@ -288,12 +307,6 @@
 		return pad(d.getMonth() + 1) + '-' + pad(d.getDate())
 	}
 
-	function roomTitleShort(room: MatrixRoom): string {
-		const t = roomTitle(room)
-		if (t.length <= 5) return t
-		return t.substring(0, 4) + '…'
-	}
-
 	function onLang(): void {
 		uni.showToast({ title: '当前仅支持简体中文', icon: 'none' })
 	}
@@ -310,11 +323,6 @@
 	}
 	function roomMuted(room: MatrixRoom): boolean {
 		return room.muted == true
-	}
-	function roomHasUnread(room: MatrixRoom): boolean {
-		const c = room.unread_count
-		if (c == null) return false
-		return c > 0
 	}
 	function roomUnreadText(room: MatrixRoom): string {
 		const c = room.unread_count
@@ -335,11 +343,6 @@
 		const http = matrix.mxcToHttp(a, 96, 96)
 		if (http.length == 0) return '/static/login/tiki.png'
 		return http
-	}
-	function roomTitle(room: MatrixRoom): string {
-		const n = room.name
-		if (n != null && n.length > 0) return n
-		return room.room_id
 	}
 	function roomPreviewText(room: MatrixRoom): string {
 		const p = room.last_message_preview
@@ -678,6 +681,16 @@
 		offCall = null
 	})
 
+	function onMatrixAuthLost(): void {
+		needMatrixLogin.value = true
+		rooms.value = []
+		if (hasPlatformLogin()) {
+			uni.showToast({ title: '聊天登录已失效，请重新登录', icon: 'none' })
+			return
+		}
+		uni.reLaunch({ url: '/pages/login/login' })
+	}
+
 	async function loadRooms(): Promise<void> {
 		const matrix = getMatrix()
 		if (matrix == null) return
@@ -755,16 +768,6 @@
 
 	function goMatrixLogin(): void {
 		openMatrixLogin()
-	}
-
-	function onMatrixAuthLost(): void {
-		needMatrixLogin.value = true
-		rooms.value = []
-		if (hasPlatformLogin()) {
-			uni.showToast({ title: '聊天登录已失效，请重新登录', icon: 'none' })
-			return
-		}
-		uni.reLaunch({ url: '/pages/login/login' })
 	}
 
 	async function setupRooms(): Promise<void> {

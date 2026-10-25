@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="home-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="home-top">
 			<image class="brand-logo" src="/static/login/logo.png" mode="aspectFit"></image>
 			<view class="user-pill">

@@ -1,5 +1,8 @@
-<template>
+﻿<template>
 	<view class="pub-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
 		<view class="nav">
 			<text class="nav-back" @click="onBack">‹</text>
 			<text class="nav-title">发布项目</text>
