@@ -163,13 +163,17 @@
 					>
 						<view class="plan-card-top">
 							<text class="plan-name">{{ item.name }}</text>
-							<text class="plan-price">{{ formatPlanPrice(item) }}</text>
+							<view class="plan-price-col">
+								<text class="plan-price">{{ formatPlanPayPrice(item) }}</text>
+								<text v-if="hasPlanDiscount(item)" class="plan-price-origin">{{ formatPlanOriginPrice(item) }}</text>
+							</view>
 						</view>
+						<text v-if="hasPlanDiscount(item)" class="plan-dis">{{ formatPlanDiscount(item) }}</text>
 						<text class="plan-meta">{{ formatPlanMeta(item) }}</text>
 					</view>
 				</scroll-view>
 				<view class="invite-btn" :class="{ 'invite-btn-disabled': paying || selectedPlanCode.length == 0 }" @click="onPayPlan">
-					<text class="invite-btn-text">{{ paying ? '支付中…' : '确认支付' }}</text>
+					<text class="invite-btn-text">{{ paying ? '支付中…' : payBtnLabel }}</text>
 				</view>
 			</view>
 		</view>
@@ -191,9 +195,12 @@
 		billingPayNotify,
 		fetchOrderDetail,
 		PAY_USDT_RECV_FALLBACK,
+		planPayPrice,
+		planPayPriceText,
+		isPlanDiscountActive,
 		RolePlan
 	} from '@/common/platform.uts'
-	import { tpTransferUsdt, isTpAppInstalled } from '@/common/tp-wallet.uts'
+	import { tpTransferUsdt, waitBscTxConfirmed, isTpAppInstalled } from '@/common/tp-wallet.uts'
 	import { friendCodeOf, inviteQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
 	import { openChat } from '@/common/app.uts'
 
@@ -204,7 +211,11 @@
 	const vipPeriod = ref<string>('暂无有效订阅')
 	const renewBtnText = computed((): string => {
 		const label = vipLabel.value
+		const period = vipPeriod.value
 		if (label == '游客' || label == '普通用户' || label.toUpperCase() == 'VISITOR') {
+			return '去订阅'
+		}
+		if (period.indexOf('待支付') >= 0 || period.indexOf('暂无') >= 0 || period.indexOf('过期') >= 0) {
 			return '去订阅'
 		}
 		return '续费'
@@ -349,10 +360,51 @@
 		uni.showToast({ title: '即将开放', icon: 'none' })
 	}
 
-	function formatPlanPrice(item: RolePlan): string {
-		const cur = item.currency.length > 0 ? item.currency : 'USD'
-		return cur + ' ' + item.price
+	function hasPlanDiscount(item: RolePlan): boolean {
+		return isPlanDiscountActive(item)
 	}
+
+	function selectedPlan(): RolePlan | null {
+		const code = selectedPlanCode.value
+		if (code.length == 0) return null
+		const list = planList.value
+		for (let i = 0; i < list.length; i++) {
+			if (list[i].plan_code == code) return list[i]
+		}
+		return null
+	}
+
+	function formatPlanPayPrice(item: RolePlan): string {
+		return 'USDT ' + planPayPriceText(item)
+	}
+
+	function formatPlanOriginPrice(item: RolePlan): string {
+		return '原价 USDT ' + item.price
+	}
+
+	function formatPlanDiscount(item: RolePlan): string {
+		return '优惠 -' + item.dis + ' USDT'
+	}
+
+	function formatPayConfirm(item: RolePlan): string {
+		const pay = planPayPriceText(item)
+		if (isPlanDiscountActive(item)) {
+			return '实付 USDT ' + pay + '（原价 ' + item.price + '，已减 ' + item.dis + '）\n将打开 TokenPocket（BSC）转账，请确认后签名。'
+		}
+		return '实付 USDT ' + pay + '\n将打开 TokenPocket（BSC）转账，请确认后签名。'
+	}
+
+	const payBtnLabel = computed((): string => {
+		const code = selectedPlanCode.value
+		if (code.length == 0) return '确认支付'
+		const list = planList.value
+		for (let i = 0; i < list.length; i++) {
+			if (list[i].plan_code == code) {
+				return '支付 USDT ' + planPayPriceText(list[i])
+			}
+		}
+		return '确认支付'
+	})
 
 	function formatPlanMeta(item: RolePlan): string {
 		let days = item.duration_days
@@ -403,20 +455,13 @@
 			uni.showToast({ title: '请选择套餐', icon: 'none' })
 			return
 		}
-		let picked: RolePlan | null = null
-		const list = planList.value
-		for (let i = 0; i < list.length; i++) {
-			if (list[i].plan_code == code) {
-				picked = list[i]
-				break
-			}
-		}
-		const priceTip = picked != null ? formatPlanPrice(picked!) : code
-		const amtTip = picked != null ? ('' + picked!.price) : ''
+		const picked = selectedPlan()
+		const amtTip = picked != null ? planPayPriceText(picked!) : ''
+		const confirmText = picked != null ? formatPayConfirm(picked!) : ('将打开 TokenPocket 支付 ' + code)
 		const ok = await new Promise((resolve: (v: boolean) => void) => {
 			uni.showModal({
 				title: '确认支付',
-				content: '将打开 TokenPocket 支付 ' + priceTip + ' USDT（BSC 链）。\n请确认网络与金额后签名转账。',
+				content: confirmText,
 				success: (res) => {
 					resolve(res.confirm == true)
 				},
@@ -437,14 +482,17 @@
 			const order = isRenew ? await renewBillingSubscription(code) : await createBillingOrder(code)
 			let orderNo = order.order_no
 			let payTo = order.pay_address
-			let amount = order.amount
-			// 补拉详情，尽量拿到收款地址 / 金额
-			if (orderNo.length > 0 && (payTo.length == 0 || amount.length == 0)) {
+			// 实付优先用套餐优惠价；下单接口常返回原价 amount，不能直接用来转账
+			let amount = amtTip
+			if (amount.length == 0) amount = order.amount
+			// 补拉详情拿收款地址
+			if (orderNo.length > 0 && payTo.length == 0) {
 				try {
 					const detail = await fetchOrderDetail(orderNo)
 					if (detail.pay_address.length > 0) payTo = detail.pay_address
-					if (detail.amount.length > 0) amount = detail.amount
 					if (detail.order_no.length > 0) orderNo = detail.order_no
+					// 仅当本地没有优惠价时，才用订单金额
+					if (amount.length == 0 && detail.amount.length > 0) amount = detail.amount
 				} catch (eDet) {
 					console.warn('[profile] order detail skip', eDet)
 				}
@@ -453,19 +501,55 @@
 			if (payTo.length == 0) {
 				throw new Error('未获取到收款地址，请在平台配置或填写 PAY_USDT_RECV_FALLBACK')
 			}
-			if (amount.length == 0 && amtTip.length > 0) amount = amtTip
 			if (amount.length == 0) throw new Error('未获取到支付金额')
 			if (orderNo.length == 0) throw new Error('下单成功但未返回订单号')
 
 			uni.showLoading({ title: '打开钱包…', mask: true })
-			console.log('[profile] pay order=', orderNo, 'to=', payTo, 'amt=', amount)
+			console.log('[profile] pay order=', orderNo, 'to=', payTo, 'amt=', amount, 'orderAmt=', order.amount, 'planPay=', amtTip)
 			const tx = await tpTransferUsdt(payTo, amount, 'plan:' + code)
 			console.log('[profile] txHash=', tx.txHash)
 
+			uni.showLoading({ title: '确认链上结果…', mask: true })
+			const conf = await waitBscTxConfirmed(tx.txHash, 40000)
+			console.log('[profile] confirm', conf.status, conf.message)
+			uni.hideLoading()
+
+			if (conf.status == 'failed') {
+				throw new Error((conf.message.length > 0 ? conf.message : '链上交易失败') + '。常见原因：BSC 钱包 USDT 余额不足（需有 USDT，BNB 只付手续费）')
+			}
+			if (conf.status == 'confirmed') {
+				uni.showLoading({ title: '同步订单…', mask: true })
+				await billingPayNotify(orderNo, tx.txHash, 'USDT')
+				uni.hideLoading()
+				uni.showToast({ title: '支付成功', icon: 'success' })
+				showPlans.value = false
+				await loadUsdtBalance()
+				paying.value = false
+				return
+			}
+			// network / timeout：让用户选择是否手动同步（RPC 在国内常不可达）
+			const tip = conf.message.length > 0 ? conf.message : '无法自动确认链上结果'
+			const manualOk = await new Promise((resolve: (v: boolean) => void) => {
+				uni.showModal({
+					title: '链上确认受阻',
+					content: tip + '\n\n哈希：' + tx.txHash + '\n\n若钱包里已显示转账成功，可点「继续同步」；否则请取消后到 BscScan 核对。',
+					confirmText: '继续同步',
+					cancelText: '取消',
+					success: (res) => {
+						resolve(res.confirm == true)
+					},
+					fail: () => {
+						resolve(false)
+					}
+				})
+			})
+			if (manualOk != true) {
+				throw new Error('未确认链上成功，订单仍待支付。哈希：' + tx.txHash.substring(0, 18) + '…')
+			}
 			uni.showLoading({ title: '同步订单…', mask: true })
 			await billingPayNotify(orderNo, tx.txHash, 'USDT')
 			uni.hideLoading()
-			uni.showToast({ title: '支付成功', icon: 'success' })
+			uni.showToast({ title: '已提交同步', icon: 'success' })
 			showPlans.value = false
 			await loadUsdtBalance()
 		} catch (e) {
@@ -926,10 +1010,23 @@
 		font-weight: 700;
 		color: #1a1a1a;
 	}
+	.plan-price-col {
+		align-items: flex-end;
+	}
 	.plan-price {
 		font-size: 30rpx;
 		font-weight: 700;
 		color: #1861c8;
+	}
+	.plan-price-origin {
+		font-size: 22rpx;
+		color: #9aa3af;
+		margin-top: 4rpx;
+	}
+	.plan-dis {
+		font-size: 22rpx;
+		color: #ef4444;
+		margin-bottom: 6rpx;
 	}
 	.plan-meta {
 		font-size: 22rpx;

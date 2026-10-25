@@ -178,6 +178,212 @@ export type TpTransferResult = {
 	raw: string
 }
 
+/** 优先国内/公共可达节点；binance 官方 seed 在部分网络会连不上 */
+const BSC_RPCS: Array<string> = [
+	'https://bsc-dataseed1.ninicoin.io/',
+	'https://bsc-dataseed3.defibit.io/',
+	'https://bsc-dataseed4.defibit.io/',
+	'https://bscrpc.com',
+	'https://1rpc.io/bnb',
+	'https://bsc.publicnode.com',
+	'https://rpc.ankr.com/bsc',
+	'https://bsc-dataseed.binance.org/'
+]
+
+function sleepMs(ms: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(() => {
+			resolve()
+		}, ms)
+	})
+}
+
+function rpcPostUni(url: string, jsonBody: string): Promise<UTSJSONObject> {
+	return new Promise((resolve, reject) => {
+		uni.request({
+			url: url,
+			method: 'POST',
+			timeout: 8000,
+			header: {
+				'Content-Type': 'application/json',
+				'Accept': 'application/json'
+			},
+			data: jsonBody,
+			success: (res) => {
+				try {
+					const code = res.statusCode
+					if (code < 200 || code >= 300) {
+						reject(new Error('RPC_HTTP_' + code))
+						return
+					}
+					const raw = res.data
+					if (raw == null) {
+						reject(new Error('RPC empty'))
+						return
+					}
+					try {
+						const asStr = '' + raw
+						if (asStr.length > 0 && asStr.charAt(0) == '{') {
+							resolve(JSON.parse(asStr) as UTSJSONObject)
+							return
+						}
+					} catch (eStr) {}
+					resolve(raw as UTSJSONObject)
+				} catch (e) {
+					reject(new Error('RPC parse fail'))
+				}
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}
+
+function httpGetUni(url: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		uni.request({
+			url: url,
+			method: 'GET',
+			timeout: 8000,
+			header: { 'Accept': 'application/json' },
+			success: (res) => {
+				try {
+					const code = res.statusCode
+					if (code < 200 || code >= 300) {
+						reject(new Error('HTTP_' + code))
+						return
+					}
+					resolve('' + res.data)
+				} catch (e) {
+					reject(new Error('HTTP parse fail'))
+				}
+			},
+			fail: (err) => {
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}
+
+async function rpcPostJson(url: string, jsonBody: string): Promise<UTSJSONObject> {
+	return await rpcPostUni(url, jsonBody)
+}
+
+function parseReceiptStatus(root: UTSJSONObject): string {
+	const errObj = root['error']
+	if (errObj != null) return 'error'
+	const result = root['result']
+	if (result == null) return 'pending'
+	try {
+		const receipt = result as UTSJSONObject
+		const v = receipt['status']
+		if (v != null) return ('' + v).toLowerCase()
+	} catch (e0) {}
+	return 'unknown'
+}
+
+/** BscScan 公共接口兜底（不依赖 JSON-RPC） */
+async function checkBscScanStatus(txHash: string): Promise<string> {
+	try {
+		const url = 'https://api.bscscan.com/api?module=transaction&action=gettxreceiptstatus&txhash=' + txHash
+		const text = await httpGetUni(url)
+		if (text.length == 0) return 'error'
+		const o = JSON.parse(text) as UTSJSONObject
+		const data = o['result']
+		if (data == null) return 'pending'
+		const row = data as UTSJSONObject
+		const st = '' + (row['status'] != null ? row['status'] : '')
+		console.log('[tp] bscscan status=', st)
+		if (st == '1') return '0x1'
+		if (st == '0') return '0x0'
+		return 'pending'
+	} catch (e) {
+		console.warn('[tp] bscscan fail', e)
+	}
+	return 'error'
+}
+
+export type TxConfirmResult = {
+	/** confirmed | failed | timeout | network */
+	status: string
+	txHash: string
+	message: string
+}
+
+/**
+ * 等待 BSC 交易回执。网络不可达时返回 network，由 UI 决定是否手动继续同步。
+ */
+export async function waitBscTxConfirmed(txHash: string, maxWaitMs: number = 45000): Promise<TxConfirmResult> {
+	const out: TxConfirmResult = {
+		status: 'timeout',
+		txHash: txHash,
+		message: ''
+	}
+	if (txHash.length < 66 || txHash.indexOf('0x') != 0) {
+		out.status = 'failed'
+		out.message = '无效交易哈希'
+		return out
+	}
+	await sleepMs(1200)
+	const started = Date.now()
+	let rpcIdx = 0
+	let netFails = 0
+	let pendingHits = 0
+	const jsonBody = '{"jsonrpc":"2.0","id":1,"method":"eth_getTransactionReceipt","params":["' + txHash + '"]}'
+	while (Date.now() - started < maxWaitMs) {
+		const rpc = BSC_RPCS[rpcIdx % BSC_RPCS.length]
+		rpcIdx++
+		try {
+			const root = await rpcPostJson(rpc, jsonBody)
+			const st = parseReceiptStatus(root)
+			console.log('[tp] receipt', rpc, 'st=', st)
+			if (st == '0x1' || st == '0x01' || st == '1') {
+				out.status = 'confirmed'
+				out.message = '链上已确认'
+				return out
+			}
+			if (st == '0x0' || st == '0x00' || st == '0') {
+				out.status = 'failed'
+				out.message = '链上交易失败（已回滚）'
+				return out
+			}
+			if (st == 'pending' || st == 'unknown') {
+				pendingHits++
+				netFails = 0
+			}
+			if (st == 'error') netFails++
+		} catch (e) {
+			netFails++
+			console.warn('[tp] wait receipt', rpc, e)
+		}
+		// 每轮失败多时试 BscScan
+		if (netFails > 0 && netFails % 3 == 0) {
+			const bs = await checkBscScanStatus(txHash)
+			if (bs == '0x1') {
+				out.status = 'confirmed'
+				out.message = '链上已确认(BscScan)'
+				return out
+			}
+			if (bs == '0x0') {
+				out.status = 'failed'
+				out.message = '链上交易失败（BscScan）'
+				return out
+			}
+		}
+		await sleepMs(2000)
+	}
+	// 超时：若几乎全是网络失败 → network；若见过 pending → timeout
+	if (pendingHits == 0 && netFails > 0) {
+		out.status = 'network'
+		out.message = '无法连接 BSC 节点确认交易，可到钱包/BscScan 核对后手动同步'
+	} else {
+		out.status = 'timeout'
+		out.message = '等待确认超时，请到 BscScan 核对：' + txHash
+	}
+	return out
+}
+
 /**
  * 拉起 TP 转 USDT（BSC）
  * to=收款地址 amount=人类可读数量（如 "100"）
@@ -208,22 +414,43 @@ export async function tpTransferUsdt(to: string, amount: string, desc: string = 
 		DAPP_ICON
 	)
 	if (r.wallet.length > 0) saveTpWalletAddress(r.wallet)
-	const tx = r.signature
+	let tx = extractTxHash(r.signature, r.raw)
 	const out: TpTransferResult = {
 		ok: r.code == 0 && tx.length > 0,
 		txHash: tx,
 		wallet: r.wallet.length > 0 ? r.wallet : from,
 		raw: r.raw
 	}
-	if (!out.ok) {
-		// 部分 TP 版本成功但 tx 在 raw 字符串里
-		if (r.code == 0 && r.raw.length > 0 && r.raw.indexOf('0x') >= 0) {
-			out.ok = true
-			out.txHash = tx.length > 0 ? tx : r.raw
-		}
+	if (!out.ok && r.code == 0) {
+		throw new Error('转账已提交但未解析到交易哈希，请稍后在钱包核对')
 	}
 	if (!out.ok) throw new Error(r.raw.length > 0 ? r.raw : '转账失败')
 	return out
+}
+
+/** 从 TP 回包抽出 0x 交易哈希，禁止把整段 JSON 当 trade_no */
+function extractTxHash(sig: string, raw: string): string {
+	if (sig.length >= 66 && sig.indexOf('0x') == 0 && sig.indexOf('{') < 0) return sig
+	const text = raw.length > 0 ? raw : sig
+	if (text.length == 0) return ''
+	if (text.indexOf('{') == 0) {
+		try {
+			const o = JSON.parse(text) as UTSJSONObject
+			let h = pickStr(o, 'txID')
+			if (h.length == 0) h = pickStr(o, 'txId')
+			if (h.length == 0) h = pickStr(o, 'txHash')
+			if (h.length == 0) h = pickStr(o, 'hash')
+			if (h.length == 0) h = pickStr(o, 'transactionHash')
+			if (h.length >= 66 && h.indexOf('0x') == 0) return h
+		} catch (e) {}
+	}
+	// 兜底：在文本里找 0x + 64 hex
+	const idx = text.indexOf('0x')
+	if (idx >= 0 && text.length >= idx + 66) {
+		const cand = text.substring(idx, idx + 66)
+		if (cand.indexOf('{') < 0 && cand.indexOf('"') < 0) return cand
+	}
+	return ''
 }
 
 /** Mobile-SDK ethPersonalSign（用于 SIWE challenge.message） */

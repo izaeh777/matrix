@@ -586,12 +586,19 @@ function parseSubscriptionObj(obj: UTSJSONObject | null): PlatformSubscription {
 	}
 	let remain = pickNumAny(obj, ['remain_days', 'remainDays', 'remain_day', 'remain', 'days_left', 'left_days', 'surplus_days', 'days'])
 	const status = pickStrAny(obj, ['status', 'state', 'subscription_status', 'sub_status']).toLowerCase()
+	const pending = status.indexOf('pending') >= 0 || status == 'unpaid' || status == 'created' || status == 'wait_pay'
 	let active = status == 'active' || status == 'normal' || status == 'valid' || status == '1' || status == 'success' || status == 'paid'
-	if (!active && (planName.length > 0 || planCode.length > 0 || endAt.length > 0 || remain > 0)) {
+	if (!active && !pending && (planName.length > 0 || planCode.length > 0 || endAt.length > 0 || remain > 0)) {
 		active = status.length == 0 || (status != 'expired' && status != 'cancel' && status != 'cancelled' && status != '0')
 	}
-	if (planName.length == 0 && planCode.length > 0) {
-		planName = planCode.toUpperCase().indexOf('VIP') >= 0 ? (planCode.toUpperCase() + '会员') : (planCode + '会员')
+	if (pending) active = false
+	// 不要把 PLAN_MEMBER_1Y 拼成「PLAN_MEMBER_1Y会员」；用 role 映射可读名
+	if (planName.length == 0) {
+		const roleCode = pickStrAny(obj, ['role_code', 'roleCode', 'role']).toUpperCase()
+		planName = roleDisplayName(roleCode)
+	}
+	if (planName.length == 0) {
+		planName = planCodeDisplayName(planCode)
 	}
 	const out: PlatformSubscription = {
 		plan_code: planCode,
@@ -673,15 +680,37 @@ function subscriptionFromMeData(data: UTSJSONObject): PlatformSubscription {
 	return out
 }
 
+function roleDisplayName(role: string): string {
+	const r = role.toUpperCase()
+	if (r == 'OWNER') return '项目方'
+	if (r == 'LEADER') return '社区长'
+	if (r == 'MEMBER') return '会员'
+	if (r == 'VISITOR' || r.length == 0) return ''
+	return role
+}
+
+function planCodeDisplayName(code: string): string {
+	const c = code.toUpperCase()
+	if (c.indexOf('OWNER') >= 0) return '项目方'
+	if (c.indexOf('LEADER') >= 0) return '社区长'
+	if (c.indexOf('MEMBER') >= 0) return '会员'
+	if (c.indexOf('VIP') >= 0) return c + '会员'
+	return ''
+}
+
 export function formatVipLabel(sub: PlatformSubscription): string {
 	if (sub.plan_name.length > 0) {
-		return sub.plan_name
+		// 过滤掉误拼的 PLAN_xxx会员
+		const n = sub.plan_name
+		if (n.indexOf('PLAN_') == 0) {
+			const mapped = planCodeDisplayName(n)
+			if (mapped.length > 0) return mapped
+		}
+		return n
 	}
-	if (sub.plan_code.length > 0) {
-		const c = sub.plan_code
-		if (c.toUpperCase().indexOf('VIP') >= 0) return c.toUpperCase() + '会员'
-		return c
-	}
+	const fromCode = planCodeDisplayName(sub.plan_code)
+	if (fromCode.length > 0) return fromCode
+	if (sub.plan_code.length > 0) return sub.plan_code
 	return '普通用户'
 }
 
@@ -774,7 +803,9 @@ export async function fetchPlatformMe(): Promise<PlatformMe> {
 				const billData = pickObj(billRoot, 'data')
 				const status = billData != null ? pickStr(billData!, 'status').toUpperCase() : ''
 				const sub = parseSubscriptionResponse(billRoot)
-				if (sub.end_at.length > 0 || sub.remain_days > 0 || sub.active) {
+				if (status.indexOf('PENDING') >= 0) {
+					me.vip_period = '待支付'
+				} else if (sub.end_at.length > 0 || sub.remain_days > 0 || sub.active) {
 					me.vip_period = formatVipPeriod(sub)
 				} else if (status == 'EXPIRED' || status == 'CANCELLED') {
 					me.vip_period = '订阅已过期'
@@ -850,10 +881,72 @@ export type RolePlan = {
 	plan_code: string
 	role_code: string
 	name: string
+	/** 原价 */
 	price: number
+	/** 优惠减免金额（在优惠期内从 price 扣减） */
+	dis: number
+	/** 优惠开始时间（unix 秒或日期串，空=不限） */
+	start_time: string
+	/** 优惠结束时间（unix 秒或日期串，空=不限） */
+	end_time: string
 	currency: string
 	duration_days: number
 	weigh: number
+}
+
+/** 解析接口时间：支持 unix 秒/毫秒、ISO 日期；空/null → 0 */
+function planTimeMs(raw: string): number {
+	if (raw.length == 0 || raw == 'null' || raw == '0') return 0
+	if (isUnixTsText(raw)) {
+		let ms = parseFloat(raw)
+		if (ms < 1000000000000) ms = ms * 1000
+		return ms
+	}
+	try {
+		const d = new Date(raw)
+		const t = d.getTime()
+		if (t == t) return t
+	} catch (e) {}
+	return 0
+}
+
+/** 当前是否在优惠期内 */
+export function isPlanDiscountActive(plan: RolePlan): boolean {
+	if (plan.dis <= 0) return false
+	const now = Date.now()
+	const startMs = planTimeMs(plan.start_time)
+	const endMs = planTimeMs(plan.end_time)
+	if (startMs > 0 && now < startMs) return false
+	if (endMs > 0 && now > endMs) return false
+	return true
+}
+
+/** 实付金额：优惠期内 price - dis，否则原价；最低 0；保留最多 6 位小数避免 0.099999… */
+export function planPayPrice(plan: RolePlan): number {
+	let pay = plan.price
+	if (isPlanDiscountActive(plan)) {
+		pay = plan.price - plan.dis
+	}
+	if (pay < 0) pay = 0
+	// 先按「分」再按 6 位修约，兼容 99.9 这类优惠
+	const cents = Math.round(pay * 100) / 100
+	if (Math.abs(pay - cents) < 0.000001) return cents
+	return Math.round(pay * 1000000) / 1000000
+}
+
+/** 实付金额字符串（给转账 / 展示，避免科学计数与浮点尾巴） */
+export function planPayPriceText(plan: RolePlan): string {
+	const n = planPayPrice(plan)
+	let s = n.toFixed(6)
+	// 去掉末尾 0 与小数点
+	while (s.length > 0 && s.charAt(s.length - 1) == '0') {
+		s = s.substring(0, s.length - 1)
+	}
+	if (s.length > 0 && s.charAt(s.length - 1) == '.') {
+		s = s.substring(0, s.length - 1)
+	}
+	if (s.length == 0) s = '0'
+	return s
 }
 
 export type BillingOrder = {
@@ -925,11 +1018,24 @@ function parseBillingOrder(data: UTSJSONObject, root: UTSJSONObject, planFallbac
 }
 
 function parseRolePlan(obj: UTSJSONObject): RolePlan {
+	let startRaw = pickStrAny(obj, ['start_time', 'startTime', 'dis_start', 'discount_start'])
+	if (startRaw.length == 0) {
+		const n = pickNumAny(obj, ['start_time', 'startTime'])
+		if (n > 0) startRaw = '' + n
+	}
+	let endRaw = pickStrAny(obj, ['end_time', 'endTime', 'dis_end', 'discount_end'])
+	if (endRaw.length == 0) {
+		const n2 = pickNumAny(obj, ['end_time', 'endTime'])
+		if (n2 > 0) endRaw = '' + n2
+	}
 	const out: RolePlan = {
 		plan_code: pickStrAny(obj, ['plan_code', 'planCode', 'code']),
 		role_code: pickStrAny(obj, ['role_code', 'roleCode', 'role']),
 		name: pickStrAny(obj, ['name', 'title', 'plan_name', 'planName']),
 		price: pickNumAny(obj, ['price', 'amount', 'fee']),
+		dis: pickNumAny(obj, ['dis', 'discount', 'discount_amount', 'off']),
+		start_time: startRaw,
+		end_time: endRaw,
 		currency: pickStrAny(obj, ['currency', 'coin', 'unit']),
 		duration_days: pickNumAny(obj, ['duration_days', 'durationDays', 'days', 'duration']),
 		weigh: pickNumAny(obj, ['weigh', 'weight', 'sort'])

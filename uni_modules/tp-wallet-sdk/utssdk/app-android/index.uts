@@ -242,13 +242,17 @@ export const tpTransfer: TpTransfer = function (
 		TpWalletNative.transfer(fr, to, ct, amount, dec, sym, d, aid, name, icon, cid, (code: number, data: string) => {
 			const parsed = parseSdkPayload(code, data)
 			let tx = parsed.signature
+			// 仅当已是 0x 哈希时保留；否则从 raw JSON 抽 txID（TP 常用大写 ID）
+			if (tx.indexOf('{') >= 0 || tx.indexOf('0x') != 0) tx = ''
 			if (tx.length == 0 && parsed.raw.length > 0) {
 				try {
 					const o = JSON.parse(parsed.raw) as UTSJSONObject
-					tx = pickStr(o, 'txId')
+					tx = pickStr(o, 'txID')
+					if (tx.length == 0) tx = pickStr(o, 'txId')
 					if (tx.length == 0) tx = pickStr(o, 'txHash')
 					if (tx.length == 0) tx = pickStr(o, 'hash')
 					if (tx.length == 0) tx = pickStr(o, 'transactionHash')
+					if (tx.length == 0) tx = pickStr(o, 'transaction_id')
 				} catch (e1) {}
 			}
 			const result: TpSdkResult = {
