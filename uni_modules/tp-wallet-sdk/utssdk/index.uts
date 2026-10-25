@@ -4,6 +4,7 @@
 import {
 	TpAuthorize,
 	TpPersonalSign,
+	TpTransfer,
 	TpIsInstalled,
 	TpDeliverSchema,
 	TpSdkResult
@@ -33,6 +34,22 @@ export const tpPersonalSign: TpPersonalSign = function (
 	_dappIcon: string,
 	_memo: string,
 	_signType: string
+): Promise<TpSdkResult> {
+	return unsupported()
+}
+
+export const tpTransfer: TpTransfer = function (
+	_from: string,
+	_to: string,
+	_contract: string,
+	_amount: string,
+	_decimalStr: string,
+	_symbol: string,
+	_desc: string,
+	_actionId: string,
+	_chainId: string,
+	_dappName: string,
+	_dappIcon: string
 ): Promise<TpSdkResult> {
 	return unsupported()
 }

@@ -8,6 +8,8 @@ import io.dcloud.uts.UTSAndroid
 import io.dcloud.uts.console
 import org.json.JSONArray
 import org.json.JSONObject
+import java.math.BigDecimal
+import java.math.BigInteger
 import java.net.URLEncoder
 
 /**
@@ -158,6 +160,94 @@ object TpWalletNative {
 			),
 			callback
 		)
+	}
+
+	/**
+	 * EVM 代币转账（USDT 等）
+	 * 有合约地址时走 pushTransaction（显式 gas + ERC20 data），
+	 * 避免 action=transfer 时 TP 估 gas=0 导致 Signer Error。
+	 */
+	fun transfer(
+		from: String,
+		to: String,
+		contract: String,
+		amount: String,
+		decimal: Int,
+		symbol: String,
+		desc: String,
+		actionId: String,
+		dappName: String,
+		dappIcon: String,
+		chainId: String,
+		callback: (code: Int, data: String) -> Unit
+	) {
+		if (to.isEmpty()) {
+			callback(1, "empty to")
+			return
+		}
+		val cid = if (chainId.isNotEmpty()) chainId else "56"
+		val param = JSONObject()
+		param.put("protocol", "TokenPocket")
+		param.put("version", "1.0")
+		param.put("dappName", dappName)
+		param.put("dappIcon", dappIcon)
+		param.put("actionId", actionId)
+		val chains = JSONArray()
+		val c = JSONObject()
+		c.put("network", "ethereum")
+		c.put("chainId", cid)
+		chains.put(c)
+		param.put("blockchains", chains)
+		param.put("callbackSchema", "itiklink://tp-wallet")
+
+		if (contract.isNotEmpty()) {
+			// ERC-20：pushTransaction + 显式 gas
+			val dataHex = try {
+				encodeErc20Transfer(to, amount, decimal)
+			} catch (e: Throwable) {
+				callback(1, "invalid amount: " + (e.message ?: ""))
+				return
+			}
+			val tx = JSONObject()
+			if (from.isNotEmpty()) tx.put("from", from)
+			tx.put("to", contract)
+			tx.put("data", dataHex)
+			tx.put("value", "0x0")
+			tx.put("gas", "0x186a0") // 100000
+			tx.put("gasLimit", "0x186a0")
+			tx.put("chainId", cid)
+			param.put("action", "pushTransaction")
+			param.put("txData", tx.toString())
+			param.put("desc", if (desc.isNotEmpty()) desc else ((if (symbol.isNotEmpty()) symbol else "USDT") + " pay"))
+			console.log("[tp-sdk] pushTx ERC20 to=", to, "via=", contract, "amt=", amount, "chain=", cid)
+		} else {
+			val amt = try {
+				amount.toDouble()
+			} catch (e: Throwable) {
+				callback(1, "invalid amount")
+				return
+			}
+			param.put("action", "transfer")
+			if (from.isNotEmpty()) param.put("from", from)
+			param.put("to", to)
+			param.put("amount", amt)
+			param.put("decimal", decimal)
+			param.put("symbol", if (symbol.isNotEmpty()) symbol else "BNB")
+			param.put("desc", if (desc.isNotEmpty()) desc else "itiklink pay")
+			console.log("[tp-sdk] transfer native to=", to, "amount=", amt, "chain=", cid)
+		}
+		pullWallet(param.toString(), callback)
+	}
+
+	/** ERC-20 transfer(address,uint256) calldata */
+	private fun encodeErc20Transfer(to: String, amountHuman: String, decimals: Int): String {
+		val addr = to.trim().removePrefix("0x").removePrefix("0X").lowercase()
+		if (addr.length != 40) throw IllegalArgumentException("bad to address")
+		val dec = if (decimals > 0) decimals else 18
+		val raw: BigInteger = BigDecimal(amountHuman.trim()).movePointRight(dec).toBigIntegerExact()
+		if (raw < BigInteger.ZERO) throw IllegalArgumentException("negative amount")
+		val amountHex = raw.toString(16).padStart(64, '0')
+		return "0xa9059cbb" + addr.padStart(64, '0') + amountHex
 	}
 
 	/**

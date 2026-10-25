@@ -627,18 +627,30 @@ function meUserObj(data: UTSJSONObject): UTSJSONObject {
 
 function subscriptionFromMeData(data: UTSJSONObject): PlatformSubscription {
 	const user = meUserObj(data)
-	// 1) 有效订阅对象（subscription:null 跳过）
+	// 1) 仅采纳「已生效」订阅；PENDING_PAYMENT / unpaid 不算会员
 	const nestedKeys: Array<string> = ['subscription', 'current_subscription', 'current', 'billing']
 	for (let i = 0; i < nestedKeys.length; i++) {
 		const sub = pickObj(data, nestedKeys[i])
-		if (sub != null) {
-			const parsed = parseSubscriptionObj(sub)
-			if (parsed.plan_name.length > 0 || parsed.end_at.length > 0 || parsed.remain_days > 0 || parsed.plan_code.length > 0) {
-				return parsed
-			}
+		if (sub == null) continue
+		const st = pickStrAny(sub!, ['status', 'state']).toUpperCase()
+		const activeFlag = pickStrAny(sub!, ['active']).toLowerCase()
+		const isPending = st.indexOf('PENDING') >= 0 || st == 'UNPAID' || st == 'CREATED' || st == 'WAIT_PAY'
+		const isExpired = st == 'EXPIRED' || st == 'CANCELLED' || st == 'CANCELED'
+		const explicitlyInactive = activeFlag == 'false' || activeFlag == '0'
+		// active:false 或待支付 / 已过期 → 不当成有效套餐名
+		if (isPending || isExpired || explicitlyInactive) {
+			continue
+		}
+		const parsed = parseSubscriptionObj(sub)
+		if (parsed.active || parsed.end_at.length > 0 || parsed.remain_days > 0) {
+			return parsed
+		}
+		// 无明确有效期时，仅当 status 像 ACTIVE 才用
+		if (st == 'ACTIVE' || st == 'NORMAL' || st == 'VALID' || st == 'PAID') {
+			return parsed
 		}
 	}
-	// 2) 无订阅时用用户等级字段：lv_vip_name / lv_vip（如「游客」）
+	// 2) 无有效订阅时用用户等级字段：lv_vip_name / lv_vip（如「游客」）
 	const vipName = pickStrAny(user, ['lv_vip_name', 'lvVipName', 'vip_name', 'vipName', 'level_name', 'lv_vip_title'])
 	let vipCode = ''
 	const lv = pickNumAny(user, ['lv_vip', 'lvVip', 'vip_level', 'level'])
@@ -674,11 +686,16 @@ export function formatVipLabel(sub: PlatformSubscription): string {
 }
 
 export function formatVipPeriod(sub: PlatformSubscription): string {
-	if (sub.start_at.length > 0 && sub.end_at.length > 0) {
-		return '有效期：' + sub.start_at + ' 至 ' + sub.end_at
+	// 过滤占位 0 / 1970
+	const s = sub.start_at
+	const e = sub.end_at
+	const sOk = s.length > 0 && s != '0' && s.indexOf('1970') < 0
+	const eOk = e.length > 0 && e != '0' && e.indexOf('1970') < 0
+	if (sOk && eOk) {
+		return '有效期：' + s + ' 至 ' + e
 	}
-	if (sub.end_at.length > 0) {
-		return '有效期至：' + sub.end_at
+	if (eOk) {
+		return '有效期至：' + e
 	}
 	if (sub.remain_days > 0) {
 		return '剩余 ' + sub.remain_days + ' 天'
@@ -737,6 +754,16 @@ export async function fetchPlatformMe(): Promise<PlatformMe> {
 	const root = await httpGet('/api/v1/users/me', true)
 	const data = assertOk(root, '获取用户信息失败')
 	logJson('[platform] users/me data', data)
+	// 缓存绑定钱包，供链上支付 from
+	try {
+		const u = pickObj(data, 'user')
+		if (u != null) {
+			const wa = pickStrAny(u!, ['wallet_address', 'address', 'wallet'])
+			if (wa.length > 10) {
+				uni.setStorageSync('tp_wallet_address_v1', wa)
+			}
+		}
+	} catch (eWa) {}
 	let me = parsePlatformMe(data)
 	// 等级已从 user.lv_vip_name 取到；再拉订阅补有效期 / EXPIRED 文案
 	if (me.vip_period.indexOf('暂无') >= 0) {
@@ -834,7 +861,67 @@ export type BillingOrder = {
 	status: string
 	plan_code: string
 	amount: string
+	/** 链上收款地址（下单接口若返回则用） */
+	pay_address: string
 	msg: string
+}
+
+/**
+ * BSC USDT 收款地址兜底。
+ * 优先用下单接口返回的 pay_address；若接口无地址，用此配置。
+ * 请换成平台真实收款钱包。
+ */
+export const PAY_USDT_RECV_FALLBACK = '0x88EA19052CcF40bC92CD56C3Fe8512Eb1957c01B'
+
+function pickPayAddress(data: UTSJSONObject): string {
+	let addr = pickStrAny(data, [
+		'pay_address', 'payAddress', 'usdt_address', 'usdtAddress', 'usdtaddress',
+		'receive_address', 'receiveAddress', 'to_address', 'toAddress', 'wallet_address', 'address'
+	])
+	if (addr.length > 0) return addr
+	const nestKeys: Array<string> = ['pay', 'payment', 'pay_info', 'payInfo', 'channel', 'wallet']
+	for (let i = 0; i < nestKeys.length; i++) {
+		const nest = pickObj(data, nestKeys[i])
+		if (nest != null) {
+			addr = pickStrAny(nest!, [
+				'pay_address', 'address', 'usdt_address', 'usdtAddress', 'usdtaddress', 'to', 'to_address'
+			])
+			if (addr.length > 0) return addr
+		}
+	}
+	return ''
+}
+
+function parseBillingOrder(data: UTSJSONObject, root: UTSJSONObject, planFallback: string): BillingOrder {
+	// 实际结构：data.order = { order_no, amount, ... }
+	let src = data
+	const nested = pickObj(data, 'order')
+	if (nested != null) src = nested!
+	const order: BillingOrder = {
+		order_no: pickStrAny(src, ['order_no', 'orderNo', 'order_id']),
+		status: pickStrAny(src, ['status', 'state', 'pay_status']),
+		plan_code: pickStrAny(src, ['plan_code', 'planCode']),
+		amount: pickStrAny(src, ['amount', 'price', 'pay_amount', 'money']),
+		pay_address: pickPayAddress(src),
+		msg: pickStr(root, 'msg')
+	}
+	if (order.pay_address.length == 0) {
+		order.pay_address = pickPayAddress(data)
+	}
+	if (order.order_no.length == 0) {
+		// id 数字兜底（仅当没有 order_no）
+		const idNum = pickNum(src, 'id')
+		if (idNum > 0) order.order_no = '' + idNum
+	}
+	if (order.plan_code.length == 0) order.plan_code = planFallback
+	if (order.amount.length == 0) {
+		const n = pickNumAny(src, ['amount', 'price', 'pay_amount', 'money'])
+		if (n > 0) order.amount = '' + n
+	}
+	if (order.pay_address.length == 0) {
+		order.pay_address = PAY_USDT_RECV_FALLBACK
+	}
+	return order
 }
 
 function parseRolePlan(obj: UTSJSONObject): RolePlan {
@@ -883,7 +970,7 @@ export async function fetchRolePlans(): Promise<Array<RolePlan>> {
 }
 
 /**
- * 创建订单（余额等）
+ * 创建订单
  * POST /api/v1/billing/orders  plan_code
  */
 export async function createBillingOrder(planCode: string, couponCode: string = ''): Promise<BillingOrder> {
@@ -896,18 +983,8 @@ export async function createBillingOrder(planCode: string, couponCode: string = 
 	const root = await httpPostForm('/api/v1/billing/orders', fields, true)
 	logJson('[platform] billing/orders create', root)
 	const data = assertOk(root, '下单失败')
-	const order: BillingOrder = {
-		order_no: pickStrAny(data, ['order_no', 'orderNo', 'order_id', 'id']),
-		status: pickStrAny(data, ['status', 'state', 'pay_status']),
-		plan_code: pickStrAny(data, ['plan_code', 'planCode']),
-		amount: pickStrAny(data, ['amount', 'price', 'pay_amount', 'money']),
-		msg: pickStr(root, 'msg')
-	}
-	if (order.plan_code.length == 0) order.plan_code = planCode
-	if (order.amount.length == 0) {
-		const n = pickNumAny(data, ['amount', 'price', 'pay_amount', 'money'])
-		if (n > 0) order.amount = '' + n
-	}
+	const order = parseBillingOrder(data, root, planCode)
+	console.log('[platform] order', order.order_no, 'amt=', order.amount, 'payTo=', order.pay_address)
 	return order
 }
 
@@ -919,15 +996,38 @@ export async function renewBillingSubscription(planCode: string = ''): Promise<B
 	const root = await httpPostForm('/api/v1/billing/subscription/renew', fields, true)
 	logJson('[platform] billing/renew', root)
 	const data = assertOk(root, '续费失败')
-	const order: BillingOrder = {
-		order_no: pickStrAny(data, ['order_no', 'orderNo', 'order_id', 'id']),
-		status: pickStrAny(data, ['status', 'state', 'pay_status']),
-		plan_code: pickStrAny(data, ['plan_code', 'planCode']),
-		amount: pickStrAny(data, ['amount', 'price', 'pay_amount', 'money']),
-		msg: pickStr(root, 'msg')
+	return parseBillingOrder(data, root, planCode)
+}
+
+/**
+ * 支付结果上报（对应 demo 的 paySuccess）
+ * POST /api/v1/billing/pay/notify
+ * trade_no = 链上 txHash
+ */
+export async function billingPayNotify(orderNo: string, tradeNo: string, payType: string = 'USDT'): Promise<void> {
+	if (orderNo.length == 0) throw new Error('订单号为空')
+	if (tradeNo.length == 0) throw new Error('交易哈希为空')
+	const fields: UTSJSONObject = {
+		order_no: orderNo,
+		pay_type: payType,
+		trade_no: tradeNo
 	}
-	if (order.plan_code.length == 0) order.plan_code = planCode
-	return order
+	const root = await httpPostForm('/api/v1/billing/pay/notify', fields, true)
+	logJson('[platform] billing/pay/notify', root)
+	assertOk(root, '支付回调失败')
+}
+
+/**
+ * 完整链上支付：下单 →（外部转账）→ 回调
+ * 返回订单；调用方负责拉起钱包转账后再 notify
+ */
+export async function fetchOrderDetail(orderNo: string): Promise<BillingOrder> {
+	if (orderNo.length == 0) throw new Error('订单号为空')
+	const path = '/api/v1/billing/orders/detail?order_no=' + encodeURIComponent(orderNo)
+	const root = await httpGet(path, true)
+	logJson('[platform] order detail', root)
+	const data = assertOk(root, '获取订单失败')
+	return parseBillingOrder(data, root, '')
 }
 
 /**

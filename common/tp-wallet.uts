@@ -7,6 +7,7 @@
 import {
 	tpAuthorize as sdkAuthorize,
 	tpPersonalSign as sdkPersonalSign,
+	tpTransfer as sdkTransfer,
 	tpIsInstalled as sdkIsInstalled,
 	tpDeliverSchema as sdkDeliverSchema,
 	TpSdkResult
@@ -137,11 +138,92 @@ export function isTpAppInstalled(): boolean {
 	}
 }
 
+const KEY_TP_WALLET = 'tp_wallet_address_v1'
+/** 与登录一致：BSC */
+export const TP_PAY_CHAIN_ID = '56'
+/** BSC USDT（Binance-Peg） */
+export const TP_USDT_CONTRACT = '0x55d398326f99059fF775485246999027B3197955'
+export const TP_USDT_DECIMALS = 18
+
+export function saveTpWalletAddress(addr: string): void {
+	try {
+		if (addr.length > 0) uni.setStorageSync(KEY_TP_WALLET, addr)
+	} catch (e) {}
+}
+
+export function loadTpWalletAddress(): string {
+	try {
+		const raw = uni.getStorageSync(KEY_TP_WALLET)
+		if (raw == null) return ''
+		const s = ('' + raw).trim()
+		return s
+	} catch (e) {
+		return ''
+	}
+}
+
 /** Mobile-SDK 授权登录 → 钱包地址（chain 与服务端 SIWE 一致用 56） */
 export async function tpSdkAuthorize(): Promise<TpCallbackResult> {
 	const actionId = newActionId()
 	const r = await sdkAuthorize(actionId, '56', DAPP_NAME, DAPP_ICON, 'itiklink-auth-login')
-	return sdkToCallback(r)
+	const out = sdkToCallback(r)
+	if (out.ok && out.wallet.length > 0) saveTpWalletAddress(out.wallet)
+	return out
+}
+
+export type TpTransferResult = {
+	ok: boolean
+	txHash: string
+	wallet: string
+	raw: string
+}
+
+/**
+ * 拉起 TP 转 USDT（BSC）
+ * to=收款地址 amount=人类可读数量（如 "100"）
+ */
+export async function tpTransferUsdt(to: string, amount: string, desc: string = ''): Promise<TpTransferResult> {
+	if (to.length == 0) throw new Error('收款地址为空')
+	if (amount.length == 0) throw new Error('金额为空')
+	let from = loadTpWalletAddress()
+	if (from.length == 0) {
+		// 未缓存地址时先授权拿 from
+		const auth = await tpSdkAuthorize()
+		if (!auth.ok || auth.wallet.length == 0) throw new Error('请先连接钱包')
+		from = auth.wallet
+	}
+	const actionId = newActionId()
+	const memo = desc.length > 0 ? desc : 'itiklink-usdt-pay'
+	const r = await sdkTransfer(
+		from,
+		to,
+		TP_USDT_CONTRACT,
+		amount,
+		'' + TP_USDT_DECIMALS,
+		'USDT',
+		memo,
+		actionId,
+		TP_PAY_CHAIN_ID,
+		DAPP_NAME,
+		DAPP_ICON
+	)
+	if (r.wallet.length > 0) saveTpWalletAddress(r.wallet)
+	const tx = r.signature
+	const out: TpTransferResult = {
+		ok: r.code == 0 && tx.length > 0,
+		txHash: tx,
+		wallet: r.wallet.length > 0 ? r.wallet : from,
+		raw: r.raw
+	}
+	if (!out.ok) {
+		// 部分 TP 版本成功但 tx 在 raw 字符串里
+		if (r.code == 0 && r.raw.length > 0 && r.raw.indexOf('0x') >= 0) {
+			out.ok = true
+			out.txHash = tx.length > 0 ? tx : r.raw
+		}
+	}
+	if (!out.ok) throw new Error(r.raw.length > 0 ? r.raw : '转账失败')
+	return out
 }
 
 /** Mobile-SDK ethPersonalSign（用于 SIWE challenge.message） */

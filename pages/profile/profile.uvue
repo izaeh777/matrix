@@ -146,7 +146,7 @@
 		<view v-if="showPlans" class="invite-mask" @click="closePlans">
 			<view class="plan-sheet" @click.stop="">
 				<text class="invite-title">选择套餐</text>
-				<text class="invite-desc">使用 USDT 余额支付，订阅后立即生效</text>
+				<text class="invite-desc">使用 TokenPocket 链上支付 USDT（BSC），转账成功后自动开通</text>
 				<view v-if="plansLoading" class="plan-state">
 					<text class="plan-state-text">加载中…</text>
 				</view>
@@ -188,8 +188,12 @@
 		fetchRolePlans,
 		createBillingOrder,
 		renewBillingSubscription,
+		billingPayNotify,
+		fetchOrderDetail,
+		PAY_USDT_RECV_FALLBACK,
 		RolePlan
 	} from '@/common/platform.uts'
+	import { tpTransferUsdt, isTpAppInstalled } from '@/common/tp-wallet.uts'
 	import { friendCodeOf, inviteQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
 	import { openChat } from '@/common/app.uts'
 
@@ -408,10 +412,11 @@
 			}
 		}
 		const priceTip = picked != null ? formatPlanPrice(picked!) : code
+		const amtTip = picked != null ? ('' + picked!.price) : ''
 		const ok = await new Promise((resolve: (v: boolean) => void) => {
 			uni.showModal({
 				title: '确认支付',
-				content: '将使用 USDT 余额支付 ' + priceTip + '，是否继续？',
+				content: '将打开 TokenPocket 支付 ' + priceTip + ' USDT（BSC 链）。\n请确认网络与金额后签名转账。',
 				success: (res) => {
 					resolve(res.confirm == true)
 				},
@@ -421,18 +426,50 @@
 			})
 		})
 		if (ok != true) return
+		if (!isTpAppInstalled()) {
+			uni.showToast({ title: '请先安装 TokenPocket', icon: 'none' })
+			return
+		}
 		paying.value = true
+		uni.showLoading({ title: '下单中…', mask: true })
 		try {
 			const isRenew = renewBtnText.value == '续费'
-			if (isRenew) {
-				await renewBillingSubscription(code)
-			} else {
-				await createBillingOrder(code)
+			const order = isRenew ? await renewBillingSubscription(code) : await createBillingOrder(code)
+			let orderNo = order.order_no
+			let payTo = order.pay_address
+			let amount = order.amount
+			// 补拉详情，尽量拿到收款地址 / 金额
+			if (orderNo.length > 0 && (payTo.length == 0 || amount.length == 0)) {
+				try {
+					const detail = await fetchOrderDetail(orderNo)
+					if (detail.pay_address.length > 0) payTo = detail.pay_address
+					if (detail.amount.length > 0) amount = detail.amount
+					if (detail.order_no.length > 0) orderNo = detail.order_no
+				} catch (eDet) {
+					console.warn('[profile] order detail skip', eDet)
+				}
 			}
+			if (payTo.length == 0) payTo = PAY_USDT_RECV_FALLBACK
+			if (payTo.length == 0) {
+				throw new Error('未获取到收款地址，请在平台配置或填写 PAY_USDT_RECV_FALLBACK')
+			}
+			if (amount.length == 0 && amtTip.length > 0) amount = amtTip
+			if (amount.length == 0) throw new Error('未获取到支付金额')
+			if (orderNo.length == 0) throw new Error('下单成功但未返回订单号')
+
+			uni.showLoading({ title: '打开钱包…', mask: true })
+			console.log('[profile] pay order=', orderNo, 'to=', payTo, 'amt=', amount)
+			const tx = await tpTransferUsdt(payTo, amount, 'plan:' + code)
+			console.log('[profile] txHash=', tx.txHash)
+
+			uni.showLoading({ title: '同步订单…', mask: true })
+			await billingPayNotify(orderNo, tx.txHash, 'USDT')
+			uni.hideLoading()
 			uni.showToast({ title: '支付成功', icon: 'success' })
 			showPlans.value = false
 			await loadUsdtBalance()
 		} catch (e) {
+			uni.hideLoading()
 			console.warn('[profile] pay fail', e)
 			uni.showToast({ title: '' + e, icon: 'none' })
 		}

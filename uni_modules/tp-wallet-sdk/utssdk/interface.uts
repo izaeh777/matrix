@@ -21,6 +21,24 @@ export type TpAuthorize = (actionId: string, chainId: string, dappName: string, 
 /** message, actionId, chainId, dappName, dappIcon, memo, signType */
 export type TpPersonalSign = (message: string, actionId: string, chainId: string, dappName: string, dappIcon: string, memo: string, signType: string) => Promise<TpSdkResult>
 
+/**
+ * EVM 代币转账
+ * from, to, contract, amount, decimalStr, symbol, desc, actionId, chainId, dappName, dappIcon
+ */
+export type TpTransfer = (
+	from: string,
+	to: string,
+	contract: string,
+	amount: string,
+	decimalStr: string,
+	symbol: string,
+	desc: string,
+	actionId: string,
+	chainId: string,
+	dappName: string,
+	dappIcon: string
+) => Promise<TpSdkResult>
+
 export type TpIsInstalled = () => boolean
 /** callbackSchema 兜底：把 itiklink:// 回跳交给 SDK Promise */
 export type TpDeliverSchema = (urlOrQuery: string) => boolean

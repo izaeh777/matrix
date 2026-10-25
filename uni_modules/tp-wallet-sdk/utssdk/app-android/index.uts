@@ -1,6 +1,7 @@
 import {
 	TpAuthorize,
 	TpPersonalSign,
+	TpTransfer,
 	TpIsInstalled,
 	TpDeliverSchema,
 	TpSdkResult
@@ -113,6 +114,28 @@ function friendlyErr(raw: string): string {
 	if (t.indexOf('NoClassDefFoundError') >= 0 || t.indexOf('com.tokenpocket.opensdk') >= 0) {
 		return '当前自定义基座未包含 TokenPocket SDK。请在 HBuilderX：运行 → 制作自定义调试基座（抬高版本号后重装），再用新基座测试。'
 	}
+	if (t.indexOf('gasLimit is too low') >= 0 || t.indexOf('gasLimit') >= 0 && t.indexOf('too low') >= 0) {
+		return '钱包估算 Gas 失败（gasLimit 过低）。请确认 TP 已切到 BSC，账户有少量 BNB 作手续费后重试。'
+	}
+	if (t.indexOf('insufficient funds') >= 0 || t.indexOf('Insufficient') >= 0) {
+		return '余额不足（USDT 或 BNB 手续费）'
+	}
+	// 尝试从 TP 返回 JSON 里抽出 message.error
+	try {
+		const o = JSON.parse(t) as UTSJSONObject
+		let msg = pickStr(o, 'message')
+		if (msg.indexOf('{') == 0) {
+			try {
+				const inner = JSON.parse(msg) as UTSJSONObject
+				const err = pickStr(inner, 'error')
+				if (err.length > 0) msg = err
+			} catch (e1) {}
+		}
+		if (msg.length > 0) {
+			if (msg.length > 160) return msg.substring(0, 160) + '…'
+			return msg
+		}
+	} catch (e0) {}
 	if (t.length > 180) return t.substring(0, 180) + '…'
 	return t.length > 0 ? t : 'TokenPocket 调用失败'
 }
@@ -173,6 +196,74 @@ export const tpPersonalSign: TpPersonalSign = function (
 				resolve(result)
 			} else if (code == 2) {
 				reject('用户取消签名')
+			} else {
+				reject(friendlyErr(result.raw))
+			}
+		})
+	})
+}
+
+export const tpTransfer: TpTransfer = function (
+	from: string,
+	to: string,
+	contract: string,
+	amount: string,
+	decimalStr: string,
+	symbol: string,
+	desc: string,
+	actionId: string,
+	chainId: string,
+	dappName: string,
+	dappIcon: string
+): Promise<TpSdkResult> {
+	return new Promise<TpSdkResult>((resolve, reject) => {
+		if (to == null || to.length == 0) {
+			reject('收款地址为空')
+			return
+		}
+		if (amount == null || amount.length == 0) {
+			reject('支付金额为空')
+			return
+		}
+		const aid = orDefault(actionId, newActionId())
+		const cid = orDefault(chainId, '56')
+		const name = orDefault(dappName, DEFAULT_DAPP)
+		const icon = orDefault(dappIcon, DEFAULT_ICON)
+		let dec: Int = 18
+		try {
+			const n = parseInt(decimalStr)
+			if (n > 0) dec = n as Int
+		} catch (e0) {}
+		const sym = orDefault(symbol, 'USDT')
+		const d = orDefault(desc, 'itiklink-pay')
+		const fr = from != null ? from : ''
+		const ct = contract != null ? contract : ''
+		console.log('[tp-sdk] transfer', aid, 'to=', to, 'amt=', amount, 'chain=', cid)
+		TpWalletNative.transfer(fr, to, ct, amount, dec, sym, d, aid, name, icon, cid, (code: number, data: string) => {
+			const parsed = parseSdkPayload(code, data)
+			let tx = parsed.signature
+			if (tx.length == 0 && parsed.raw.length > 0) {
+				try {
+					const o = JSON.parse(parsed.raw) as UTSJSONObject
+					tx = pickStr(o, 'txId')
+					if (tx.length == 0) tx = pickStr(o, 'txHash')
+					if (tx.length == 0) tx = pickStr(o, 'hash')
+					if (tx.length == 0) tx = pickStr(o, 'transactionHash')
+				} catch (e1) {}
+			}
+			const result: TpSdkResult = {
+				code: parsed.code,
+				raw: parsed.raw,
+				wallet: parsed.wallet,
+				signature: tx,
+				action: parsed.action,
+				actionId: parsed.actionId
+			}
+			console.log('[tp-sdk] transfer result', code, 'tx=', result.signature)
+			if (code == 0) {
+				resolve(result)
+			} else if (code == 2) {
+				reject('用户取消转账')
 			} else {
 				reject(friendlyErr(result.raw))
 			}
