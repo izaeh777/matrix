@@ -5,8 +5,8 @@
 		<!-- #endif -->
 		<view class="nav">
 			<text class="nav-back" @click="onBack">‹</text>
-			<text class="nav-title">发布项目</text>
-			<text class="nav-draft" @click="saveDraft">保存草稿</text>
+			<text class="nav-title">{{ i18n.title }}</text>
+			<text class="nav-draft" @click="saveDraft">{{ i18n.draft }}</text>
 		</view>
 
 		<view class="steps">
@@ -14,138 +14,140 @@
 				<view class="step-num" :class="{ 'step-num-on': step >= 1 }">
 					<text class="step-num-text">1</text>
 				</view>
-				<text class="step-label" :class="{ 'step-label-on': step >= 1 }">基本信息</text>
+				<text class="step-label" :class="{ 'step-label-on': step >= 1 }">{{ i18n.step1 }}</text>
 			</view>
 			<view class="step-line" :class="{ 'step-line-on': step >= 2 }"></view>
 			<view class="step" :class="{ 'step-on': step >= 2 }">
 				<view class="step-num" :class="{ 'step-num-on': step >= 2 }">
 					<text class="step-num-text">2</text>
 				</view>
-				<text class="step-label" :class="{ 'step-label-on': step >= 2 }">项目介绍</text>
+				<text class="step-label" :class="{ 'step-label-on': step >= 2 }">{{ i18n.step2 }}</text>
 			</view>
 			<view class="step-line" :class="{ 'step-line-on': step >= 3 }"></view>
 			<view class="step" :class="{ 'step-on': step >= 3 }">
 				<view class="step-num" :class="{ 'step-num-on': step >= 3 }">
 					<text class="step-num-text">3</text>
 				</view>
-				<text class="step-label" :class="{ 'step-label-on': step >= 3 }">上传资料</text>
+				<text class="step-label" :class="{ 'step-label-on': step >= 3 }">{{ i18n.step3 }}</text>
 			</view>
 			<view class="step-line" :class="{ 'step-line-on': step >= 4 }"></view>
 			<view class="step" :class="{ 'step-on': step >= 4 }">
 				<view class="step-num" :class="{ 'step-num-on': step >= 4 }">
 					<text class="step-num-text">4</text>
 				</view>
-				<text class="step-label" :class="{ 'step-label-on': step >= 4 }">提交审核</text>
+				<text class="step-label" :class="{ 'step-label-on': step >= 4 }">{{ i18n.step4 }}</text>
 			</view>
 		</view>
 
-		<scroll-view class="form-scroll" scroll-y>
-			<view v-if="step == 1" class="form">
-				<text class="label"><text class="req">*</text>项目名称</text>
-				<input class="input" v-model="name" placeholder="请输入项目名称（不少于五个字）" />
+		<scroll-view class="form-scroll" direction="vertical" :show-scrollbar="false">
+			<view class="form-scroll-inner">
+				<view v-if="step == 1" class="form">
+					<text class="label"><text class="req">*</text>{{ i18n.name }}</text>
+					<input class="input" v-model="name" :placeholder="i18n.namePh" />
 
-				<text class="label"><text class="req">*</text>项目分类</text>
-				<view class="select" @click="pickCategory">
-					<text class="select-text" :class="{ 'ph': category.length == 0 }">{{ category.length > 0 ? category : '请选择项目分类' }}</text>
-					<text class="select-caret">▾</text>
-				</view>
-
-				<text class="label"><text class="req">*</text>项目简介</text>
-				<view class="area-wrap">
-					<textarea class="area" v-model="intro" maxlength="300" placeholder="请输入项目简介，让更多用户看到（不少于20字）"></textarea>
-					<text class="counter">{{ intro.length }}/300</text>
-				</view>
-
-				<text class="label"><text class="req">*</text>项目logo/标志</text>
-				<view class="upload-row">
-					<view class="upload-box" @click="pickImage('logo')">
-						<image v-if="logo.length > 0" class="upload-img" :src="logo" mode="aspectFill"></image>
-						<view v-else class="upload-empty">
-							<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
-							<text class="upload-txt">上传logo</text>
-						</view>
+					<text class="label"><text class="req">*</text>{{ i18n.category }}</text>
+					<view class="select" @click="pickCategory">
+						<text class="select-text" :class="{ 'ph': category.length == 0 }">{{ category.length > 0 ? category : i18n.categoryPh }}</text>
+						<text class="select-caret">▾</text>
 					</view>
-					<text class="upload-hint">支持jpg/png，大小不错过2MB</text>
-				</view>
 
-				<text class="label"><text class="req">*</text>项目封面</text>
-				<view class="upload-row">
-					<view class="upload-box" @click="pickImage('cover')">
-						<image v-if="cover.length > 0" class="upload-img" :src="cover" mode="aspectFill"></image>
-						<view v-else class="upload-empty">
-							<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
-							<text class="upload-txt">上传封面</text>
-						</view>
+					<text class="label"><text class="req">*</text>{{ i18n.intro }}</text>
+					<view class="area-wrap">
+						<textarea class="area" v-model="intro" maxlength="300" :placeholder="i18n.introPh"></textarea>
+						<text class="counter">{{ intro.length }}/300</text>
 					</view>
-					<text class="upload-hint">推荐尺寸1280*720</text>
-				</view>
-			</view>
 
-			<view v-if="step == 2" class="form">
-				<text class="label"><text class="req">*</text>项目亮点</text>
-				<input class="input" v-model="highlight" placeholder="请输入项目亮点（不少于五个字）" />
-
-				<text class="label"><text class="req">*</text>目标用户</text>
-				<input class="input" v-model="audience" placeholder="请描述目标用户" />
-
-				<text class="label"><text class="req">*</text>详细介绍</text>
-				<view class="area-wrap">
-					<textarea class="area" v-model="detail" maxlength="300" placeholder="请输入详细介绍，让更多用户看到（不少于20字）"></textarea>
-					<text class="counter">{{ detail.length }}/300</text>
-				</view>
-			</view>
-
-			<view v-if="step == 3" class="form">
-				<text class="label">补充资料</text>
-				<view class="upload-row">
-					<view class="upload-box" @click="pickImage('material')">
-						<image v-if="material.length > 0" class="upload-img" :src="material" mode="aspectFill"></image>
-						<view v-else class="upload-empty">
-							<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
-							<text class="upload-txt">上传资料</text>
+					<text class="label"><text class="req">*</text>{{ i18n.logo }}</text>
+					<view class="upload-row">
+						<view class="upload-box" @click="pickImage('logo')">
+							<image v-if="logo.length > 0" class="upload-img" :src="logo" mode="aspectFill"></image>
+							<view v-else class="upload-empty">
+								<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
+								<text class="upload-txt">{{ i18n.uploadLogo }}</text>
+							</view>
 						</view>
+						<text class="upload-hint">{{ i18n.uploadHint }}</text>
 					</view>
-					<text class="upload-hint">支持jpg/png，大小不错过2MB</text>
-				</view>
-				<text class="label">封面预览</text>
-				<view class="upload-row">
-					<view class="upload-box" @click="pickImage('cover')">
-						<image v-if="cover.length > 0" class="upload-img" :src="cover" mode="aspectFill"></image>
-						<view v-else class="upload-empty">
-							<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
-							<text class="upload-txt">上传封面</text>
-						</view>
-					</view>
-					<text class="upload-hint">推荐尺寸1280*720</text>
-				</view>
-			</view>
 
-			<view v-if="step == 4" class="form">
-				<text class="review-title">请确认信息后提交审核</text>
-				<view class="review-card">
-					<text class="review-line">名称：{{ name }}</text>
-					<text class="review-line">分类：{{ category }}</text>
-					<text class="review-line">简介：{{ intro }}</text>
-					<text class="review-line">亮点：{{ highlight }}</text>
+					<text class="label"><text class="req">*</text>{{ i18n.cover }}</text>
+					<view class="upload-row">
+						<view class="upload-box" @click="pickImage('cover')">
+							<image v-if="cover.length > 0" class="upload-img" :src="cover" mode="aspectFill"></image>
+							<view v-else class="upload-empty">
+								<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
+								<text class="upload-txt">{{ i18n.uploadCover }}</text>
+							</view>
+						</view>
+						<text class="upload-hint">{{ i18n.coverHint }}</text>
+					</view>
 				</view>
+
+				<view v-if="step == 2" class="form">
+					<text class="label"><text class="req">*</text>{{ i18n.highlight }}</text>
+					<input class="input" v-model="highlight" :placeholder="i18n.highlightPh" />
+
+					<text class="label"><text class="req">*</text>{{ i18n.audience }}</text>
+					<input class="input" v-model="audience" :placeholder="i18n.audiencePh" />
+
+					<text class="label"><text class="req">*</text>{{ i18n.detail }}</text>
+					<view class="area-wrap">
+						<textarea class="area" v-model="detail" maxlength="300" :placeholder="i18n.detailPh"></textarea>
+						<text class="counter">{{ detail.length }}/300</text>
+					</view>
+				</view>
+
+				<view v-if="step == 3" class="form">
+					<text class="label">{{ i18n.material }}</text>
+					<view class="upload-row">
+						<view class="upload-box" @click="pickImage('material')">
+							<image v-if="material.length > 0" class="upload-img" :src="material" mode="aspectFill"></image>
+							<view v-else class="upload-empty">
+								<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
+								<text class="upload-txt">{{ i18n.uploadMaterial }}</text>
+							</view>
+						</view>
+						<text class="upload-hint">{{ i18n.uploadHint }}</text>
+					</view>
+					<text class="label">{{ i18n.coverPreview }}</text>
+					<view class="upload-row">
+						<view class="upload-box" @click="pickImage('cover')">
+							<image v-if="cover.length > 0" class="upload-img" :src="cover" mode="aspectFill"></image>
+							<view v-else class="upload-empty">
+								<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
+								<text class="upload-txt">{{ i18n.uploadCover }}</text>
+							</view>
+						</view>
+						<text class="upload-hint">{{ i18n.coverHint }}</text>
+					</view>
+				</view>
+
+				<view v-if="step == 4" class="form">
+					<text class="review-title">{{ i18n.reviewTitle }}</text>
+					<view class="review-card">
+						<text class="review-line">{{ i18n.reviewName }}{{ name }}</text>
+						<text class="review-line">{{ i18n.reviewCat }}{{ category }}</text>
+						<text class="review-line">{{ i18n.reviewIntro }}{{ intro }}</text>
+						<text class="review-line">{{ i18n.reviewHighlight }}{{ highlight }}</text>
+					</view>
+				</view>
+				<view class="scroll-pad"></view>
 			</view>
-			<view class="scroll-pad"></view>
 		</scroll-view>
 
 		<view class="footer">
 			<view v-if="step == 1" class="btn-primary" @click="nextStep">
-				<text class="btn-primary-text">下一步</text>
+				<text class="btn-primary-text">{{ i18n.next }}</text>
 			</view>
 			<view v-else-if="step < 4" class="footer-row">
 				<view class="btn-ghost" @click="prevStep">
-					<text class="btn-ghost-text">上一步</text>
+					<text class="btn-ghost-text">{{ i18n.prev }}</text>
 				</view>
 				<view class="btn-primary btn-primary-half" @click="nextStep">
-					<text class="btn-primary-text">下一步</text>
+					<text class="btn-primary-text">{{ i18n.next }}</text>
 				</view>
 			</view>
 			<view v-else class="btn-primary" @click="submit">
-				<text class="btn-primary-text">{{ submitting ? '提交中…' : '提交审核' }}</text>
+				<text class="btn-primary-text">{{ submitting ? i18n.submitting : i18n.submit }}</text>
 			</view>
 		</view>
 	</view>
@@ -159,9 +161,50 @@
 		canPublishProject,
 		loadCachedVipLabel
 	} from '@/common/platform.uts'
+	import { t } from '@/common/i18n.uts'
 
 	const DRAFT_KEY = 'cms_project_draft_v1'
 	const CATS: Array<string> = ['Web3', '金融', '直播', 'DeFi', '项目', '其他']
+
+	type PubI18n = {
+		title: string
+		draft: string
+		step1: string
+		step2: string
+		step3: string
+		step4: string
+		name: string
+		namePh: string
+		category: string
+		categoryPh: string
+		intro: string
+		introPh: string
+		logo: string
+		uploadLogo: string
+		uploadHint: string
+		cover: string
+		uploadCover: string
+		coverHint: string
+		highlight: string
+		highlightPh: string
+		audience: string
+		audiencePh: string
+		detail: string
+		detailPh: string
+		material: string
+		uploadMaterial: string
+		coverPreview: string
+		reviewTitle: string
+		reviewName: string
+		reviewCat: string
+		reviewIntro: string
+		reviewHighlight: string
+		next: string
+		prev: string
+		submit: string
+		submitting: string
+		visitorBlock: string
+	}
 
 	const step = ref<number>(1)
 	const name = ref<string>('')
@@ -174,6 +217,45 @@
 	const detail = ref<string>('')
 	const material = ref<string>('')
 	const submitting = ref<boolean>(false)
+	const i18n = ref<PubI18n>({
+		title: t('pub.title'),
+		draft: t('pub.draft'),
+		step1: t('pub.step1'),
+		step2: t('pub.step2'),
+		step3: t('pub.step3'),
+		step4: t('pub.step4'),
+		name: t('pub.name'),
+		namePh: t('pub.namePh'),
+		category: t('pub.category'),
+		categoryPh: t('pub.categoryPh'),
+		intro: t('pub.intro'),
+		introPh: t('pub.introPh'),
+		logo: t('pub.logo'),
+		uploadLogo: t('pub.uploadLogo'),
+		uploadHint: t('pub.uploadHint'),
+		cover: t('pub.cover'),
+		uploadCover: t('pub.uploadCover'),
+		coverHint: t('pub.coverHint'),
+		highlight: t('pub.highlight'),
+		highlightPh: t('pub.highlightPh'),
+		audience: t('pub.audience'),
+		audiencePh: t('pub.audiencePh'),
+		detail: t('pub.detail'),
+		detailPh: t('pub.detailPh'),
+		material: t('pub.material'),
+		uploadMaterial: t('pub.uploadMaterial'),
+		coverPreview: t('pub.coverPreview'),
+		reviewTitle: t('pub.reviewTitle'),
+		reviewName: t('pub.reviewName'),
+		reviewCat: t('pub.reviewCat'),
+		reviewIntro: t('pub.reviewIntro'),
+		reviewHighlight: t('pub.reviewHighlight'),
+		next: t('pub.next'),
+		prev: t('pub.prev'),
+		submit: t('pub.submit'),
+		submitting: t('pub.submitting'),
+		visitorBlock: t('pub.visitorBlock')
+	} as PubI18n)
 
 	function loadDraft(): void {
 		try {
@@ -208,9 +290,9 @@
 		}
 		try {
 			uni.setStorageSync(DRAFT_KEY, JSON.stringify(draft))
-			uni.showToast({ title: '草稿已保存', icon: 'none' })
+			uni.showToast({ title: i18n.value.draft, icon: 'none' })
 		} catch (e) {
-			uni.showToast({ title: '保存失败', icon: 'none' })
+			uni.showToast({ title: 'save failed', icon: 'none' })
 		}
 	}
 
@@ -233,22 +315,63 @@
 			success: (res) => {
 				const paths = res.tempFilePaths
 				if (paths == null || paths.length == 0) return
-				const p = paths[0]
-				if (kind == 'logo') logo.value = p
-				else if (kind == 'cover') cover.value = p
-				else material.value = p
+				const path = '' + paths[0]
+				if (kind == 'logo') logo.value = path
+				else if (kind == 'cover') cover.value = path
+				else if (kind == 'material') material.value = path
 			}
 		})
 	}
 
 	onLoad(() => {
-		// 游客禁止进入发布页（以缓存等级为准；提交时再校验）
 		if (!canPublishProject(loadCachedVipLabel())) {
-			uni.showToast({ title: '游客无法发布项目，请先订阅', icon: 'none' })
+			uni.showToast({ title: t('pub.visitorBlock'), icon: 'none' })
 			setTimeout(() => {
 				uni.navigateBack({})
 			}, 800)
 		}
+	})
+
+	onShow(() => {
+		i18n.value = {
+			title: t('pub.title'),
+			draft: t('pub.draft'),
+			step1: t('pub.step1'),
+			step2: t('pub.step2'),
+			step3: t('pub.step3'),
+			step4: t('pub.step4'),
+			name: t('pub.name'),
+			namePh: t('pub.namePh'),
+			category: t('pub.category'),
+			categoryPh: t('pub.categoryPh'),
+			intro: t('pub.intro'),
+			introPh: t('pub.introPh'),
+			logo: t('pub.logo'),
+			uploadLogo: t('pub.uploadLogo'),
+			uploadHint: t('pub.uploadHint'),
+			cover: t('pub.cover'),
+			uploadCover: t('pub.uploadCover'),
+			coverHint: t('pub.coverHint'),
+			highlight: t('pub.highlight'),
+			highlightPh: t('pub.highlightPh'),
+			audience: t('pub.audience'),
+			audiencePh: t('pub.audiencePh'),
+			detail: t('pub.detail'),
+			detailPh: t('pub.detailPh'),
+			material: t('pub.material'),
+			uploadMaterial: t('pub.uploadMaterial'),
+			coverPreview: t('pub.coverPreview'),
+			reviewTitle: t('pub.reviewTitle'),
+			reviewName: t('pub.reviewName'),
+			reviewCat: t('pub.reviewCat'),
+			reviewIntro: t('pub.reviewIntro'),
+			reviewHighlight: t('pub.reviewHighlight'),
+			next: t('pub.next'),
+			prev: t('pub.prev'),
+			submit: t('pub.submit'),
+			submitting: t('pub.submitting'),
+			visitorBlock: t('pub.visitorBlock')
+		} as PubI18n
 	})
 
 	function onBack(): void {
@@ -266,29 +389,33 @@
 	function nextStep(): void {
 		if (step.value == 1) {
 			if (name.value.trim().length < 5) {
-				uni.showToast({ title: '项目名称不少于五个字', icon: 'none' })
+				uni.showToast({ title: i18n.value.namePh, icon: 'none' })
 				return
 			}
 			if (category.value.length == 0) {
-				uni.showToast({ title: '请选择项目分类', icon: 'none' })
+				uni.showToast({ title: i18n.value.categoryPh, icon: 'none' })
 				return
 			}
 			if (intro.value.trim().length < 20) {
-				uni.showToast({ title: '简介不少于20字', icon: 'none' })
+				uni.showToast({ title: i18n.value.introPh, icon: 'none' })
 				return
 			}
 			if (logo.value.length == 0 || cover.value.length == 0) {
-				uni.showToast({ title: '请上传 logo 和封面', icon: 'none' })
+				uni.showToast({ title: i18n.value.uploadCover, icon: 'none' })
 				return
 			}
 		}
 		if (step.value == 2) {
 			if (highlight.value.trim().length < 5) {
-				uni.showToast({ title: '请填写项目亮点', icon: 'none' })
+				uni.showToast({ title: i18n.value.highlightPh, icon: 'none' })
+				return
+			}
+			if (audience.value.trim().length == 0) {
+				uni.showToast({ title: i18n.value.audiencePh, icon: 'none' })
 				return
 			}
 			if (detail.value.trim().length < 20) {
-				uni.showToast({ title: '详细介绍不少于20字', icon: 'none' })
+				uni.showToast({ title: i18n.value.detailPh, icon: 'none' })
 				return
 			}
 		}
@@ -300,12 +427,12 @@
 		try {
 			const me = await fetchPlatformMe()
 			if (!canPublishProject(me.vip_label)) {
-				uni.showToast({ title: '游客无法发布项目，请先订阅', icon: 'none' })
+				uni.showToast({ title: i18n.value.visitorBlock, icon: 'none' })
 				return
 			}
 		} catch (eGate) {
 			if (!canPublishProject(loadCachedVipLabel())) {
-				uni.showToast({ title: '游客无法发布项目，请先订阅', icon: 'none' })
+				uni.showToast({ title: i18n.value.visitorBlock, icon: 'none' })
 				return
 			}
 		}
@@ -327,15 +454,15 @@
 				await submitCmsProject(id)
 			} catch (e1) {}
 			try { uni.removeStorageSync(DRAFT_KEY) } catch (e2) {}
-			uni.showToast({ title: '已提交审核', icon: 'none' })
+			uni.showToast({ title: i18n.value.submit, icon: 'none' })
 			setTimeout(() => {
 				uni.navigateBack()
 			}, 600)
 		} catch (e) {
-			let msg = '提交失败'
+			let msg = 'submit failed'
 			try { msg = '' + e } catch (e3) {}
 			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
-			uni.showToast({ title: msg.length > 0 ? msg : '提交失败', icon: 'none' })
+			uni.showToast({ title: msg.length > 0 ? msg : 'submit failed', icon: 'none' })
 		}
 		submitting.value = false
 	}
@@ -346,13 +473,16 @@
 <style>
 	.pub-page {
 		flex: 1;
+		height: 100%;
 		background-color: #f5f7fb;
 		flex-direction: column;
+		overflow: hidden;
 	}
 	.nav {
 		flex-direction: row;
 		align-items: center;
 		padding: 56rpx 24rpx 16rpx;
+		flex-shrink: 0;
 	}
 	.nav-back {
 		width: 64rpx;
@@ -376,6 +506,7 @@
 		flex-direction: row;
 		align-items: flex-start;
 		padding: 12rpx 28rpx 24rpx;
+		flex-shrink: 0;
 	}
 	.step {
 		align-items: center;
@@ -417,6 +548,12 @@
 	.form-scroll {
 		flex: 1;
 		height: 0;
+		width: 100%;
+	}
+	.form-scroll-inner {
+		flex-direction: column;
+		width: 100%;
+		padding-bottom: 24rpx;
 	}
 	.form {
 		padding: 8rpx 32rpx 24rpx;
@@ -438,9 +575,6 @@
 		padding: 22rpx 24rpx;
 		font-size: 28rpx;
 		color: #1a1a1a;
-		border-width: 1rpx;
-		border-color: #e5e7eb;
-		border-style: solid;
 	}
 	.select {
 		background-color: #ffffff;
@@ -448,9 +582,6 @@
 		padding: 22rpx 24rpx;
 		flex-direction: row;
 		align-items: center;
-		border-width: 1rpx;
-		border-color: #e5e7eb;
-		border-style: solid;
 	}
 	.select-text {
 		flex: 1;
@@ -458,7 +589,7 @@
 		color: #1a1a1a;
 	}
 	.ph {
-		color: #c0c4cc;
+		color: #9aa3af;
 	}
 	.select-caret {
 		font-size: 24rpx;
@@ -467,14 +598,12 @@
 	.area-wrap {
 		background-color: #ffffff;
 		border-radius: 16rpx;
-		padding: 16rpx 24rpx 8rpx;
-		border-width: 1rpx;
-		border-color: #e5e7eb;
-		border-style: solid;
+		padding: 16rpx 20rpx 12rpx;
+		position: relative;
 	}
 	.area {
 		width: 100%;
-		height: 180rpx;
+		min-height: 180rpx;
 		font-size: 28rpx;
 		color: #1a1a1a;
 	}
@@ -482,30 +611,31 @@
 		font-size: 22rpx;
 		color: #9aa3af;
 		text-align: right;
+		margin-top: 8rpx;
 	}
 	.upload-row {
 		flex-direction: row;
 		align-items: center;
 	}
 	.upload-box {
-		width: 168rpx;
-		height: 168rpx;
+		width: 160rpx;
+		height: 160rpx;
 		border-radius: 16rpx;
 		background-color: #ffffff;
-		border-width: 1rpx;
-		border-color: #e5e7eb;
-		border-style: solid;
+		border-width: 2rpx;
+		border-style: dashed;
+		border-color: #d1d5db;
+		overflow: hidden;
 		align-items: center;
 		justify-content: center;
-		margin-right: 20rpx;
-		overflow: hidden;
 	}
 	.upload-img {
-		width: 168rpx;
-		height: 168rpx;
+		width: 160rpx;
+		height: 160rpx;
 	}
 	.upload-empty {
 		align-items: center;
+		justify-content: center;
 	}
 	.upload-ico-img {
 		width: 48rpx;
@@ -514,12 +644,14 @@
 	}
 	.upload-txt {
 		font-size: 22rpx;
-		color: #9aa3af;
+		color: #6b7280;
 	}
 	.upload-hint {
 		flex: 1;
+		margin-left: 20rpx;
 		font-size: 24rpx;
 		color: #9aa3af;
+		lines: 2;
 	}
 	.review-title {
 		font-size: 30rpx;
@@ -533,51 +665,53 @@
 		padding: 24rpx;
 	}
 	.review-line {
-		font-size: 26rpx;
-		color: #4b5563;
+		font-size: 28rpx;
+		color: #374151;
 		margin-bottom: 12rpx;
 		lines: 3;
 	}
-	.scroll-pad { height: 32rpx; }
+	.scroll-pad {
+		height: 40rpx;
+	}
 	.footer {
-		flex-direction: column;
-		padding: 28rpx 40rpx 56rpx;
-		background-color: #ffffff;
+		padding: 16rpx 32rpx 40rpx;
+		background-color: #f5f7fb;
+		flex-shrink: 0;
 	}
 	.footer-row {
 		flex-direction: row;
 		align-items: center;
 	}
 	.btn-primary {
-		height: 120rpx;
-		background-color: #1861c8;
-		border-radius: 60rpx;
+		height: 96rpx;
+		border-radius: 48rpx;
+		background-color: #2f6ff2;
 		align-items: center;
 		justify-content: center;
-		border-width: 2rpx;
-		border-style: solid;
-		border-color: #1454b0;
 	}
 	.btn-primary-half {
 		flex: 1;
-		margin-left: 20rpx;
+		margin-left: 16rpx;
 	}
 	.btn-primary-text {
+		font-size: 32rpx;
 		color: #ffffff;
-		font-size: 34rpx;
-		font-weight: 600;
+		font-weight: 700;
 	}
 	.btn-ghost {
 		flex: 1;
-		height: 120rpx;
-		border-radius: 60rpx;
-		background-color: #f3f4f6;
+		height: 96rpx;
+		border-radius: 48rpx;
+		background-color: #ffffff;
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #2f6ff2;
 		align-items: center;
 		justify-content: center;
 	}
 	.btn-ghost-text {
-		font-size: 34rpx;
-		color: #6b7280;
-		font-weight: 600;
+		font-size: 32rpx;
+		color: #2f6ff2;
+		font-weight: 700;
 	}
 </style>

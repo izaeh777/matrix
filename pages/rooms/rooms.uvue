@@ -5,7 +5,7 @@
 		<!-- #endif -->
 		<view class="msg-header">
 			<view class="msg-header-row">
-				<text class="msg-title">聊天</text>
+				<text class="msg-title">{{ i18n.title }}</text>
 				<view class="header-actions">
 					<text class="header-ico header-search" @click="onSearch">⌕</text>
 					<text class="header-ico" @click="onJoin">＋</text>
@@ -18,13 +18,13 @@
 			</view>
 			<view class="filter-row">
 				<view class="filter-pill" :class="{ 'filter-on': filterTab == 'all' }" @click="filterTab = 'all'">
-					<text class="filter-text" :class="{ 'filter-text-on': filterTab == 'all' }">全部</text>
+					<text class="filter-text" :class="{ 'filter-text-on': filterTab == 'all' }">{{ i18n.filterAll }}</text>
 				</view>
 				<view class="filter-pill" :class="{ 'filter-on': filterTab == 'recent' }" @click="filterTab = 'recent'">
-					<text class="filter-text" :class="{ 'filter-text-on': filterTab == 'recent' }">最近聊天</text>
+					<text class="filter-text" :class="{ 'filter-text-on': filterTab == 'recent' }">{{ i18n.filterRecent }}</text>
 				</view>
 				<view class="filter-pill" :class="{ 'filter-on': filterTab == 'unread' }" @click="filterTab = 'unread'">
-					<text class="filter-text" :class="{ 'filter-text-on': filterTab == 'unread' }">未读消息</text>
+					<text class="filter-text" :class="{ 'filter-text-on': filterTab == 'unread' }">{{ i18n.filterUnread }}</text>
 				</view>
 			</view>
 		</view>
@@ -77,29 +77,29 @@
 			</view>
 			<view class="incoming-call-actions">
 				<view class="incoming-call-reject" @click="rejectIncomingCall">
-					<text class="incoming-call-btn-text">拒绝</text>
+					<text class="incoming-call-btn-text">{{ i18n.reject }}</text>
 				</view>
 				<view class="incoming-call-accept" @click="acceptIncomingCall">
-					<text class="incoming-call-btn-text">接听</text>
+					<text class="incoming-call-btn-text">{{ i18n.answer }}</text>
 				</view>
 			</view>
 		</view>
 
 		<view v-if="invites.length > 0" class="invite-banner">
 			<view class="invite-banner-head">
-				<text class="invite-banner-title">你有 {{ invites.length }} 条新邀请</text>
+				<text class="invite-banner-title">{{ inviteBannerText }}</text>
 			</view>
 			<view v-for="inv in invites" :key="inv.room_id" class="invite-row">
 				<view class="invite-row-body">
 					<text class="invite-room-name">{{ inviteTitle(inv) }}</text>
-					<text v-if="inviteHasFrom(inv)" class="invite-from">来自：{{ inv.inviter }}</text>
+					<text v-if="inviteHasFrom(inv)" class="invite-from">{{ i18n.from }}{{ inv.inviter }}</text>
 				</view>
 				<view class="invite-row-actions">
 					<view class="invite-btn reject" @click="onRejectInvite(inv.room_id)">
-						<text class="invite-btn-text">拒绝</text>
+						<text class="invite-btn-text">{{ i18n.reject }}</text>
 					</view>
 					<view class="invite-btn accept" @click="onAcceptInvite(inv.room_id)">
-						<text class="invite-btn-text">接受</text>
+						<text class="invite-btn-text">{{ i18n.accept }}</text>
 					</view>
 				</view>
 			</view>
@@ -107,20 +107,20 @@
 
 		<scroll-view class="rooms-scroll" direction="vertical" :show-scrollbar="false" :rebound="false">
 			<view v-if="needMatrixLogin" class="empty">
-				<text class="empty-title">聊天未登录</text>
-				<text class="empty-hint">邮箱登录仅进入平台，消息需再登录 Matrix 账号</text>
+				<text class="empty-title">{{ i18n.needLogin }}</text>
+				<text class="empty-hint">{{ i18n.needLoginHint }}</text>
 				<view class="matrix-login-btn" @click="goMatrixLogin">
-					<text class="matrix-login-btn-text">登录聊天账号</text>
+					<text class="matrix-login-btn-text">{{ i18n.loginMatrix }}</text>
 				</view>
 			</view>
 
 			<view v-else-if="loading && filteredRooms.length == 0" class="loading">
-				<text class="empty-hint">加载中…</text>
+				<text class="empty-hint">{{ i18n.loading }}</text>
 			</view>
 
 			<view v-else-if="!loading && filteredRooms.length == 0" class="empty">
-				<text class="empty-title">还没有任何对话</text>
-				<text class="empty-hint">点击右上角 ＋ 发起群聊或加入房间</text>
+				<text class="empty-title">{{ i18n.empty }}</text>
+				<text class="empty-hint">{{ i18n.emptyHint }}</text>
 			</view>
 
 			<view
@@ -195,15 +195,15 @@
 					</view>
 					<view class="action-item" @click="doRoomAction('invite')">
 						<text class="action-icon">＋</text>
-						<text class="action-label">邀请成员</text>
+						<text class="action-label">{{ i18n.inviteMember }}</text>
 					</view>
 					<view class="action-item danger" @click="doRoomAction('leave')">
 						<text class="action-icon">⎋</text>
-						<text class="action-label">删除该聊天</text>
+						<text class="action-label">{{ i18n.deleteChat }}</text>
 					</view>
 				</view>
 				<view class="action-cancel" @click="roomAction.show = false">
-					<text>取消</text>
+					<text>{{ i18n.cancel }}</text>
 				</view>
 			</view>
 		</view>
@@ -216,11 +216,64 @@
 	import { loadSession, SessionInfo, loadRoomList, saveRoomList, loadRoomChat } from '@/common/storage.uts'
 	import { openChat, bootstrapMatrix, openGroupPick, hasPlatformLogin, openMatrixLogin } from '@/common/app.uts'
 	import { getCallManager, CallSnapshot, h5TapRunAnswer, unlockH5CallMedia } from '@/common/call.uts'
-	import { getLocaleLabel, openLanguagePage } from '@/common/i18n.uts'
+	import { getLocaleLabel, openLanguagePage, t } from '@/common/i18n.uts'
+
+	type RoomsI18n = {
+		title: string
+		filterAll: string
+		filterRecent: string
+		filterUnread: string
+		reject: string
+		accept: string
+		answer: string
+		from: string
+		needLogin: string
+		needLoginHint: string
+		loginMatrix: string
+		loading: string
+		empty: string
+		emptyHint: string
+		inviteMember: string
+		deleteChat: string
+		cancel: string
+		inviteBannerTpl: string
+		noMessage: string
+		yesterday: string
+		pin: string
+		unpin: string
+		mute: string
+		unmute: string
+	}
 
 	const rooms = ref<Array<MatrixRoom>>([])
 	const invites = ref<Array<InvitedRoomInfo>>([])
 	const langLabel = ref<string>(getLocaleLabel())
+	const i18n = ref<RoomsI18n>({
+		title: t('chat.title'),
+		filterAll: t('chat.filterAll'),
+		filterRecent: t('chat.filterRecent'),
+		filterUnread: t('chat.filterUnread'),
+		reject: t('chat.reject'),
+		accept: t('chat.accept'),
+		answer: t('chat.answer'),
+		from: t('chat.from'),
+		needLogin: t('chat.needLogin'),
+		needLoginHint: t('chat.needLoginHint'),
+		loginMatrix: t('chat.loginMatrix'),
+		loading: t('common.loading'),
+		empty: t('chat.empty'),
+		emptyHint: t('chat.emptyHint'),
+		inviteMember: t('chat.inviteMember'),
+		deleteChat: t('chat.deleteChat'),
+		cancel: t('common.cancel'),
+		inviteBannerTpl: t('chat.inviteBanner'),
+		noMessage: t('chat.noMessage'),
+		yesterday: t('chat.yesterday'),
+		pin: t('chat.pin'),
+		unpin: t('chat.unpin'),
+		mute: t('chat.mute'),
+		unmute: t('chat.unmute')
+	} as RoomsI18n)
 	const loading = ref<boolean>(false)
 	const needMatrixLogin = ref<boolean>(false)
 	const incomingCall = ref<boolean>(false)
@@ -303,11 +356,15 @@
 		const startMsg = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
 		const dayDiff = Math.floor((startToday - startMsg) / 86400000)
 		if (dayDiff == 0) return pad(d.getHours()) + ':' + pad(d.getMinutes())
-		if (dayDiff == 1) return '昨天'
-		if (dayDiff == 2) return '前天'
-		if (dayDiff < 7) return '周' + ['日', '一', '二', '三', '四', '五', '六'][d.getDay()]
+		if (dayDiff == 1) return i18n.value.yesterday
+		if (dayDiff == 2) return i18n.value.yesterday
+		if (dayDiff < 7) return pad(d.getMonth() + 1) + '-' + pad(d.getDate())
 		return pad(d.getMonth() + 1) + '-' + pad(d.getDate())
 	}
+
+	const inviteBannerText = computed((): string => {
+		return i18n.value.inviteBannerTpl.replace('{n}', '' + invites.value.length)
+	})
 
 	function onLang(): void {
 		openLanguagePage()
@@ -353,7 +410,7 @@
 		if (preview.length == 0) {
 			const t = room.topic
 			if (t != null && t.length > 0) return t
-			return '暂无消息'
+			return i18n.value.noMessage
 		}
 		if (roomIsGroup(room)) {
 			const sid = room.last_message_sender
@@ -378,13 +435,13 @@
 
 	const pinActionLabel = computed((): string => {
 		const r = roomAction.value.room
-		if (r != null && r.favourite == true) return '取消置顶'
-		return '置顶聊天'
+		if (r != null && r.favourite == true) return i18n.value.unpin
+		return i18n.value.pin
 	})
 	const muteActionLabel = computed((): string => {
 		const r = roomAction.value.room
-		if (r != null && r.muted == true) return '取消免打扰'
-		return '消息免打扰'
+		if (r != null && r.muted == true) return i18n.value.unmute
+		return i18n.value.mute
 	})
 	const actionRoomName = computed((): string => {
 		const r = roomAction.value.room
@@ -586,7 +643,7 @@
 		const s = session.value
 		if (s == null) return false
 		const preview = room.last_message_preview
-		if (preview != null && preview.length > 0 && preview != '暂无消息') return false
+		if (preview != null && preview.length > 0 && preview != i18n.value.noMessage) return false
 		const cached = loadRoomChat(s.user_id, room.room_id)
 		if (cached == null || cached.msgs.length == 0) return false
 		const last = cached.msgs[cached.msgs.length - 1]
@@ -868,6 +925,32 @@
 
 	onShow(() => {
 		langLabel.value = getLocaleLabel()
+		i18n.value = {
+			title: t('chat.title'),
+			filterAll: t('chat.filterAll'),
+			filterRecent: t('chat.filterRecent'),
+			filterUnread: t('chat.filterUnread'),
+			reject: t('chat.reject'),
+			accept: t('chat.accept'),
+			answer: t('chat.answer'),
+			from: t('chat.from'),
+			needLogin: t('chat.needLogin'),
+			needLoginHint: t('chat.needLoginHint'),
+			loginMatrix: t('chat.loginMatrix'),
+			loading: t('common.loading'),
+			empty: t('chat.empty'),
+			emptyHint: t('chat.emptyHint'),
+			inviteMember: t('chat.inviteMember'),
+			deleteChat: t('chat.deleteChat'),
+			cancel: t('common.cancel'),
+			inviteBannerTpl: t('chat.inviteBanner'),
+			noMessage: t('chat.noMessage'),
+			yesterday: t('chat.yesterday'),
+			pin: t('chat.pin'),
+			unpin: t('chat.unpin'),
+			mute: t('chat.mute'),
+			unmute: t('chat.unmute')
+		} as RoomsI18n
 	})
 
 	async function onAcceptInvite(roomId: string) {

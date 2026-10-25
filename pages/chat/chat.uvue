@@ -210,7 +210,7 @@
 					<input
 					class="msg-input"
 					v-model="inputText"
-					placeholder="请输入消息"
+					:placeholder="chatInputPh"
 					placeholder-class="input-placeholder"
 					confirm-type="send"
 					@input="onInputChange"
@@ -226,7 +226,7 @@
 				<image class="input-tool-img" src="/static/login/b2.png" mode="aspectFit"></image>
 			</view>
 			<view v-else class="btn-send" @click="onSend">
-				<text class="btn-send-text">发送</text>
+				<text class="btn-send-text">{{ chatSendText }}</text>
 			</view>
 		</view>
 
@@ -389,6 +389,7 @@
 	import { bootstrapMatrix, openGroupInfo, ensureMatrixClient, hasPlatformLogin } from '@/common/app.uts'
 	import { getCallManager, CallSnapshot, h5TapRunAnswer } from '@/common/call.uts'
 	import { loadRoomChat, saveRoomChat } from '@/common/storage.uts'
+	import { t } from '@/common/i18n.uts'
 
 	type ChatMsg = {
 		event_id: string
@@ -507,6 +508,8 @@
 	const incomingCallSub = ref<string>('')
 	const messages = ref<Array<ChatMsg>>([])
 	const inputText = ref<string>('')
+	const chatSendText = ref<string>(t('chat.send'))
+	const chatInputPh = ref<string>(t('chat.inputPh'))
 	const sending = ref<boolean>(false)
 	const loadingHistory = ref<boolean>(false)
 	const scrollTop = ref<number>(999999)
@@ -3494,6 +3497,8 @@
 	})
 
 	onShow(() => {
+		chatSendText.value = t('chat.send')
+		chatInputPh.value = t('chat.inputPh')
 		if (_mounted == false) return
 		const matrix = getMatrix()
 		if (matrix == null) return
