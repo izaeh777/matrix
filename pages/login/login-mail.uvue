@@ -73,6 +73,19 @@
 			</view>
 		</view>
 
+		<view v-if="isRegister" class="field">
+			<text class="field-label">好友码 / 邀请码（选填）</text>
+			<view class="input-box">
+				<input
+					class="input"
+					type="text"
+					v-model="inviteCode"
+					placeholder="请输入好友邀请码"
+					placeholder-class="placeholder"
+				/>
+			</view>
+		</view>
+
 		<view class="btn-login" :class="loading ? 'btn-login-off' : ''" @click="onSubmit">
 			<text class="btn-login-text">{{ loading ? '请稍候…' : (isRegister ? '注册并登录' : '登录') }}</text>
 		</view>
@@ -86,7 +99,14 @@
 
 <script setup lang="uts">
 	import { ref, onUnmounted } from 'vue'
-	import { sendEmailCode, emailLogin, emailRegister } from '@/common/platform.uts'
+	import {
+		sendEmailCode,
+		emailLogin,
+		emailRegister,
+		consumePendingInviteCode,
+		savePendingInviteCode,
+		loadPendingInviteCode
+	} from '@/common/platform.uts'
 	import { startMatrixFromPlatform } from '@/common/app.uts'
 
 	const isRegister = ref<boolean>(false)
@@ -94,16 +114,42 @@
 	const code = ref<string>('')
 	const nickname = ref<string>('')
 	const password = ref<string>('')
+	const inviteCode = ref<string>('')
 	const showPwd = ref<boolean>(false)
 	const loading = ref<boolean>(false)
 	const codeWait = ref<number>(0)
 	let codeTimer: number | null = null
+
+	function resolveInviteForSubmit(): string {
+		let inv = inviteCode.value.trim()
+		if (inv.length == 0) {
+			inv = consumePendingInviteCode()
+		} else {
+			savePendingInviteCode(inv)
+			consumePendingInviteCode()
+		}
+		return inv
+	}
 
 	onLoad((opts: UTSJSONObject) => {
 		try {
 			const m = opts['mode']
 			if (m != null && ('' + m) == 'register') isRegister.value = true
 		} catch (e) {}
+		try {
+			let inv = ''
+			const c1 = opts['invite']
+			const c2 = opts['code']
+			const c3 = opts['invite_code']
+			if (c1 != null) inv = ('' + c1).trim()
+			if (inv.length == 0 && c2 != null) inv = ('' + c2).trim()
+			if (inv.length == 0 && c3 != null) inv = ('' + c3).trim()
+			if (inv.length == 0) inv = loadPendingInviteCode()
+			if (inv.length > 0) {
+				savePendingInviteCode(inv)
+				inviteCode.value = inv
+			}
+		} catch (eInv) {}
 	})
 
 	onUnmounted(() => {
@@ -200,7 +246,9 @@
 		uni.showLoading({ title: isRegister.value ? '注册中…' : '登录中…' })
 		try {
 			if (isRegister.value) {
-				await emailRegister(em, cd, password.value, nickname.value.trim())
+				const invite = resolveInviteForSubmit()
+				console.log('[mail] register invite=', invite)
+				await emailRegister(em, cd, password.value, nickname.value.trim(), invite)
 			} else {
 				await emailLogin(em, cd)
 			}

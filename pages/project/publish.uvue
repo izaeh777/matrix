@@ -154,6 +154,11 @@
 <script setup lang="uts">
 	import { ref } from 'vue'
 	import { createCmsProject, submitCmsProject, CmsProjectDraft } from '@/common/cms.uts'
+	import {
+		fetchPlatformMe,
+		canPublishProject,
+		loadCachedVipLabel
+	} from '@/common/platform.uts'
 
 	const DRAFT_KEY = 'cms_project_draft_v1'
 	const CATS: Array<string> = ['Web3', '金融', '直播', 'DeFi', '项目', '其他']
@@ -236,6 +241,16 @@
 		})
 	}
 
+	onLoad(() => {
+		// 游客禁止进入发布页（以缓存等级为准；提交时再校验）
+		if (!canPublishProject(loadCachedVipLabel())) {
+			uni.showToast({ title: '游客无法发布项目，请先订阅', icon: 'none' })
+			setTimeout(() => {
+				uni.navigateBack({})
+			}, 800)
+		}
+	})
+
 	function onBack(): void {
 		if (step.value > 1) {
 			step.value = step.value - 1
@@ -282,6 +297,18 @@
 
 	async function submit(): Promise<void> {
 		if (submitting.value) return
+		try {
+			const me = await fetchPlatformMe()
+			if (!canPublishProject(me.vip_label)) {
+				uni.showToast({ title: '游客无法发布项目，请先订阅', icon: 'none' })
+				return
+			}
+		} catch (eGate) {
+			if (!canPublishProject(loadCachedVipLabel())) {
+				uni.showToast({ title: '游客无法发布项目，请先订阅', icon: 'none' })
+				return
+			}
+		}
 		submitting.value = true
 		const draft: CmsProjectDraft = {
 			name: name.value.trim(),

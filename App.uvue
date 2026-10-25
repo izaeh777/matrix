@@ -2,7 +2,8 @@
 	import { bootstrapMatrix } from '@/common/app.uts'
 	import { getMatrix } from '@/common/matrix.uts'
 	import { bindCallToMatrix } from '@/common/call.uts'
-	import { captureTpCallbackFromIntent } from '@/common/tp-wallet.uts'
+	import { captureTpCallbackFromIntent, readAndroidLaunchUri } from '@/common/tp-wallet.uts'
+	import { handleLaunchDeepLink } from '@/common/deeplink.uts'
 
 	// #ifdef APP-ANDROID || APP-HARMONY
 	let firstBackTime = 0
@@ -14,6 +15,17 @@
 		// #endif
 	}
 
+	function maybeAppDeepLink(): void {
+		// #ifdef APP
+		try {
+			const uri = readAndroidLaunchUri()
+			if (uri.length > 0) {
+				handleLaunchDeepLink(uri)
+			}
+		} catch (e) {}
+		// #endif
+	}
+
 	onLaunch(() => {
 		console.log('App Launch')
 		const matrix = bootstrapMatrix()
@@ -22,6 +34,7 @@
 			matrix.startSync()
 		}
 		maybeTpSchema()
+		maybeAppDeepLink()
 	})
 
 	onAppShow(() => {
@@ -30,6 +43,7 @@
 		const m = getMatrix()
 		if (m != null) m.startSync()
 		maybeTpSchema()
+		maybeAppDeepLink()
 	})
 
 	onAppHide(() => {

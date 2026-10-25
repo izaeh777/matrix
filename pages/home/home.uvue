@@ -25,7 +25,7 @@
 					<text class="banner-sub">Web3 项目提示·交流·合作·共赢</text>
 					<text class="banner-sub banner-sub-2">平台</text>
 					<view class="banner-actions">
-						<view class="btn-solid" @click="goPublish">
+						<view v-if="canPublish" class="btn-solid" @click="goPublish">
 							<text class="btn-solid-text">发布项目</text>
 						</view>
 						<view class="btn-outline" @click="goSearch">
@@ -154,7 +154,12 @@
 <script setup lang="uts">
 	import { ref, computed, onMounted } from 'vue'
 	import { loadSession, saveSession } from '@/common/storage.uts'
-	import { loadPlatformSession } from '@/common/platform.uts'
+	import {
+		loadPlatformSession,
+		fetchPlatformMe,
+		canPublishProject,
+		loadCachedVipLabel
+	} from '@/common/platform.uts'
 	import { getMatrix } from '@/common/matrix.uts'
 	import {
 		fetchCmsHome,
@@ -165,6 +170,7 @@
 		CmsArchiveItem,
 		CmsFriendLink
 	} from '@/common/cms.uts'
+	import { tryConsumePendingFriend } from '@/common/deeplink.uts'
 
 	const session = loadSession()
 	const platform = loadPlatformSession()
@@ -172,6 +178,7 @@
 	const latest = ref<Array<CmsArchiveItem>>([])
 	const hot = ref<Array<CmsArchiveItem>>([])
 	const friendLinks = ref<Array<CmsFriendLink>>([])
+	const canPublish = ref<boolean>(canPublishProject(loadCachedVipLabel()))
 
 	const shortName = computed((): string => {
 		let name = ''
@@ -279,7 +286,20 @@
 		uni.navigateTo({ url: '/pages/search/search' })
 	}
 	function goPublish(): void {
+		if (!canPublish.value) {
+			uni.showToast({ title: '游客无法发布项目，请先订阅', icon: 'none' })
+			return
+		}
 		uni.navigateTo({ url: '/pages/project/publish' })
+	}
+
+	async function refreshPublishGate(): Promise<void> {
+		try {
+			const me = await fetchPlatformMe()
+			canPublish.value = canPublishProject(me.vip_label)
+		} catch (e) {
+			canPublish.value = canPublishProject(loadCachedVipLabel())
+		}
 	}
 
 	async function loadHome(): Promise<void> {
@@ -300,6 +320,12 @@
 	onMounted(() => {
 		loadAvatar()
 		loadHome()
+		refreshPublishGate()
+	})
+
+	onShow(() => {
+		tryConsumePendingFriend()
+		refreshPublishGate()
 	})
 </script>
 
@@ -368,19 +394,21 @@
 	}
 	.banner {
 		margin: 8rpx 28rpx 32rpx;
-		background-color: #e8f3ff;
+		background-color: #BAE7FE;
+		background-image: linear-gradient(to bottom, #BAE7FE, #DBF1FE);
 		border-radius: 24rpx;
-		padding: 40rpx 8rpx 36rpx 32rpx;
-		min-height: 320rpx;
+		padding: 36rpx 8rpx 40rpx 32rpx;
+		min-height: 340rpx;
 		flex-direction: row;
-		align-items: center;
+		align-items: flex-start;
 		overflow: hidden;
 		position: relative;
 	}
 	.banner-left {
 		flex: 1;
 		z-index: 2;
-		padding-right: 280rpx;
+		padding-right: 260rpx;
+		padding-top: 4rpx;
 	}
 	.banner-title {
 		font-size: 44rpx;
@@ -399,16 +427,19 @@
 	}
 	.banner-sub-2 {
 		margin-top: 0;
-		margin-bottom: 28rpx;
+		margin-bottom: 24rpx;
 	}
 	.banner-actions {
 		flex-direction: row;
 		align-items: center;
+		position: relative;
+		z-index: 3;
+		margin-top: 8rpx;
 	}
 	.btn-solid {
 		background-color: #2f6ff2;
 		border-radius: 12rpx;
-		height: 56rpx;
+		height: 60rpx;
 		padding: 0 28rpx;
 		margin-right: 16rpx;
 		justify-content: center;
@@ -418,12 +449,12 @@
 		font-size: 24rpx;
 		color: #ffffff;
 		font-weight: 600;
-		line-height: 24rpx;
+		line-height: 28rpx;
 	}
 	.btn-outline {
 		background-color: #ffffff;
 		border-radius: 12rpx;
-		height: 56rpx;
+		height: 60rpx;
 		padding: 0 28rpx;
 		border-width: 2rpx;
 		border-color: #2f6ff2;
@@ -435,21 +466,21 @@
 		font-size: 24rpx;
 		color: #2f6ff2;
 		font-weight: 600;
-		line-height: 24rpx;
+		line-height: 28rpx;
 	}
 	.banner-mascot-wrap {
 		position: absolute;
-		right: -24rpx;
-		bottom: -56rpx;
-		width: 380rpx;
-		height: 420rpx;
+		right: -20rpx;
+		bottom: 8rpx;
+		width: 360rpx;
+		height: 400rpx;
 		z-index: 1;
 		align-items: center;
 		justify-content: flex-end;
 	}
 	.banner-mascot {
-		width: 380rpx;
-		height: 420rpx;
+		width: 360rpx;
+		height: 400rpx;
 	}
 	.section {
 		padding: 0 24rpx 28rpx;

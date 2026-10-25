@@ -5,6 +5,40 @@
 
 const API_HOST = 'https://m.itiklink.com'
 const KEY_PLATFORM = 'platform_session_v1'
+const KEY_PENDING_INVITE = 'pending_invite_code_v1'
+const KEY_PENDING_FRIEND = 'pending_friend_mxid_v1'
+const KEY_VIP_LABEL = 'platform_vip_label_v1'
+
+/** 游客 / 普通用户：无发布项目等会员能力 */
+export function isVisitorVipLabel(label: string): boolean {
+	const t = label.trim()
+	if (t.length == 0) return true
+	const u = t.toUpperCase()
+	if (u == 'VISITOR') return true
+	if (t == '游客' || t == '普通用户') return true
+	return false
+}
+
+export function saveCachedVipLabel(label: string): void {
+	try { uni.setStorageSync(KEY_VIP_LABEL, label.trim()) } catch (e) {}
+}
+
+export function loadCachedVipLabel(): string {
+	try {
+		const raw = uni.getStorageSync(KEY_VIP_LABEL)
+		if (raw == null) return ''
+		return ('' + raw).trim()
+	} catch (e) {
+		return ''
+	}
+}
+
+/** 非游客才可发布项目 */
+export function canPublishProject(vipLabel: string = ''): boolean {
+	let label = vipLabel.trim()
+	if (label.length == 0) label = loadCachedVipLabel()
+	return !isVisitorVipLabel(label)
+}
 
 function isH5DevHost(host: string): boolean {
 	if (host == 'localhost' || host == '127.0.0.1' || host == '[::1]' || host == '::1') return true
@@ -422,14 +456,16 @@ export async function emailLogin(email: string, code: string): Promise<PlatformS
 	return session
 }
 
-/** 邮箱注册 */
-export async function emailRegister(email: string, code: string, password: string, nickname: string): Promise<PlatformSession> {
+/** 邮箱注册（可选透传邀请码） */
+export async function emailRegister(email: string, code: string, password: string, nickname: string, inviteCode: string = ''): Promise<PlatformSession> {
 	const fields: UTSJSONObject = {
 		email: email,
 		code: code,
 		password: password,
 		nickname: nickname
 	}
+	const inv = inviteCode.trim()
+	if (inv.length > 0) fields['invite_code'] = inv
 	const root = await httpPostForm('/api/v1/auth/email/register', fields, false)
 	const data = assertOk(root, '注册失败')
 	// 注册成功后可能不带 token，再走一次登录
@@ -464,6 +500,63 @@ export type PlatformMe = {
 	vip_period: string
 	/** 团队等级名，如 lv_team_name；空则不展示 */
 	team_name: string
+	/** 我的邀请码（新用户注册时填写此码绑定推荐关系） */
+	invite_code: string
+}
+
+/** 待绑定的推荐人邀请码（扫码/DeepLink 落地后写入，登录注册时透传） */
+export function savePendingInviteCode(code: string): void {
+	const c = code.trim()
+	if (c.length == 0) return
+	try { uni.setStorageSync(KEY_PENDING_INVITE, c) } catch (e) {}
+}
+
+export function loadPendingInviteCode(): string {
+	try {
+		const raw = uni.getStorageSync(KEY_PENDING_INVITE)
+		if (raw == null) return ''
+		return ('' + raw).trim()
+	} catch (e) {
+		return ''
+	}
+}
+
+export function clearPendingInviteCode(): void {
+	try { uni.removeStorageSync(KEY_PENDING_INVITE) } catch (e) {}
+}
+
+/** 读取并清除，供登录/注册提交 invite_code */
+export function consumePendingInviteCode(): string {
+	const c = loadPendingInviteCode()
+	if (c.length > 0) clearPendingInviteCode()
+	return c
+}
+
+/** 待加好友的 Matrix ID（扫码落地未登录时暂存） */
+export function savePendingFriendMxid(mxid: string): void {
+	const id = mxid.trim()
+	if (id.length == 0) return
+	try { uni.setStorageSync(KEY_PENDING_FRIEND, id) } catch (e) {}
+}
+
+export function loadPendingFriendMxid(): string {
+	try {
+		const raw = uni.getStorageSync(KEY_PENDING_FRIEND)
+		if (raw == null) return ''
+		return ('' + raw).trim()
+	} catch (e) {
+		return ''
+	}
+}
+
+export function clearPendingFriendMxid(): void {
+	try { uni.removeStorageSync(KEY_PENDING_FRIEND) } catch (e) {}
+}
+
+export function consumePendingFriendMxid(): string {
+	const id = loadPendingFriendMxid()
+	if (id.length > 0) clearPendingFriendMxid()
+	return id
 }
 
 /** 订阅信息（users/me、subscription、billing 多端字段兼容） */
@@ -762,15 +855,28 @@ function parsePlatformMe(data: UTSJSONObject): PlatformMe {
 		if (direct.length > 0) vipLabel = direct
 	}
 	const teamName = pickStrAny(user, ['lv_team_name', 'lvTeamName', 'team_name', 'teamName'])
+	const username = pickStr(user, 'username')
+	let inviteCode = pickStrAny(user, [
+		'invite_code', 'inviteCode', 'my_invite_code', 'myInviteCode',
+		'referral_code', 'referralCode', 'refer_code', 'invite'
+	])
+	if (inviteCode.length == 0) {
+		inviteCode = pickStrAny(data, [
+			'invite_code', 'inviteCode', 'my_invite_code', 'myInviteCode'
+		])
+	}
+	// 多数后台用 username 作为邀请码
+	if (inviteCode.length == 0) inviteCode = username
 	const me: PlatformMe = {
 		money: money,
 		nickname: nickname,
-		username: pickStr(user, 'username'),
+		username: username,
 		user_id: userId,
 		avatar: avatar,
 		vip_label: vipLabel,
 		vip_period: formatVipPeriod(sub),
-		team_name: teamName
+		team_name: teamName,
+		invite_code: inviteCode
 	}
 	return me
 }
@@ -823,6 +929,7 @@ export async function fetchPlatformMe(): Promise<PlatformMe> {
 		}
 	}
 	console.log('[platform] me vip=', me.vip_label, me.vip_period, 'money=', me.money)
+	saveCachedVipLabel(me.vip_label)
 	applyMeToLocalSession(me)
 	return me
 }
@@ -995,19 +1102,9 @@ export async function fetchBillingWallet(): Promise<string> {
 	const data = assertOk(root, '获取收款地址失败')
 	let addr = pickPayAddress(data)
 	if (addr.length == 0) {
-		// data 可能直接是字符串
-		const raw = pickStr(root, 'data')
+		// data 为字符串地址时 assertOk 会得到空对象，再从 root.data 取
+		const raw = pickStr(root, 'data').trim()
 		if (raw.indexOf('0x') == 0 && raw.length >= 42) addr = raw
-	}
-	if (addr.length == 0) {
-		// data 为数组时取首项
-		const arr = data.getArray('list')
-		if (arr == null) {
-			try {
-				const anyData = data as any
-				// 部分后端 data 即 address 对象已由 pickPayAddress 覆盖
-			} catch (e) {}
-		}
 	}
 	addr = addr.trim()
 	if (addr.length == 0) throw new Error('收款地址为空')

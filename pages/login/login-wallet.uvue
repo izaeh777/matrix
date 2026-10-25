@@ -20,6 +20,19 @@
 			<text class="status-text">{{ statusText }}</text>
 		</view>
 
+		<view class="invite-field">
+			<text class="invite-label">好友码 / 邀请码（新用户选填）</text>
+			<view class="invite-box">
+				<input
+					class="invite-input"
+					type="text"
+					v-model="inviteCode"
+					placeholder="请输入好友邀请码"
+					placeholder-class="invite-ph"
+				/>
+			</view>
+		</view>
+
 		<view class="btn-login" :class="busy ? 'btn-login-off' : ''" @click="onOneTapLogin">
 			<text class="btn-login-text">{{ mainBtnText }}</text>
 		</view>
@@ -35,6 +48,9 @@
 		walletVerify,
 		loadTpLoginTicket,
 		clearTpLoginTicket,
+		consumePendingInviteCode,
+		savePendingInviteCode,
+		loadPendingInviteCode,
 		PlatformSession
 	} from '@/common/platform.uts'
 	import { startMatrixFromPlatform } from '@/common/app.uts'
@@ -47,6 +63,7 @@
 	const LAST_WALLET_KEY = 'tp_last_wallet_v1'
 
 	const address = ref<string>('')
+	const inviteCode = ref<string>('')
 	const loading = ref<boolean>(false)
 	const checking = ref<boolean>(false)
 	const waiting = ref<boolean>(false)
@@ -57,6 +74,34 @@
 	// #endif
 	let loginDone = false
 	let starting = false
+
+	function resolveInviteForSubmit(): string {
+		let inv = inviteCode.value.trim()
+		if (inv.length == 0) {
+			inv = consumePendingInviteCode()
+		} else {
+			savePendingInviteCode(inv)
+			consumePendingInviteCode()
+		}
+		return inv
+	}
+
+	onLoad((opts: UTSJSONObject) => {
+		try {
+			let inv = ''
+			const c1 = opts['invite']
+			const c2 = opts['code']
+			const c3 = opts['invite_code']
+			if (c1 != null) inv = ('' + c1).trim()
+			if (inv.length == 0 && c2 != null) inv = ('' + c2).trim()
+			if (inv.length == 0 && c3 != null) inv = ('' + c3).trim()
+			if (inv.length == 0) inv = loadPendingInviteCode()
+			if (inv.length > 0) {
+				savePendingInviteCode(inv)
+				inviteCode.value = inv
+			}
+		} catch (e) {}
+	})
 
 	function loadLastWallet(): string {
 		try {
@@ -190,8 +235,9 @@
 	}
 
 	async function finishLoginSiwe(addr: string, signature: string): Promise<void> {
-		console.log('[wallet] verify start', addr, 'sigLen=', signature.length)
-		const session = await walletVerify(addr, signature, '')
+		const invite = resolveInviteForSubmit()
+		console.log('[wallet] verify start', addr, 'sigLen=', signature.length, 'invite=', invite)
+		const session = await walletVerify(addr, signature, invite)
 		await afterLoginOk(session)
 	}
 
@@ -243,7 +289,9 @@
 			saveLastWallet(useWallet)
 			waitTip.value = '正在完成登录…'
 			uni.showLoading({ title: '登录中…' })
-			const session = await walletVerify(useWallet, signed.signature, '')
+			const invite = resolveInviteForSubmit()
+			console.log('[wallet] verify invite=', invite)
+			const session = await walletVerify(useWallet, signed.signature, invite)
 			await afterLoginOk(session)
 			starting = false
 		} catch (e) {
@@ -382,6 +430,35 @@
 		font-size: 28rpx;
 		color: #374151;
 		lines: 2;
+	}
+	.invite-field {
+		margin-bottom: 28rpx;
+	}
+	.invite-label {
+		font-size: 24rpx;
+		color: #475569;
+		margin-bottom: 12rpx;
+		font-weight: 600;
+	}
+	.invite-box {
+		flex-direction: row;
+		align-items: center;
+		background-color: #f4f8fd;
+		border-radius: 16rpx;
+		padding: 0 24rpx;
+		height: 96rpx;
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #e2eef8;
+	}
+	.invite-input {
+		flex: 1;
+		font-size: 28rpx;
+		color: #0f172a;
+		height: 96rpx;
+	}
+	.invite-ph {
+		color: #94a3b8;
 	}
 	.btn-login {
 		height: 96rpx;

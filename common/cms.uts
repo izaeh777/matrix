@@ -567,8 +567,22 @@ export function friendCodeOf(userId: string): string {
 	return out.substring(0, 8)
 }
 
+/** @deprecated 请用 inviteRegisterQrUrl / friendAddQrUrl */
 export function inviteQrUrl(userId: string): string {
-	const payload = 'itiklink://invite?u=' + encodeURIComponent(userId) + '&c=' + encodeURIComponent(friendCodeOf(userId))
+	return friendAddQrUrl(userId)
+}
+
+/** 邀请注册二维码：扫码后带 invite_code 进登录/注册 */
+export function inviteRegisterQrUrl(inviteCode: string): string {
+	const code = inviteCode.trim()
+	const payload = 'itiklink://invite?code=' + encodeURIComponent(code)
+	return 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=10&data=' + encodeURIComponent(payload)
+}
+
+/** 加好友二维码：扫码后 startDM */
+export function friendAddQrUrl(matrixUserId: string): string {
+	const uid = matrixUserId.trim()
+	const payload = 'itiklink://friend?u=' + encodeURIComponent(uid)
 	return 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=10&data=' + encodeURIComponent(payload)
 }
 

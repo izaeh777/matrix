@@ -106,7 +106,7 @@
 	"app-ios": {
 		"privacyDescription": {
 			"NSMicrophoneUsageDescription": "需要使用麦克风进行语音通话",
-			"NSCameraUsageDescription": "需要使用摄像头进行视频通话"
+			"NSCameraUsageDescription": "需要使用摄像头进行视频通话与扫码加好友"
 		},
 		"distribute": {
 			"modules": {},

@@ -47,6 +47,21 @@
 </template>
 
 <script setup lang="uts">
+	import { savePendingInviteCode } from '@/common/platform.uts'
+
+	onLoad((opts: UTSJSONObject) => {
+		try {
+			let inv = ''
+			const c1 = opts['invite']
+			const c2 = opts['code']
+			const c3 = opts['invite_code']
+			if (c1 != null) inv = ('' + c1).trim()
+			if (inv.length == 0 && c2 != null) inv = ('' + c2).trim()
+			if (inv.length == 0 && c3 != null) inv = ('' + c3).trim()
+			if (inv.length > 0) savePendingInviteCode(inv)
+		} catch (e) {}
+	})
+
 	function goLogin() {
 		uni.navigateTo({ url: '/pages/login/login-mail' })
 	}

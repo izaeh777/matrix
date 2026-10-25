@@ -1,0 +1,259 @@
+/**
+ * App Deep Link / 扫码：邀请注册、加好友
+ * itiklink://invite?code=XXX
+ * itiklink://friend?u=@xxx:matrix.itiklink.com
+ */
+import { getMatrix } from './matrix.uts'
+import { openChat, hasPlatformLogin, startMatrixFromPlatform } from './app.uts'
+import {
+	savePendingInviteCode,
+	savePendingFriendMxid,
+	consumePendingFriendMxid,
+	loadPlatformSession
+} from './platform.uts'
+
+function queryParam(uri: string, key: string): string {
+	const q = uri.indexOf('?')
+	if (q < 0) return ''
+	let qs = uri.substring(q + 1)
+	const hash = qs.indexOf('#')
+	if (hash >= 0) qs = qs.substring(0, hash)
+	const parts = qs.split('&')
+	const prefix = key + '='
+	for (let i = 0; i < parts.length; i++) {
+		const p = parts[i]
+		if (p.indexOf(prefix) != 0) continue
+		let v = p.substring(prefix.length)
+		try {
+			const decoded = decodeURIComponent(v)
+			if (decoded != null && ('' + decoded).length > 0) {
+				v = '' + decoded
+			}
+		} catch (e) {}
+		return v.trim()
+	}
+	return ''
+}
+
+function schemeHost(uri: string): string {
+	const s = uri.trim().toLowerCase()
+	if (s.indexOf('itiklink://') != 0) return ''
+	let rest = s.substring('itiklink://'.length)
+	const slash: number = rest.indexOf('/') as number
+	const q: number = rest.indexOf('?') as number
+	let end: number = rest.length as number
+	if (slash >= 0 && slash < end) end = slash
+	if (q >= 0 && q < end) end = q
+	return rest.substring(0, end)
+}
+
+function isMatrixId(s: string): boolean {
+	const t = s.trim()
+	return t.indexOf('@') == 0 && t.indexOf(':') > 1
+}
+
+async function openFriendDm(mxid: string): Promise<void> {
+	let matrix = getMatrix()
+	if (matrix == null) {
+		startMatrixFromPlatform()
+		matrix = getMatrix()
+	}
+	if (matrix == null) {
+		savePendingFriendMxid(mxid)
+		uni.showToast({ title: '请先登录后再加好友', icon: 'none' })
+		uni.navigateTo({ url: '/pages/login/login' })
+		return
+	}
+	if (mxid == matrix.userId) {
+		uni.showToast({ title: '不能添加自己', icon: 'none' })
+		return
+	}
+	uni.showLoading({ title: '正在添加…', mask: true })
+	try {
+		const rid = await matrix.startDM(mxid)
+		uni.hideLoading()
+		openChat(rid)
+	} catch (e) {
+		uni.hideLoading()
+		uni.showToast({ title: '加好友失败', icon: 'none' })
+	}
+}
+
+function goLoginWithInvite(): void {
+	uni.navigateTo({ url: '/pages/login/login' })
+}
+
+/**
+ * 处理 itiklink:// 或扫码文本。
+ * 返回 true 表示已消费（含邀请/加友）；tp-wallet 返回 false 交给钱包模块。
+ */
+export function handleItiklinkUri(uri: string): boolean {
+	const raw = uri.trim()
+	if (raw.length == 0) return false
+
+	// 纯 Matrix ID
+	if (isMatrixId(raw)) {
+		openFriendDm(raw)
+		return true
+	}
+
+	if (raw.indexOf('itiklink://') != 0) return false
+	const host = schemeHost(raw)
+	if (host == 'tp-wallet') return false
+
+	if (host == 'invite') {
+		let code = queryParam(raw, 'code')
+		if (code.length == 0) code = queryParam(raw, 'c')
+		if (code.length == 0) code = queryParam(raw, 'invite_code')
+		if (code.length == 0) {
+			// itiklink://invite/CODE
+			const path = raw.substring('itiklink://invite'.length)
+			if (path.indexOf('/') == 0) {
+				let seg = path.substring(1)
+				const q = seg.indexOf('?')
+				if (q >= 0) seg = seg.substring(0, q)
+				try {
+					const decoded = decodeURIComponent(seg)
+					if (decoded != null) {
+						code = ('' + decoded).trim()
+					} else {
+						code = seg.trim()
+					}
+				} catch (eDec) {
+					code = seg.trim()
+				}
+			}
+		}
+		if (code.length == 0) {
+			uni.showToast({ title: '邀请码无效', icon: 'none' })
+			return true
+		}
+		savePendingInviteCode(code)
+		if (hasPlatformLogin() || loadPlatformSession() != null) {
+			uni.showToast({ title: '邀请码已记录，仅新注册生效', icon: 'none' })
+		} else {
+			uni.showToast({ title: '邀请码已记录，请注册/登录', icon: 'none' })
+			goLoginWithInvite()
+		}
+		return true
+	}
+
+	if (host == 'friend') {
+		let u = queryParam(raw, 'u')
+		if (u.length == 0) u = queryParam(raw, 'user')
+		if (u.length == 0) u = queryParam(raw, 'id')
+		if (!isMatrixId(u) && u.length > 0) {
+			// 允许传 localpart
+			if (u.indexOf('@') != 0) u = '@' + u + ':matrix.itiklink.com'
+		}
+		if (!isMatrixId(u)) {
+			uni.showToast({ title: '好友二维码无效', icon: 'none' })
+			return true
+		}
+		if (hasPlatformLogin() || getMatrix() != null) {
+			openFriendDm(u)
+		} else {
+			savePendingFriendMxid(u)
+			uni.showToast({ title: '请先登录后加好友', icon: 'none' })
+			goLoginWithInvite()
+		}
+		return true
+	}
+
+	return false
+}
+
+/** App 启动/回前台：从 Intent 读 URI 并处理（排除 tp-wallet） */
+export function handleLaunchDeepLink(uri: string): boolean {
+	if (uri.length == 0) return false
+	if (uri.indexOf('itiklink://tp-wallet') >= 0) return false
+	return handleItiklinkUri(uri)
+}
+
+/** 登录成功后消费「待加好友」 */
+export async function consumePendingFriendAfterLogin(): Promise<void> {
+	const mxid = consumePendingFriendMxid()
+	if (mxid.length == 0) return
+	await openFriendDm(mxid)
+}
+
+/** 同步入口：首页 onShow 调用，内部异步处理 */
+export function tryConsumePendingFriend(): void {
+	const mxid = consumePendingFriendMxid()
+	if (mxid.length == 0) return
+	// 不等待：避免 UTS 对 Promise.then 支持差异
+	openFriendDm(mxid)
+}
+
+function applyScannedText(text: string): void {
+	const t = text.trim()
+	if (t.length == 0) {
+		uni.showToast({ title: '未识别到内容', icon: 'none' })
+		return
+	}
+	const ok = handleItiklinkUri(t)
+	if (!ok) {
+		uni.showToast({ title: '无法识别该二维码', icon: 'none' })
+	}
+}
+
+/** 基座未含扫码时：从剪贴板粘贴链接/邀请码 */
+function pasteLinkFallback(reason: string): void {
+	uni.showModal({
+		title: '扫码不可用',
+		content: reason + '。可粘贴邀请链接或好友链接（itiklink://…），或重新「制作自定义调试基座」后再扫。',
+		confirmText: '粘贴处理',
+		cancelText: '取消',
+		success: (r) => {
+			if (r.confirm != true) return
+			uni.getClipboardData({
+				success: (clip) => {
+					let data = ''
+					try {
+						data = '' + clip.data
+					} catch (e) {}
+					applyScannedText(data)
+				},
+				fail: () => {
+					uni.showToast({ title: '读取剪贴板失败', icon: 'none' })
+				}
+			})
+		}
+	})
+}
+
+/** 扫一扫入口（需自定义基座包含 uni.scanCode） */
+export function scanAddFriendOrInvite(): void {
+	// #ifndef APP
+	pasteLinkFallback('当前端不支持扫码')
+	return
+	// #endif
+	// #ifdef APP
+	try {
+		uni.scanCode({
+			onlyFromCamera: false,
+			scanType: ['qrCode'],
+			success: (res) => {
+				let text = ''
+				try {
+					text = ('' + res.result).trim()
+				} catch (e) {}
+				applyScannedText(text)
+			},
+			fail: (err) => {
+				let msg = ''
+				try {
+					msg = '' + err
+				} catch (e2) {}
+				if (msg.indexOf('scanCode') >= 0 || msg.indexOf('基座') >= 0 || msg.indexOf('未包含') >= 0) {
+					pasteLinkFallback('当前自定义基座未包含扫码能力')
+					return
+				}
+				uni.showToast({ title: '扫码取消或失败', icon: 'none' })
+			}
+		})
+	} catch (e) {
+		pasteLinkFallback('当前自定义基座未包含扫码能力')
+	}
+	// #endif
+}

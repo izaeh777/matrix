@@ -5,7 +5,7 @@
 		<!-- #endif -->
 		<view class="wx-nav">
 			<text class="wx-nav-title">通讯录</text>
-			<text class="wx-nav-btn" @click="onOpenSettings">+</text>
+			<text class="wx-nav-btn" @click="onAddFriend">+</text>
 		</view>
 		<view class="search-bar">
 			<view class="search-input-wrap">
@@ -70,6 +70,10 @@
 			<text class="empty-title">通讯录</text>
 			<text class="empty-desc">在上方搜索框输入用户名\n即可找到其他用户并发消息</text>
 			<view class="entry-buttons">
+				<view class="entry-btn" @click="onAddFriend">
+					<text class="entry-btn-icon">＋</text>
+					<text class="entry-btn-text">添加好友</text>
+				</view>
 				<view class="entry-btn" @click="onCreateGroup">
 					<text class="entry-btn-icon">👥</text>
 					<text class="entry-btn-text">发起群聊</text>
@@ -272,6 +276,10 @@
 
 	function onOpenSettings() {
 		uni.navigateTo({ url: '/pages/settings/settings' })
+	}
+
+	function onAddFriend() {
+		uni.navigateTo({ url: '/pages/contacts/add' })
 	}
 
 	function onCreateGroup() {

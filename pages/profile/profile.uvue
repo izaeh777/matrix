@@ -122,26 +122,34 @@
 
 		<view v-if="showInvite" class="invite-mask" @click="closeInvite">
 			<view class="invite-sheet" @click.stop="">
-				<text class="invite-title">邀请好友</text>
-				<text class="invite-desc">邀请新用户提前获得新项目信息以及平台会员其他特权时刻关注平台信息</text>
+				<text class="invite-title">邀请好友注册</text>
+				<text class="invite-desc">分享邀请码，新用户注册时绑定推荐关系，可提前获得新项目信息与会员特权</text>
 				<image class="invite-qr" :src="inviteQr" mode="aspectFit"></image>
-				<view class="or-row">
-					<view class="or-line"></view>
-					<text class="or-text">或</text>
-					<view class="or-line"></view>
-				</view>
-				<view class="code-pill" @click="copyFriendCode">
-					<text class="code-text">我的好友码 {{ friendCode }}</text>
+				<view class="code-pill" @click="copyInviteCode">
+					<text class="code-text">我的邀请码 {{ inviteCodeDisplay }}</text>
 					<text class="code-copy">⧉</text>
 				</view>
+				<view class="or-row">
+					<view class="or-line"></view>
+					<text class="or-text">加好友</text>
+					<view class="or-line"></view>
+				</view>
+				<view class="invite-actions">
+					<view class="invite-action" @click="onScanFriend">
+						<text class="invite-action-text">扫码加好友</text>
+					</view>
+					<view class="invite-action" @click="onGoAddFriend">
+						<text class="invite-action-text">搜用户名</text>
+					</view>
+				</view>
 				<view v-if="showCodeInput" class="code-input-wrap">
-					<input class="code-input" v-model="enterCode" placeholder="请输入好友码" />
+					<input class="code-input" v-model="enterCode" placeholder="输入用户名或 Matrix ID" />
 					<view class="code-go" @click="applyFriendCode">
 						<text class="code-go-text">添加</text>
 					</view>
 				</view>
 				<view class="invite-btn" @click="onEnterCode">
-					<text class="invite-btn-text">{{ showCodeInput ? '收起' : '输入好友码' }}</text>
+					<text class="invite-btn-text">{{ showCodeInput ? '收起' : '输入用户名加好友' }}</text>
 				</view>
 			</view>
 		</view>
@@ -201,11 +209,13 @@
 		planPayPrice,
 		planPayPriceText,
 		isPlanDiscountActive,
+		findFriendByUsername,
 		RolePlan
 	} from '@/common/platform.uts'
 	import { tpTransferUsdt, waitBscTxConfirmed, isTpAppInstalled } from '@/common/tp-wallet.uts'
-	import { friendCodeOf, inviteQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
+	import { inviteRegisterQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
 	import { openChat } from '@/common/app.uts'
+	import { scanAddFriendOrInvite } from '@/common/deeplink.uts'
 
 	const session = ref<SessionInfo | null>(loadSession())
 	const platform = ref<PlatformSession | null>(loadPlatformSession())
@@ -270,8 +280,12 @@
 	const paying = ref<boolean>(false)
 	const planList = ref<Array<RolePlan>>([])
 	const selectedPlanCode = ref<string>('')
-	const friendCode = computed((): string => friendCodeOf(userId.value as string))
-	const inviteQr = computed((): string => inviteQrUrl(userId.value as string))
+	const myInviteCode = ref<string>('')
+	const inviteCodeDisplay = computed((): string => {
+		if (myInviteCode.value.length > 0) return myInviteCode.value
+		return accountName.value as string
+	})
+	const inviteQr = computed((): string => inviteRegisterQrUrl(inviteCodeDisplay.value as string))
 	let offSync: (() => void) | null = null
 
 	function stopOff(handler: (() => void) | null): void {
@@ -295,7 +309,10 @@
 			if (me.vip_label.length > 0) vipLabel.value = me.vip_label
 			if (me.vip_period.length > 0) vipPeriod.value = me.vip_period
 			teamName.value = me.team_name
-			console.log('[profile] vip=', me.vip_label, me.vip_period, 'team=', me.team_name)
+			if (me.invite_code.length > 0) myInviteCode.value = me.invite_code
+			else if (me.username.length > 0) myInviteCode.value = me.username
+			// vip_label 已在 fetchPlatformMe 内缓存，供首页/发现页判断发布入口
+			console.log('[profile] vip=', me.vip_label, me.vip_period, 'team=', me.team_name, 'invite=', me.invite_code)
 			// 同步昵称到本地 session，资料页立刻刷新
 			const p = loadPlatformSession()
 			if (p != null && me.nickname.length > 0) {
@@ -610,11 +627,16 @@
 		showInvite.value = false
 	}
 
-	function copyFriendCode(): void {
+	function copyInviteCode(): void {
+		const code = inviteCodeDisplay.value as string
+		if (code.length == 0) {
+			uni.showToast({ title: '暂无邀请码', icon: 'none' })
+			return
+		}
 		uni.setClipboardData({
-			data: friendCode.value,
+			data: code,
 			success: () => {
-				uni.showToast({ title: '好友码已复制', icon: 'none' })
+				uni.showToast({ title: '邀请码已复制', icon: 'none' })
 			}
 		})
 	}
@@ -623,21 +645,44 @@
 		showCodeInput.value = !showCodeInput.value
 	}
 
+	function onScanFriend(): void {
+		showInvite.value = false
+		scanAddFriendOrInvite()
+	}
+
+	function onGoAddFriend(): void {
+		showInvite.value = false
+		uni.navigateTo({ url: '/pages/contacts/add' })
+	}
+
 	async function applyFriendCode(): Promise<void> {
 		const code = enterCode.value.trim()
 		if (code.length == 0) {
-			uni.showToast({ title: '请输入好友码', icon: 'none' })
+			uni.showToast({ title: '请输入用户名', icon: 'none' })
 			return
 		}
-		const target = matrixIdFromFriendCode(code)
 		const matrix = getMatrix()
 		if (matrix == null) return
+		uni.showLoading({ title: '查找中…', mask: true })
 		try {
+			let target = ''
+			if (code.indexOf('@') == 0) {
+				target = code
+			} else {
+				const found = await findFriendByUsername(code)
+				if (found.length > 0 && found[0].imUser.length > 0) {
+					target = found[0].imUser
+				} else {
+					target = matrixIdFromFriendCode(code)
+				}
+			}
 			const rid = await matrix.startDM(target)
+			uni.hideLoading()
 			showInvite.value = false
 			openChat(rid)
 		} catch (e) {
-			uni.showToast({ title: '未找到该好友码', icon: 'none' })
+			uni.hideLoading()
+			uni.showToast({ title: '未找到该用户', icon: 'none' })
 		}
 	}
 </script>
@@ -923,6 +968,26 @@
 		font-size: 24rpx;
 		color: #9aa3af;
 		margin: 0 18rpx;
+	}
+	.invite-actions {
+		width: 100%;
+		flex-direction: row;
+		justify-content: space-between;
+		margin-bottom: 20rpx;
+	}
+	.invite-action {
+		flex: 1;
+		margin: 0 8rpx;
+		background-color: #eef4ff;
+		border-radius: 16rpx;
+		padding: 22rpx 12rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.invite-action-text {
+		font-size: 26rpx;
+		color: #2f6ff2;
+		font-weight: 600;
 	}
 	.code-pill {
 		width: 100%;
