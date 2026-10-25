@@ -11,33 +11,36 @@
 			<view class="top-spacer"></view>
 		</view>
 
-		<text class="brand">i-tiklink</text>
-		<text class="card-title">钱包授权登录</text>
-		<text class="card-subtitle">{{ subTitle }}</text>
+		<scroll-view class="form-scroll" scroll-y="true">
+			<text class="brand">i-tiklink</text>
+			<text class="card-title">钱包授权登录</text>
+			<text class="card-subtitle">{{ subTitle }}</text>
 
-		<view class="status-card">
-			<view class="status-dot" :class="(address.length > 0 || waiting) ? 'status-on' : ''"></view>
-			<text class="status-text">{{ statusText }}</text>
-		</view>
-
-		<view class="invite-field">
-			<text class="invite-label">好友码 / 邀请码（新用户选填）</text>
-			<view class="invite-box">
-				<input
-					class="invite-input"
-					type="text"
-					v-model="inviteCode"
-					placeholder="请输入好友邀请码"
-					placeholder-class="invite-ph"
-				/>
+			<view class="status-card">
+				<view class="status-dot" :class="(address.length > 0 || waiting) ? 'status-on' : ''"></view>
+				<text class="status-text">{{ statusText }}</text>
 			</view>
-		</view>
 
-		<view class="btn-login" :class="busy ? 'btn-login-off' : ''" @click="onOneTapLogin">
-			<text class="btn-login-text">{{ mainBtnText }}</text>
-		</view>
+			<view class="invite-field">
+				<text class="invite-label">好友码 / 邀请码（新用户选填）</text>
+				<view class="invite-box">
+					<input
+						class="invite-input"
+						type="text"
+						v-model="inviteCode"
+						placeholder="请输入好友邀请码"
+						placeholder-class="invite-ph"
+					/>
+				</view>
+			</view>
 
-		<text class="hint">{{ hintText }}</text>
+			<view class="btn-login" :class="busy ? 'btn-login-off' : ''" @click="onOneTapLogin">
+				<text class="btn-login-text">{{ mainBtnText }}</text>
+			</view>
+
+			<text class="hint">{{ hintText }}</text>
+			<view class="form-scroll-pad"></view>
+		</scroll-view>
 	</view>
 </template>
 
@@ -360,7 +363,16 @@
 	.page {
 		flex: 1;
 		background: linear-gradient(180deg, #eaf6ff 0%, #ffffff 40%);
-		padding: 24rpx 48rpx 48rpx;
+		padding: 24rpx 48rpx 0;
+		flex-direction: column;
+	}
+	.form-scroll {
+		flex: 1;
+		height: 0;
+		padding-bottom: 48rpx;
+	}
+	.form-scroll-pad {
+		height: 40rpx;
 	}
 	.top-bar {
 		flex-direction: row;

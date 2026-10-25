@@ -3,104 +3,107 @@
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
 		<!-- #endif -->
-		<view class="top-row">
-			<view class="lang-pill" @click="onSoon">
-				<image class="lang-globe" src="/static/login/china.png" mode="aspectFit"></image>
-				<text class="lang-text">简体中文</text>
-				<text class="lang-caret">▾</text>
-			</view>
-			<view class="top-right">
-				<image class="top-icon" src="/static/login/e1.png" mode="aspectFit" @click="goNotify"></image>
-				<image class="top-icon" src="/static/login/e2.png" mode="aspectFit" @click="onSettings"></image>
-			</view>
-		</view>
-
-		<view class="user-row" @click="onSettings">
-			<image class="user-avatar" :src="avatarUrl" mode="aspectFill"></image>
-			<view class="user-meta">
-				<text class="user-name">{{ displayName }}</text>
-				<view class="user-sub">
-					<text class="user-id">ID: {{ accountName }}</text>
-					<view class="vip-badge">
-						<text class="vip-text">{{ vipLabel }}</text>
-					</view>
-					<view v-if="teamName.length > 0" class="team-badge">
-						<text class="team-text">{{ teamName }}</text>
-					</view>
+		<scroll-view class="profile-scroll" scroll-y="true">
+			<view class="top-row">
+				<view class="lang-pill" @click="onLang">
+					<image class="lang-globe" src="/static/login/china.png" mode="aspectFit"></image>
+					<text class="lang-text">{{ langLabel }}</text>
+					<text class="lang-caret">▾</text>
+				</view>
+				<view class="top-right">
+					<image class="top-icon" src="/static/login/e1.png" mode="aspectFit" @click="goNotify"></image>
+					<image class="top-icon" src="/static/login/e2.png" mode="aspectFit" @click="onSettings"></image>
 				</view>
 			</view>
-			<text class="user-arrow">›</text>
-		</view>
 
-		<view class="balance-row">
-			<text class="balance-label">USDT 余额</text>
-			<text class="balance-value">{{ usdtBalance }}</text>
-		</view>
-
-		<view class="member-card">
-			<view class="vip-bar">
-				<text class="vip-bar-text">{{ vipPeriod }}</text>
-				<view class="renew-btn" @click="onSubscribe">
-					<text class="renew-text">{{ renewBtnText }}</text>
+			<view class="user-row" @click="onSettings">
+				<image class="user-avatar" :src="avatarUrl" mode="aspectFill"></image>
+				<view class="user-meta">
+					<text class="user-name">{{ displayName }}</text>
+					<view class="user-sub">
+						<text class="user-id">ID: {{ accountName }}</text>
+						<view class="vip-badge">
+							<text class="vip-text">{{ vipLabel }}</text>
+						</view>
+						<view v-if="teamName.length > 0" class="team-badge">
+							<text class="team-text">{{ teamName }}</text>
+						</view>
+					</view>
 				</view>
+				<text class="user-arrow">›</text>
 			</view>
-			<view class="stat-row">
-				<view class="stat-cell" @click="onSearchMessages">
-					<view class="stat-head">
-						<text class="stat-title">收藏夹</text>
+
+			<view class="balance-row">
+				<text class="balance-label">{{ i18n.balance }}</text>
+				<text class="balance-value">{{ usdtBalance }}</text>
+			</view>
+
+			<view class="member-card">
+				<view class="vip-bar">
+					<text class="vip-bar-text">{{ vipPeriod }}</text>
+					<view class="renew-btn" @click="onSubscribe">
+						<text class="renew-text">{{ renewBtnText }}</text>
+					</view>
+				</view>
+				<view class="stat-row">
+					<view class="stat-cell" @click="onSearchMessages">
+						<view class="stat-head">
+						<text class="stat-title">{{ i18n.fav }}</text>
 						<text class="stat-mini">›</text>
 					</view>
-					<text class="stat-empty">暂无记录</text>
+					<text class="stat-empty">{{ i18n.emptyRec }}</text>
 				</view>
 				<view class="stat-split"></view>
 				<view class="stat-cell" @click="onSearchMessages">
 					<view class="stat-head">
-						<text class="stat-title">浏览历史</text>
+						<text class="stat-title">{{ i18n.history }}</text>
 						<text class="stat-mini">›</text>
 					</view>
-					<text class="stat-empty">暂无记录</text>
+					<text class="stat-empty">{{ i18n.emptyRec }}</text>
 				</view>
 			</view>
 			<view class="quick-row">
 				<view class="quick-item" @click="goStats">
 					<image class="quick-ico" src="/static/login/q4.png" mode="aspectFit"></image>
-					<text class="quick-label">项目分析</text>
+					<text class="quick-label">{{ i18n.analytics }}</text>
 				</view>
 				<view class="quick-item" @click="goRooms">
 					<image class="quick-ico" src="/static/login/q3.png" mode="aspectFit"></image>
-					<text class="quick-label">沟通交流</text>
+					<text class="quick-label">{{ i18n.chat }}</text>
 				</view>
 				<view class="quick-item" @click="onSoon">
 					<image class="quick-ico" src="/static/login/q2.png" mode="aspectFit"></image>
-					<text class="quick-label">项目分成</text>
+					<text class="quick-label">{{ i18n.share }}</text>
 				</view>
 				<view class="quick-item" @click="onSoon">
 					<image class="quick-ico" src="/static/login/q1.png" mode="aspectFit"></image>
-					<text class="quick-label">专属服务</text>
+					<text class="quick-label">{{ i18n.service }}</text>
 				</view>
 			</view>
 		</view>
 
-		<view class="func-card">
-			<text class="func-title">功能中心</text>
-			<view class="func-cell" @click="onDiscover">
-				<image class="func-ico" src="/static/login/f1.png" mode="aspectFit"></image>
-				<text class="func-label">我的发布</text>
-				<text class="func-arrow">›</text>
+			<view class="func-card">
+				<text class="func-title">{{ i18n.center }}</text>
+				<view class="func-cell" @click="onDiscover">
+					<image class="func-ico" src="/static/login/f1.png" mode="aspectFit"></image>
+					<text class="func-label">{{ i18n.myPublish }}</text>
+					<text class="func-arrow">›</text>
+				</view>
+				<view class="func-line"></view>
+				<view class="func-cell" @click="goContacts">
+					<image class="func-ico" src="/static/login/f2.png" mode="aspectFit"></image>
+					<text class="func-label">{{ i18n.follow }}</text>
+					<text class="func-arrow">›</text>
+				</view>
+				<view class="func-line"></view>
+				<view class="func-cell" @click="onInvite">
+					<image class="func-ico" src="/static/login/f3.png" mode="aspectFit"></image>
+					<text class="func-label">{{ i18n.invite }}</text>
+					<text class="func-arrow">›</text>
+				</view>
 			</view>
-			<view class="func-line"></view>
-			<view class="func-cell" @click="goContacts">
-				<image class="func-ico" src="/static/login/f2.png" mode="aspectFit"></image>
-				<text class="func-label">我的关注</text>
-				<text class="func-arrow">›</text>
-			</view>
-			<view class="func-line"></view>
-			<view class="func-cell" @click="onInvite">
-				<image class="func-ico" src="/static/login/f3.png" mode="aspectFit"></image>
-				<text class="func-label">邀请好友</text>
-				<text class="func-arrow">›</text>
-			</view>
-		</view>
+			<view class="profile-scroll-pad"></view>
+		</scroll-view>
 
 		<view class="wx-tabbar">
 			<view class="wx-tab" @click="goHome">
@@ -216,6 +219,22 @@
 	import { inviteRegisterQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
 	import { openChat } from '@/common/app.uts'
 	import { scanAddFriendOrInvite } from '@/common/deeplink.uts'
+	import { getLocaleLabel, openLanguagePage, t } from '@/common/i18n.uts'
+
+	type ProfileI18n = {
+		balance: string
+		fav: string
+		history: string
+		emptyRec: string
+		analytics: string
+		chat: string
+		share: string
+		service: string
+		center: string
+		myPublish: string
+		follow: string
+		invite: string
+	}
 
 	const session = ref<SessionInfo | null>(loadSession())
 	const platform = ref<PlatformSession | null>(loadPlatformSession())
@@ -223,6 +242,21 @@
 	const vipLabel = ref<string>('普通用户')
 	const vipPeriod = ref<string>('暂无有效订阅')
 	const teamName = ref<string>('')
+	const langLabel = ref<string>(getLocaleLabel())
+	const i18n = ref<ProfileI18n>({
+		balance: t('profile.balance'),
+		fav: t('profile.fav'),
+		history: t('profile.history'),
+		emptyRec: t('profile.emptyRec'),
+		analytics: t('profile.analytics'),
+		chat: t('profile.chat'),
+		share: t('profile.share'),
+		service: t('profile.service'),
+		center: t('profile.center'),
+		myPublish: t('profile.myPublish'),
+		follow: t('profile.follow'),
+		invite: t('profile.invite')
+	} as ProfileI18n)
 	const renewBtnText = computed((): string => {
 		const label = vipLabel.value
 		const period = vipPeriod.value
@@ -370,6 +404,21 @@
 	onShow(() => {
 		session.value = loadSession()
 		platform.value = loadPlatformSession()
+		langLabel.value = getLocaleLabel()
+		i18n.value = {
+			balance: t('profile.balance'),
+			fav: t('profile.fav'),
+			history: t('profile.history'),
+			emptyRec: t('profile.emptyRec'),
+			analytics: t('profile.analytics'),
+			chat: t('profile.chat'),
+			share: t('profile.share'),
+			service: t('profile.service'),
+			center: t('profile.center'),
+			myPublish: t('profile.myPublish'),
+			follow: t('profile.follow'),
+			invite: t('profile.invite')
+		} as ProfileI18n
 		loadUsdtBalance()
 	})
 
@@ -380,6 +429,10 @@
 
 	function onSoon() {
 		uni.showToast({ title: '即将开放', icon: 'none' })
+	}
+
+	function onLang(): void {
+		openLanguagePage()
 	}
 
 	function hasPlanDiscount(item: RolePlan): boolean {
@@ -694,6 +747,13 @@
 		flex-direction: column;
 		position: relative;
 	}
+	.profile-scroll {
+		flex: 1;
+		height: 0;
+	}
+	.profile-scroll-pad {
+		height: 24rpx;
+	}
 	.top-row {
 		flex-direction: row;
 		align-items: center;
@@ -911,7 +971,7 @@
 		border-top-width: 1rpx;
 		border-top-color: #eaeaea;
 		padding-bottom: 24rpx;
-		margin-top: auto;
+		flex-shrink: 0;
 	}
 	.wx-tab {
 		flex: 1;

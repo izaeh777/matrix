@@ -11,7 +11,7 @@
 					<text class="header-ico" @click="onJoin">＋</text>
 					<view class="lang-pill" @click="onLang">
 						<image class="lang-globe" src="/static/login/china.png" mode="aspectFit"></image>
-						<text class="lang-text">简体中文</text>
+						<text class="lang-text">{{ langLabel }}</text>
 						<text class="lang-caret">▾</text>
 					</view>
 				</view>
@@ -216,9 +216,11 @@
 	import { loadSession, SessionInfo, loadRoomList, saveRoomList, loadRoomChat } from '@/common/storage.uts'
 	import { openChat, bootstrapMatrix, openGroupPick, hasPlatformLogin, openMatrixLogin } from '@/common/app.uts'
 	import { getCallManager, CallSnapshot, h5TapRunAnswer, unlockH5CallMedia } from '@/common/call.uts'
+	import { getLocaleLabel, openLanguagePage } from '@/common/i18n.uts'
 
 	const rooms = ref<Array<MatrixRoom>>([])
 	const invites = ref<Array<InvitedRoomInfo>>([])
+	const langLabel = ref<string>(getLocaleLabel())
 	const loading = ref<boolean>(false)
 	const needMatrixLogin = ref<boolean>(false)
 	const incomingCall = ref<boolean>(false)
@@ -308,7 +310,7 @@
 	}
 
 	function onLang(): void {
-		uni.showToast({ title: '当前仅支持简体中文', icon: 'none' })
+		openLanguagePage()
 	}
 
 	function inviteTitle(inv: InvitedRoomInfo): string {
@@ -862,6 +864,10 @@
 
 	onMounted(() => {
 		setupRooms()
+	})
+
+	onShow(() => {
+		langLabel.value = getLocaleLabel()
 	})
 
 	async function onAcceptInvite(roomId: string) {

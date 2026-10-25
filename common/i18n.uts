@@ -1,0 +1,485 @@
+/**
+ * 轻量多语言（适配 uni-app x Android VDOM）
+ * 七种：en / zh-Hans / zh-Hant / ja / ko / ru / vi
+ */
+const KEY_LOCALE = 'app_locale_v1'
+const KEY_LOCALE_VER = 'app_locale_ver_v1'
+const DEFAULT_LOCALE = 'zh-Hans'
+
+export type LocaleOption = {
+	code: string
+	label: string
+}
+
+export const LOCALE_OPTIONS: Array<LocaleOption> = [
+	{ code: 'en', label: 'English' } as LocaleOption,
+	{ code: 'zh-Hans', label: '简体中文' } as LocaleOption,
+	{ code: 'zh-Hant', label: '繁體中文' } as LocaleOption,
+	{ code: 'ja', label: '日本語' } as LocaleOption,
+	{ code: 'ko', label: '한국어' } as LocaleOption,
+	{ code: 'ru', label: 'Pусский' } as LocaleOption,
+	{ code: 'vi', label: 'Tiếng Việt' } as LocaleOption
+]
+
+function fillPack(m: Map<string, string>, pairs: Array<string>): void {
+	for (let i = 0; i + 1 < pairs.length; i += 2) {
+		m.set(pairs[i], pairs[i + 1])
+	}
+}
+
+const MSG_ZH_HANS = new Map<string, string>()
+const MSG_ZH_HANT = new Map<string, string>()
+const MSG_EN = new Map<string, string>()
+const MSG_JA = new Map<string, string>()
+const MSG_KO = new Map<string, string>()
+const MSG_RU = new Map<string, string>()
+const MSG_VI = new Map<string, string>()
+
+fillPack(MSG_ZH_HANS, [
+	'lang.title', '语言',
+	'common.confirm', '确定',
+	'common.cancel', '取消',
+	'common.soon', '即将开放',
+	'common.more', '更多 ›',
+	'common.loading', '加载中…',
+	'common.empty', '暂无数据',
+	'home.banner1', '发现优质项目',
+	'home.banner2', '链接无限商机',
+	'home.bannerSub1', 'Web3 项目提示·交流·合作·共赢',
+	'home.bannerSub2', '平台',
+	'home.publish', '发布项目',
+	'home.search', '搜索项目',
+	'home.latest', '最新动态',
+	'home.hot', '热门项目',
+	'home.viewMore', '查看更多 ›',
+	'home.emptyNews', '暂无动态',
+	'home.emptyProject', '暂无项目',
+	'home.friends', '友情链接',
+	'notify.title1a', '最',
+	'notify.title1b', '新',
+	'notify.title2a', '资',
+	'notify.title2b', '讯',
+	'notify.empty', '暂无资讯',
+	'notify.loading', '加载中…',
+	'notify.likes', '点赞',
+	'profile.balance', 'USDT 余额',
+	'profile.fav', '收藏夹',
+	'profile.history', '浏览历史',
+	'profile.emptyRec', '暂无记录',
+	'profile.analytics', '项目分析',
+	'profile.chat', '沟通交流',
+	'profile.share', '项目分成',
+	'profile.service', '专属服务',
+	'profile.center', '功能中心',
+	'profile.myPublish', '我的发布',
+	'profile.follow', '我的关注',
+	'profile.invite', '邀请好友',
+	'invite.title', '邀请好友注册',
+	'invite.desc', '分享邀请码，新用户注册时绑定推荐关系',
+	'invite.myCode', '我的邀请码',
+	'invite.scan', '扫码加好友',
+	'invite.searchUser', '搜用户名',
+	'invite.enterUser', '输入用户名加好友',
+	'login.wallet', '钱包登录',
+	'login.mail', '邮箱登录',
+	'login.register', '注册',
+	'login.welcome', '欢迎回来',
+	'login.create', '创建账号'
+])
+fillPack(MSG_ZH_HANT, [
+	'lang.title', '語言',
+	'common.confirm', '確定',
+	'common.cancel', '取消',
+	'common.soon', '即將開放',
+	'common.more', '更多 ›',
+	'common.loading', '載入中…',
+	'common.empty', '暫無資料',
+	'home.banner1', '發現優質項目',
+	'home.banner2', '連結無限商機',
+	'home.bannerSub1', 'Web3 項目提示·交流·合作·共贏',
+	'home.bannerSub2', '平台',
+	'home.publish', '發佈項目',
+	'home.search', '搜尋項目',
+	'home.latest', '最新動態',
+	'home.hot', '熱門項目',
+	'home.viewMore', '查看更多 ›',
+	'home.emptyNews', '暫無動態',
+	'home.emptyProject', '暫無項目',
+	'home.friends', '友情連結',
+	'notify.title1a', '最',
+	'notify.title1b', '新',
+	'notify.title2a', '資',
+	'notify.title2b', '訊',
+	'notify.empty', '暫無資訊',
+	'notify.loading', '載入中…',
+	'notify.likes', '點讚',
+	'profile.balance', 'USDT 餘額',
+	'profile.fav', '收藏夾',
+	'profile.history', '瀏覽歷史',
+	'profile.emptyRec', '暫無記錄',
+	'profile.analytics', '項目分析',
+	'profile.chat', '溝通交流',
+	'profile.share', '項目分成',
+	'profile.service', '專屬服務',
+	'profile.center', '功能中心',
+	'profile.myPublish', '我的發佈',
+	'profile.follow', '我的關注',
+	'profile.invite', '邀請好友',
+	'invite.title', '邀請好友註冊',
+	'invite.desc', '分享邀請碼，新用戶註冊時綁定推薦關係',
+	'invite.myCode', '我的邀請碼',
+	'invite.scan', '掃碼加好友',
+	'invite.searchUser', '搜用戶名',
+	'invite.enterUser', '輸入用戶名加好友',
+	'login.wallet', '錢包登入',
+	'login.mail', '郵箱登入',
+	'login.register', '註冊',
+	'login.welcome', '歡迎回來',
+	'login.create', '建立帳號'
+])
+fillPack(MSG_EN, [
+	'lang.title', 'Language',
+	'common.confirm', 'OK',
+	'common.cancel', 'Cancel',
+	'common.soon', 'Coming soon',
+	'common.more', 'More ›',
+	'common.loading', 'Loading…',
+	'common.empty', 'No data',
+	'home.banner1', 'Discover Projects',
+	'home.banner2', 'Unlock Opportunities',
+	'home.bannerSub1', 'Web3 tips · chat · collab · win',
+	'home.bannerSub2', 'Platform',
+	'home.publish', 'Publish',
+	'home.search', 'Search',
+	'home.latest', 'Latest',
+	'home.hot', 'Hot Projects',
+	'home.viewMore', 'See more ›',
+	'home.emptyNews', 'No updates',
+	'home.emptyProject', 'No projects',
+	'home.friends', 'Links',
+	'notify.title1a', 'News',
+	'notify.title1b', '',
+	'notify.title2a', '&',
+	'notify.title2b', 'Feed',
+	'notify.empty', 'No news',
+	'notify.loading', 'Loading…',
+	'notify.likes', ' likes',
+	'profile.balance', 'USDT Balance',
+	'profile.fav', 'Favorites',
+	'profile.history', 'History',
+	'profile.emptyRec', 'No records',
+	'profile.analytics', 'Analytics',
+	'profile.chat', 'Chat',
+	'profile.share', 'Revenue',
+	'profile.service', 'Service',
+	'profile.center', 'Features',
+	'profile.myPublish', 'My posts',
+	'profile.follow', 'Following',
+	'profile.invite', 'Invite',
+	'invite.title', 'Invite friends',
+	'invite.desc', 'Share your invite code for new users',
+	'invite.myCode', 'My invite code',
+	'invite.scan', 'Scan to add',
+	'invite.searchUser', 'Search user',
+	'invite.enterUser', 'Enter username',
+	'login.wallet', 'Wallet login',
+	'login.mail', 'Email login',
+	'login.register', 'Sign up',
+	'login.welcome', 'Welcome back',
+	'login.create', 'Create account'
+])
+fillPack(MSG_JA, [
+	'lang.title', '言語',
+	'common.confirm', 'OK',
+	'common.cancel', 'キャンセル',
+	'common.soon', '近日公開',
+	'common.more', 'もっと ›',
+	'common.loading', '読み込み中…',
+	'common.empty', 'データなし',
+	'home.banner1', '優良プロジェクト',
+	'home.banner2', '無限の機会',
+	'home.bannerSub1', 'Web3の交流・協力',
+	'home.bannerSub2', 'プラットフォーム',
+	'home.publish', '公開',
+	'home.search', '検索',
+	'home.latest', '最新',
+	'home.hot', '人気',
+	'home.viewMore', 'もっと見る ›',
+	'home.emptyNews', '更新なし',
+	'home.emptyProject', 'プロジェクトなし',
+	'home.friends', 'リンク',
+	'notify.title1a', '最',
+	'notify.title1b', '新',
+	'notify.title2a', '情',
+	'notify.title2b', '報',
+	'notify.empty', 'ニュースなし',
+	'notify.loading', '読み込み中…',
+	'notify.likes', 'いいね',
+	'profile.balance', 'USDT残高',
+	'profile.fav', 'お気に入り',
+	'profile.history', '履歴',
+	'profile.emptyRec', '記録なし',
+	'profile.analytics', '分析',
+	'profile.chat', '交流',
+	'profile.share', '分配',
+	'profile.service', 'サービス',
+	'profile.center', '機能',
+	'profile.myPublish', '投稿',
+	'profile.follow', 'フォロー',
+	'profile.invite', '招待',
+	'invite.title', '友達を招待',
+	'invite.desc', '招待コードを共有',
+	'invite.myCode', '招待コード',
+	'invite.scan', 'スキャン追加',
+	'invite.searchUser', 'ユーザー検索',
+	'invite.enterUser', 'ユーザー名入力',
+	'login.wallet', 'ウォレット',
+	'login.mail', 'メール',
+	'login.register', '登録',
+	'login.welcome', 'おかえり',
+	'login.create', 'アカウント作成'
+])
+fillPack(MSG_KO, [
+	'lang.title', '언어',
+	'common.confirm', '확인',
+	'common.cancel', '취소',
+	'common.soon', '준비 중',
+	'common.more', '더보기 ›',
+	'common.loading', '로딩…',
+	'common.empty', '데이터 없음',
+	'home.banner1', '우수 프로젝트',
+	'home.banner2', '무한 기회',
+	'home.bannerSub1', 'Web3 교류·협력',
+	'home.bannerSub2', '플랫폼',
+	'home.publish', '게시',
+	'home.search', '검색',
+	'home.latest', '최신',
+	'home.hot', '인기',
+	'home.viewMore', '더보기 ›',
+	'home.emptyNews', '소식 없음',
+	'home.emptyProject', '프로젝트 없음',
+	'home.friends', '링크',
+	'notify.title1a', '최',
+	'notify.title1b', '신',
+	'notify.title2a', '뉴',
+	'notify.title2b', '스',
+	'notify.empty', '뉴스 없음',
+	'notify.loading', '로딩…',
+	'notify.likes', '좋아요',
+	'profile.balance', 'USDT 잔액',
+	'profile.fav', '즐겨찾기',
+	'profile.history', '기록',
+	'profile.emptyRec', '기록 없음',
+	'profile.analytics', '분석',
+	'profile.chat', '소통',
+	'profile.share', '수익',
+	'profile.service', '서비스',
+	'profile.center', '기능',
+	'profile.myPublish', '내 게시',
+	'profile.follow', '팔로우',
+	'profile.invite', '초대',
+	'invite.title', '친구 초대',
+	'invite.desc', '초대 코드 공유',
+	'invite.myCode', '내 초대 코드',
+	'invite.scan', '스캔 추가',
+	'invite.searchUser', '사용자 검색',
+	'invite.enterUser', '사용자명 입력',
+	'login.wallet', '지갑 로그인',
+	'login.mail', '이메일 로그인',
+	'login.register', '가입',
+	'login.welcome', '환영합니다',
+	'login.create', '계정 만들기'
+])
+fillPack(MSG_RU, [
+	'lang.title', 'Язык',
+	'common.confirm', 'OK',
+	'common.cancel', 'Отмена',
+	'common.soon', 'Скоро',
+	'common.more', 'Ещё ›',
+	'common.loading', 'Загрузка…',
+	'common.empty', 'Нет данных',
+	'home.banner1', 'Проекты',
+	'home.banner2', 'Возможности',
+	'home.bannerSub1', 'Web3 общение и сотрудничество',
+	'home.bannerSub2', 'Платформа',
+	'home.publish', 'Опубликовать',
+	'home.search', 'Поиск',
+	'home.latest', 'Новости',
+	'home.hot', 'Популярное',
+	'home.viewMore', 'Ещё ›',
+	'home.emptyNews', 'Нет новостей',
+	'home.emptyProject', 'Нет проектов',
+	'home.friends', 'Ссылки',
+	'notify.title1a', 'Но',
+	'notify.title1b', 'вости',
+	'notify.title2a', 'и',
+	'notify.title2b', 'лента',
+	'notify.empty', 'Нет новостей',
+	'notify.loading', 'Загрузка…',
+	'notify.likes', ' лайков',
+	'profile.balance', 'Баланс USDT',
+	'profile.fav', 'Избранное',
+	'profile.history', 'История',
+	'profile.emptyRec', 'Пусто',
+	'profile.analytics', 'Аналитика',
+	'profile.chat', 'Чат',
+	'profile.share', 'Доля',
+	'profile.service', 'Сервис',
+	'profile.center', 'Функции',
+	'profile.myPublish', 'Мои посты',
+	'profile.follow', 'Подписки',
+	'profile.invite', 'Пригласить',
+	'invite.title', 'Пригласить друзей',
+	'invite.desc', 'Поделитесь кодом приглашения',
+	'invite.myCode', 'Мой код',
+	'invite.scan', 'Сканировать',
+	'invite.searchUser', 'Найти',
+	'invite.enterUser', 'Имя пользователя',
+	'login.wallet', 'Кошелёк',
+	'login.mail', 'Email',
+	'login.register', 'Регистрация',
+	'login.welcome', 'С возвращением',
+	'login.create', 'Создать аккаунт'
+])
+fillPack(MSG_VI, [
+	'lang.title', 'Ngôn ngữ',
+	'common.confirm', 'OK',
+	'common.cancel', 'Hủy',
+	'common.soon', 'Sắp ra mắt',
+	'common.more', 'Thêm ›',
+	'common.loading', 'Đang tải…',
+	'common.empty', 'Không có dữ liệu',
+	'home.banner1', 'Khám phá dự án',
+	'home.banner2', 'Cơ hội không giới hạn',
+	'home.bannerSub1', 'Web3 giao lưu · hợp tác',
+	'home.bannerSub2', 'Nền tảng',
+	'home.publish', 'Đăng dự án',
+	'home.search', 'Tìm kiếm',
+	'home.latest', 'Mới nhất',
+	'home.hot', 'Nổi bật',
+	'home.viewMore', 'Xem thêm ›',
+	'home.emptyNews', 'Chưa có tin',
+	'home.emptyProject', 'Chưa có dự án',
+	'home.friends', 'Liên kết',
+	'notify.title1a', 'Tin',
+	'notify.title1b', ' mới',
+	'notify.title2a', 'thông',
+	'notify.title2b', 'tin',
+	'notify.empty', 'Chưa có tin',
+	'notify.loading', 'Đang tải…',
+	'notify.likes', ' thích',
+	'profile.balance', 'Số dư USDT',
+	'profile.fav', 'Yêu thích',
+	'profile.history', 'Lịch sử',
+	'profile.emptyRec', 'Trống',
+	'profile.analytics', 'Phân tích',
+	'profile.chat', 'Trò chuyện',
+	'profile.share', 'Doanh thu',
+	'profile.service', 'Dịch vụ',
+	'profile.center', 'Tính năng',
+	'profile.myPublish', 'Bài đăng',
+	'profile.follow', 'Theo dõi',
+	'profile.invite', 'Mời bạn',
+	'invite.title', 'Mời bạn bè',
+	'invite.desc', 'Chia sẻ mã mời',
+	'invite.myCode', 'Mã mời của tôi',
+	'invite.scan', 'Quét thêm bạn',
+	'invite.searchUser', 'Tìm user',
+	'invite.enterUser', 'Nhập tên',
+	'login.wallet', 'Đăng nhập ví',
+	'login.mail', 'Đăng nhập email',
+	'login.register', 'Đăng ký',
+	'login.welcome', 'Chào mừng',
+	'login.create', 'Tạo tài khoản'
+])
+
+function packOf(locale: string): Map<string, string> {
+	if (locale == 'zh-Hant') return MSG_ZH_HANT
+	if (locale == 'en') return MSG_EN
+	if (locale == 'ja') return MSG_JA
+	if (locale == 'ko') return MSG_KO
+	if (locale == 'ru') return MSG_RU
+	if (locale == 'vi') return MSG_VI
+	return MSG_ZH_HANS
+}
+
+function normalizeLocale(code: string): string {
+	const c = code.trim()
+	if (c.length == 0) return DEFAULT_LOCALE
+	for (let i = 0; i < LOCALE_OPTIONS.length; i++) {
+		if (LOCALE_OPTIONS[i].code == c) return c
+	}
+	const lower = c.toLowerCase()
+	if (lower.indexOf('zh') == 0) {
+		if (lower.indexOf('hant') >= 0 || lower.indexOf('tw') >= 0 || lower.indexOf('hk') >= 0) return 'zh-Hant'
+		return 'zh-Hans'
+	}
+	if (lower.indexOf('en') == 0) return 'en'
+	if (lower.indexOf('ja') == 0) return 'ja'
+	if (lower.indexOf('ko') == 0) return 'ko'
+	if (lower.indexOf('ru') == 0) return 'ru'
+	if (lower.indexOf('vi') == 0) return 'vi'
+	return DEFAULT_LOCALE
+}
+
+export function getLocale(): string {
+	try {
+		const raw = uni.getStorageSync(KEY_LOCALE)
+		if (raw != null) {
+			const s = ('' + raw).trim()
+			if (s.length > 0) return normalizeLocale(s)
+		}
+	} catch (e) {}
+	try {
+		const info = uni.getSystemInfoSync()
+		const sys = '' + info.language
+		if (sys.length > 0) return normalizeLocale(sys)
+	} catch (e2) {}
+	return DEFAULT_LOCALE
+}
+
+export function getLocaleVersion(): number {
+	try {
+		const raw = uni.getStorageSync(KEY_LOCALE_VER)
+		if (raw == null) return 0
+		const n = parseInt('' + raw)
+		if (n == n) return n
+	} catch (e) {}
+	return 0
+}
+
+export function setLocale(code: string): void {
+	const loc = normalizeLocale(code)
+	try { uni.setStorageSync(KEY_LOCALE, loc) } catch (e) {}
+	try { uni.setStorageSync(KEY_LOCALE_VER, '' + Date.now()) } catch (e2) {}
+}
+
+export function getLocaleLabel(code: string = ''): string {
+	const loc = code.length > 0 ? normalizeLocale(code) : getLocale()
+	for (let i = 0; i < LOCALE_OPTIONS.length; i++) {
+		if (LOCALE_OPTIONS[i].code == loc) return LOCALE_OPTIONS[i].label
+	}
+	return '简体中文'
+}
+
+export function t(key: string): string {
+	const loc = getLocale()
+	const pack = packOf(loc)
+	const hit = pack.get(key)
+	if (hit != null) return hit
+	if (loc != DEFAULT_LOCALE) {
+		const hit2 = MSG_ZH_HANS.get(key)
+		if (hit2 != null) return hit2
+	}
+	return key
+}
+
+export function openLanguagePage(): void {
+	uni.navigateTo({ url: '/pages/settings/language' })
+}
+
+/** 选语言后回到首页并重建界面，确保文案生效 */
+export function applyLocaleAndReload(code: string): void {
+	setLocale(code)
+	uni.reLaunch({ url: '/pages/home/home' })
+}

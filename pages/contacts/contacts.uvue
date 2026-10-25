@@ -22,7 +22,7 @@
 		</view>
 
 		<!-- 搜索结果 -->
-		<view v-if="searchText.length > 0" class="result-list">
+		<scroll-view v-if="searchText.length > 0" class="result-list" scroll-y="true">
 			<view v-if="searching" class="loading-row">
 				<text class="loading-text">搜索中…</text>
 			</view>
@@ -62,7 +62,8 @@
 				</view>
 				<text class="chat-icon">💬</text>
 			</view>
-		</view>
+			<view class="result-list-pad"></view>
+		</scroll-view>
 
 		<!-- 默认空白页 -->
 		<view v-else class="empty-page">
@@ -457,6 +458,10 @@
 
 	.result-list {
 		flex: 1;
+		height: 0;
+	}
+	.result-list-pad {
+		height: 40rpx;
 	}
 
 	.loading-row, .empty-row {

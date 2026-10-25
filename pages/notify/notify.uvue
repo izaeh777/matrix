@@ -8,19 +8,19 @@
 				<view class="spacer"></view>
 				<view class="lang-pill" @click="onLang">
 					<image class="lang-globe" src="/static/login/china.png" mode="aspectFit"></image>
-					<text class="lang-text">简体中文</text>
+					<text class="lang-text">{{ langLabel }}</text>
 					<text class="lang-caret">▾</text>
 				</view>
 			</view>
 			<view class="title-block">
 				<view class="title-line1">
-					<text class="title-char">最</text>
-					<text class="title-char title-char-blue">新</text>
+					<text class="title-char">{{ i18n.t1a }}</text>
+					<text class="title-char title-char-blue">{{ i18n.t1b }}</text>
 				</view>
 				<view class="title-line2">
 					<view class="title-indent">
-						<text class="title-char">资</text>
-						<text class="title-char">讯</text>
+						<text class="title-char">{{ i18n.t2a }}</text>
+						<text class="title-char">{{ i18n.t2b }}</text>
 					</view>
 					<view class="date-wrap">
 						<text class="date-num">{{ dayText }}</text>
@@ -31,38 +31,40 @@
 			</view>
 		</view>
 
-		<scroll-view class="list" scroll-y>
-			<view v-if="loading && items.length == 0" class="empty">
-				<text class="empty-text">加载中…</text>
-			</view>
-			<view v-else-if="items.length == 0" class="empty">
-				<text class="empty-text">暂无资讯</text>
-			</view>
-			<view
-				v-for="(item, idx) in items"
-				:key="item.id"
-				class="news-row"
-				@click="onOpen(item)"
-			>
-				<view class="news-left">
-					<text class="news-title">{{ item.title }}</text>
-					<view class="news-meta">
-						<text class="news-tag">{{ tagOf(idx) }}</text>
-						<text class="news-time">{{ timeOf(item) }}</text>
+		<scroll-view class="list" direction="vertical" :show-scrollbar="false">
+			<view class="list-inner">
+				<view v-if="loading && items.length == 0" class="empty">
+					<text class="empty-text">{{ i18n.loading }}</text>
+				</view>
+				<view v-else-if="items.length == 0" class="empty">
+					<text class="empty-text">{{ i18n.empty }}</text>
+				</view>
+				<view
+					v-for="(item, idx) in items"
+					:key="item.id"
+					class="news-row"
+					@click="onOpen(item)"
+				>
+					<view class="news-left">
+						<text class="news-title">{{ item.title }}</text>
+						<view class="news-meta">
+							<text class="news-tag">{{ tagOf(idx) }}</text>
+							<text class="news-time">{{ timeOf(item) }}</text>
+						</view>
+					</view>
+					<view class="news-right">
+						<image
+							v-if="coverOf(item).length > 0"
+							class="news-thumb"
+							:src="coverOf(item)"
+							mode="aspectFill"
+						></image>
+						<view v-else class="news-thumb news-thumb-fallback"></view>
+						<text class="news-likes">{{ likeOf(item) }}{{ i18n.likes }}</text>
 					</view>
 				</view>
-				<view class="news-right">
-					<image
-						v-if="coverOf(item).length > 0"
-						class="news-thumb"
-						:src="coverOf(item)"
-						mode="aspectFill"
-					></image>
-					<view v-else class="news-thumb news-thumb-fallback"></view>
-					<text class="news-likes">{{ likeOf(item) }}点赞</text>
-				</view>
+				<view class="scroll-pad"></view>
 			</view>
-			<view class="scroll-pad"></view>
 		</scroll-view>
 
 		<view class="wx-tabbar">
@@ -95,9 +97,30 @@
 		openArchiveDetail,
 		CmsArchiveItem
 	} from '@/common/cms.uts'
+	import { getLocaleLabel, openLanguagePage, t } from '@/common/i18n.uts'
+
+	type NotifyI18n = {
+		t1a: string
+		t1b: string
+		t2a: string
+		t2b: string
+		loading: string
+		empty: string
+		likes: string
+	}
 
 	const loading = ref<boolean>(false)
 	const items = ref<Array<CmsArchiveItem>>([])
+	const langLabel = ref<string>(getLocaleLabel())
+	const i18n = ref<NotifyI18n>({
+		t1a: t('notify.title1a'),
+		t1b: t('notify.title1b'),
+		t2a: t('notify.title2a'),
+		t2b: t('notify.title2b'),
+		loading: t('notify.loading'),
+		empty: t('notify.empty'),
+		likes: t('notify.likes')
+	} as NotifyI18n)
 
 	const weekNames: Array<string> = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
 
@@ -135,8 +158,21 @@
 	}
 
 	function onLang(): void {
-		uni.showToast({ title: '当前仅支持简体中文', icon: 'none' })
+		openLanguagePage()
 	}
+
+	onShow(() => {
+		langLabel.value = getLocaleLabel()
+		i18n.value = {
+			t1a: t('notify.title1a'),
+			t1b: t('notify.title1b'),
+			t2a: t('notify.title2a'),
+			t2b: t('notify.title2b'),
+			loading: t('notify.loading'),
+			empty: t('notify.empty'),
+			likes: t('notify.likes')
+		} as NotifyI18n
+	})
 
 	function goHome(): void {
 		uni.redirectTo({ url: '/pages/home/home' })
@@ -182,12 +218,15 @@
 <style>
 	.notify-page {
 		flex: 1;
+		height: 100%;
 		background-color: #f3f7fc;
 		flex-direction: column;
+		overflow: hidden;
 	}
 	.header {
 		padding: 48rpx 32rpx 28rpx;
 		background-color: #f3f7fc;
+		flex-shrink: 0;
 	}
 	.header-top {
 		flex-direction: row;
@@ -264,10 +303,16 @@
 	.list {
 		flex: 1;
 		height: 0;
+		width: 100%;
 		background-color: #ffffff;
 		border-radius: 32rpx 32rpx 0 0;
 		margin-top: -8rpx;
-		padding: 12rpx 0 0;
+	}
+	.list-inner {
+		flex-direction: column;
+		width: 100%;
+		padding-top: 12rpx;
+		padding-bottom: 16rpx;
 	}
 	.news-row {
 		flex-direction: row;
@@ -327,13 +372,14 @@
 		font-size: 26rpx;
 		color: #9aa3af;
 	}
-	.scroll-pad { height: 24rpx; }
+	.scroll-pad { height: 48rpx; }
 	.wx-tabbar {
 		flex-direction: row;
 		background-color: #ffffff;
 		border-top-width: 1rpx;
 		border-top-color: #eaeaea;
 		padding-bottom: 24rpx;
+		flex-shrink: 0;
 	}
 	.wx-tab {
 		flex: 1;

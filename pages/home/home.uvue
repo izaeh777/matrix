@@ -17,19 +17,20 @@
 			</view>
 		</view>
 
-		<scroll-view class="home-scroll" scroll-y>
+		<scroll-view class="home-scroll" direction="vertical" :show-scrollbar="false">
+			<view class="home-scroll-inner">
 			<view class="banner">
 				<view class="banner-left">
-					<text class="banner-title">发现优质项目</text>
-					<text class="banner-title banner-title-2">链接无限商机</text>
-					<text class="banner-sub">Web3 项目提示·交流·合作·共赢</text>
-					<text class="banner-sub banner-sub-2">平台</text>
+					<text class="banner-title">{{ i18n.banner1 }}</text>
+					<text class="banner-title banner-title-2">{{ i18n.banner2 }}</text>
+					<text class="banner-sub">{{ i18n.bannerSub1 }}</text>
+					<text class="banner-sub banner-sub-2">{{ i18n.bannerSub2 }}</text>
 					<view class="banner-actions">
 						<view v-if="canPublish" class="btn-solid" @click="goPublish">
-							<text class="btn-solid-text">发布项目</text>
+							<text class="btn-solid-text">{{ i18n.publish }}</text>
 						</view>
 						<view class="btn-outline" @click="goSearch">
-							<text class="btn-outline-text">搜索项目</text>
+							<text class="btn-outline-text">{{ i18n.search }}</text>
 						</view>
 					</view>
 				</view>
@@ -40,12 +41,12 @@
 
 			<view class="section">
 				<view class="section-head">
-					<text class="section-title">最新动态</text>
-					<text class="section-more" @click="goDiscover">更多 ›</text>
+					<text class="section-title">{{ i18n.latest }}</text>
+					<text class="section-more" @click="goDiscover">{{ i18n.more }}</text>
 				</view>
 				<view class="timeline-card">
 					<view v-if="latest.length == 0" class="empty-tip">
-						<text class="empty-tip-text">暂无动态</text>
+						<text class="empty-tip-text">{{ i18n.emptyNews }}</text>
 					</view>
 					<view
 						v-for="(item, idx) in latest"
@@ -68,11 +69,11 @@
 
 			<view class="section">
 				<view class="section-head">
-					<text class="section-title">热门项目</text>
-					<text class="section-more" @click="goDiscover">查看更多 ›</text>
+					<text class="section-title">{{ i18n.hot }}</text>
+					<text class="section-more" @click="goDiscover">{{ i18n.viewMore }}</text>
 				</view>
 				<view v-if="hot.length == 0" class="empty-tip">
-					<text class="empty-tip-text">暂无项目</text>
+					<text class="empty-tip-text">{{ i18n.emptyProject }}</text>
 				</view>
 				<view
 					v-for="item in hot"
@@ -103,7 +104,7 @@
 
 			<view v-if="friendLinks.length > 0" class="section">
 				<view class="section-head">
-					<text class="section-title">友情链接</text>
+					<text class="section-title">{{ i18n.friends }}</text>
 				</view>
 				<view class="friend-card">
 					<view class="friend-grid">
@@ -129,6 +130,7 @@
 			</view>
 
 			<view class="scroll-pad"></view>
+			</view>
 		</scroll-view>
 
 		<view class="wx-tabbar">
@@ -171,6 +173,23 @@
 		CmsFriendLink
 	} from '@/common/cms.uts'
 	import { tryConsumePendingFriend } from '@/common/deeplink.uts'
+	import { t } from '@/common/i18n.uts'
+
+	type HomeI18n = {
+		banner1: string
+		banner2: string
+		bannerSub1: string
+		bannerSub2: string
+		publish: string
+		search: string
+		latest: string
+		more: string
+		emptyNews: string
+		hot: string
+		viewMore: string
+		emptyProject: string
+		friends: string
+	}
 
 	const session = loadSession()
 	const platform = loadPlatformSession()
@@ -179,6 +198,21 @@
 	const hot = ref<Array<CmsArchiveItem>>([])
 	const friendLinks = ref<Array<CmsFriendLink>>([])
 	const canPublish = ref<boolean>(canPublishProject(loadCachedVipLabel()))
+	const i18n = ref<HomeI18n>({
+		banner1: t('home.banner1'),
+		banner2: t('home.banner2'),
+		bannerSub1: t('home.bannerSub1'),
+		bannerSub2: t('home.bannerSub2'),
+		publish: t('home.publish'),
+		search: t('home.search'),
+		latest: t('home.latest'),
+		more: t('common.more'),
+		emptyNews: t('home.emptyNews'),
+		hot: t('home.hot'),
+		viewMore: t('home.viewMore'),
+		emptyProject: t('home.emptyProject'),
+		friends: t('home.friends')
+	} as HomeI18n)
 
 	const shortName = computed((): string => {
 		let name = ''
@@ -324,6 +358,21 @@
 	})
 
 	onShow(() => {
+		i18n.value = {
+			banner1: t('home.banner1'),
+			banner2: t('home.banner2'),
+			bannerSub1: t('home.bannerSub1'),
+			bannerSub2: t('home.bannerSub2'),
+			publish: t('home.publish'),
+			search: t('home.search'),
+			latest: t('home.latest'),
+			more: t('common.more'),
+			emptyNews: t('home.emptyNews'),
+			hot: t('home.hot'),
+			viewMore: t('home.viewMore'),
+			emptyProject: t('home.emptyProject'),
+			friends: t('home.friends')
+		} as HomeI18n
 		tryConsumePendingFriend()
 		refreshPublishGate()
 	})
@@ -332,14 +381,17 @@
 <style>
 	.home-page {
 		flex: 1;
+		height: 100%;
 		background-color: #ffffff;
 		flex-direction: column;
+		overflow: hidden;
 	}
 	.home-top {
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
 		padding: 60rpx 28rpx 16rpx;
+		flex-shrink: 0;
 	}
 	.brand-logo {
 		width: 220rpx;
@@ -391,6 +443,12 @@
 	.home-scroll {
 		flex: 1;
 		height: 0;
+		width: 100%;
+	}
+	.home-scroll-inner {
+		flex-direction: column;
+		width: 100%;
+		padding-bottom: 16rpx;
 	}
 	.banner {
 		margin: 8rpx 28rpx 32rpx;
@@ -666,7 +724,7 @@
 		color: #9aa3af;
 	}
 	.scroll-pad {
-		height: 24rpx;
+		height: 48rpx;
 	}
 	.wx-tabbar {
 		flex-direction: row;
@@ -674,6 +732,7 @@
 		border-top-width: 1rpx;
 		border-top-color: #eaeaea;
 		padding-bottom: 24rpx;
+		flex-shrink: 0;
 	}
 	.wx-tab {
 		flex: 1;

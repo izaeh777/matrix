@@ -153,6 +153,14 @@
 			}
 		},
 		{
+			"path": "pages/settings/language",
+			"style": {
+				"navigationBarTitleText": "语言",
+				"navigationStyle": "custom",
+				"backgroundColor": "#FFFFFF"
+			}
+		},
+		{
 			"path": "pages/project/publish",
 			"style": {
 				"navigationBarTitleText": "发布项目",

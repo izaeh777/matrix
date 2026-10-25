@@ -423,6 +423,7 @@
 	}
 	.group-scroll {
 		flex: 1;
+		height: 0;
 	}
 	.card {
 		background-color: #ffffff;

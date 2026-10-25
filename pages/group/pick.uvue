@@ -368,6 +368,7 @@
 	}
 	.pick-list {
 		flex: 1;
+		height: 0;
 		background-color: #ffffff;
 	}
 	.hint-row {

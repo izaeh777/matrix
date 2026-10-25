@@ -9,7 +9,7 @@
 				<image class="brand-logo" src="/static/login/logo.png" mode="aspectFit"></image>
 				<view class="lang" @click="onLang">
 					<image class="lang-icon" src="/static/login/china.png" mode="aspectFit"></image>
-					<text class="lang-text">简体中文</text>
+					<text class="lang-text">{{ langLabel }}</text>
 					<text class="lang-caret">▾</text>
 				</view>
 			</view>
@@ -47,7 +47,11 @@
 </template>
 
 <script setup lang="uts">
+	import { ref } from 'vue'
 	import { savePendingInviteCode } from '@/common/platform.uts'
+	import { getLocaleLabel, openLanguagePage } from '@/common/i18n.uts'
+
+	const langLabel = ref<string>(getLocaleLabel())
 
 	onLoad((opts: UTSJSONObject) => {
 		try {
@@ -75,8 +79,12 @@
 	}
 
 	function onLang() {
-		uni.showToast({ title: '当前仅支持简体中文', icon: 'none' })
+		openLanguagePage()
 	}
+
+	onShow(() => {
+		langLabel.value = getLocaleLabel()
+	})
 
 	function onOther(name: string) {
 		if (name == 'tp') {
