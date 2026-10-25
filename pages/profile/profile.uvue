@@ -24,6 +24,9 @@
 					<view class="vip-badge">
 						<text class="vip-text">{{ vipLabel }}</text>
 					</view>
+					<view v-if="teamName.length > 0" class="team-badge">
+						<text class="team-text">{{ teamName }}</text>
+					</view>
 				</view>
 			</view>
 			<text class="user-arrow">›</text>
@@ -194,7 +197,7 @@
 		renewBillingSubscription,
 		billingPayNotify,
 		fetchOrderDetail,
-		PAY_USDT_RECV_FALLBACK,
+		fetchBillingWallet,
 		planPayPrice,
 		planPayPriceText,
 		isPlanDiscountActive,
@@ -209,6 +212,7 @@
 	const usdtBalance = ref<string>('--')
 	const vipLabel = ref<string>('普通用户')
 	const vipPeriod = ref<string>('暂无有效订阅')
+	const teamName = ref<string>('')
 	const renewBtnText = computed((): string => {
 		const label = vipLabel.value
 		const period = vipPeriod.value
@@ -290,7 +294,8 @@
 			usdtBalance.value = me.money.length > 0 ? me.money : '0'
 			if (me.vip_label.length > 0) vipLabel.value = me.vip_label
 			if (me.vip_period.length > 0) vipPeriod.value = me.vip_period
-			console.log('[profile] vip=', me.vip_label, me.vip_period)
+			teamName.value = me.team_name
+			console.log('[profile] vip=', me.vip_label, me.vip_period, 'team=', me.team_name)
 			// 同步昵称到本地 session，资料页立刻刷新
 			const p = loadPlatformSession()
 			if (p != null && me.nickname.length > 0) {
@@ -481,25 +486,30 @@
 			const isRenew = renewBtnText.value == '续费'
 			const order = isRenew ? await renewBillingSubscription(code) : await createBillingOrder(code)
 			let orderNo = order.order_no
-			let payTo = order.pay_address
+			// 收款地址：GET /api/v1/billing/wallet
+			let payTo = ''
+			try {
+				payTo = await fetchBillingWallet()
+			} catch (eWal) {
+				console.warn('[profile] billing/wallet fail', eWal)
+			}
 			// 实付优先用套餐优惠价；下单接口常返回原价 amount，不能直接用来转账
 			let amount = amtTip
 			if (amount.length == 0) amount = order.amount
-			// 补拉详情拿收款地址
-			if (orderNo.length > 0 && payTo.length == 0) {
+			if (orderNo.length > 0) {
 				try {
 					const detail = await fetchOrderDetail(orderNo)
-					if (detail.pay_address.length > 0) payTo = detail.pay_address
 					if (detail.order_no.length > 0) orderNo = detail.order_no
-					// 仅当本地没有优惠价时，才用订单金额
 					if (amount.length == 0 && detail.amount.length > 0) amount = detail.amount
+					// 钱包接口失败时再尝试订单里的地址
+					if (payTo.length == 0 && detail.pay_address.length > 0) payTo = detail.pay_address
 				} catch (eDet) {
 					console.warn('[profile] order detail skip', eDet)
 				}
 			}
-			if (payTo.length == 0) payTo = PAY_USDT_RECV_FALLBACK
+			if (payTo.length == 0 && order.pay_address.length > 0) payTo = order.pay_address
 			if (payTo.length == 0) {
-				throw new Error('未获取到收款地址，请在平台配置或填写 PAY_USDT_RECV_FALLBACK')
+				throw new Error('未获取到收款地址（billing/wallet）')
 			}
 			if (amount.length == 0) throw new Error('未获取到支付金额')
 			if (orderNo.length == 0) throw new Error('下单成功但未返回订单号')
@@ -721,6 +731,17 @@
 		padding: 4rpx 10rpx;
 	}
 	.vip-text {
+		font-size: 20rpx;
+		color: #ffffff;
+		font-weight: 600;
+	}
+	.team-badge {
+		background-color: #0f766e;
+		border-radius: 8rpx;
+		padding: 4rpx 10rpx;
+		margin-left: 10rpx;
+	}
+	.team-text {
 		font-size: 20rpx;
 		color: #ffffff;
 		font-weight: 600;

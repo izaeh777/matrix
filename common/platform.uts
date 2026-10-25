@@ -462,6 +462,8 @@ export type PlatformMe = {
 	vip_label: string
 	/** 有效期文案，如 有效期：2026-09-11 至 2026-10-11 */
 	vip_period: string
+	/** 团队等级名，如 lv_team_name；空则不展示 */
+	team_name: string
 }
 
 /** 订阅信息（users/me、subscription、billing 多端字段兼容） */
@@ -759,6 +761,7 @@ function parsePlatformMe(data: UTSJSONObject): PlatformMe {
 		const direct = pickStrAny(user, ['lv_vip_name', 'lvVipName', 'vip_name', 'level_name'])
 		if (direct.length > 0) vipLabel = direct
 	}
+	const teamName = pickStrAny(user, ['lv_team_name', 'lvTeamName', 'team_name', 'teamName'])
 	const me: PlatformMe = {
 		money: money,
 		nickname: nickname,
@@ -766,7 +769,8 @@ function parsePlatformMe(data: UTSJSONObject): PlatformMe {
 		user_id: userId,
 		avatar: avatar,
 		vip_label: vipLabel,
-		vip_period: formatVipPeriod(sub)
+		vip_period: formatVipPeriod(sub),
+		team_name: teamName
 	}
 	return me
 }
@@ -959,30 +963,56 @@ export type BillingOrder = {
 	msg: string
 }
 
-/**
- * BSC USDT 收款地址兜底。
- * 优先用下单接口返回的 pay_address；若接口无地址，用此配置。
- * 请换成平台真实收款钱包。
- */
-export const PAY_USDT_RECV_FALLBACK = '0x88EA19052CcF40bC92CD56C3Fe8512Eb1957c01B'
-
 function pickPayAddress(data: UTSJSONObject): string {
 	let addr = pickStrAny(data, [
 		'pay_address', 'payAddress', 'usdt_address', 'usdtAddress', 'usdtaddress',
-		'receive_address', 'receiveAddress', 'to_address', 'toAddress', 'wallet_address', 'address'
+		'receive_address', 'receiveAddress', 'to_address', 'toAddress', 'wallet_address', 'walletAddress',
+		'address', 'addr', 'account'
 	])
 	if (addr.length > 0) return addr
-	const nestKeys: Array<string> = ['pay', 'payment', 'pay_info', 'payInfo', 'channel', 'wallet']
+	const nestKeys: Array<string> = ['pay', 'payment', 'pay_info', 'payInfo', 'channel', 'wallet', 'usdt', 'bsc', 'chain']
 	for (let i = 0; i < nestKeys.length; i++) {
 		const nest = pickObj(data, nestKeys[i])
 		if (nest != null) {
 			addr = pickStrAny(nest!, [
-				'pay_address', 'address', 'usdt_address', 'usdtAddress', 'usdtaddress', 'to', 'to_address'
+				'pay_address', 'address', 'usdt_address', 'usdtAddress', 'usdtaddress',
+				'wallet_address', 'walletAddress', 'to', 'to_address', 'addr', 'account'
 			])
 			if (addr.length > 0) return addr
 		}
 	}
 	return ''
+}
+
+/**
+ * 平台收款钱包
+ * GET /api/v1/billing/wallet
+ */
+export async function fetchBillingWallet(): Promise<string> {
+	if (platformToken().length == 0) throw new Error('请先登录平台账号')
+	const root = await httpGet('/api/v1/billing/wallet', true)
+	logJson('[platform] billing/wallet', root)
+	const data = assertOk(root, '获取收款地址失败')
+	let addr = pickPayAddress(data)
+	if (addr.length == 0) {
+		// data 可能直接是字符串
+		const raw = pickStr(root, 'data')
+		if (raw.indexOf('0x') == 0 && raw.length >= 42) addr = raw
+	}
+	if (addr.length == 0) {
+		// data 为数组时取首项
+		const arr = data.getArray('list')
+		if (arr == null) {
+			try {
+				const anyData = data as any
+				// 部分后端 data 即 address 对象已由 pickPayAddress 覆盖
+			} catch (e) {}
+		}
+	}
+	addr = addr.trim()
+	if (addr.length == 0) throw new Error('收款地址为空')
+	console.log('[platform] billing/wallet addr=', addr)
+	return addr
 }
 
 function parseBillingOrder(data: UTSJSONObject, root: UTSJSONObject, planFallback: string): BillingOrder {
@@ -1010,9 +1040,6 @@ function parseBillingOrder(data: UTSJSONObject, root: UTSJSONObject, planFallbac
 	if (order.amount.length == 0) {
 		const n = pickNumAny(src, ['amount', 'price', 'pay_amount', 'money'])
 		if (n > 0) order.amount = '' + n
-	}
-	if (order.pay_address.length == 0) {
-		order.pay_address = PAY_USDT_RECV_FALLBACK
 	}
 	return order
 }
