@@ -1595,43 +1595,84 @@ export function clearTpLoginTicket(): void {
  * 返回 session=成功；null=仍 pending；抛错=过期/失败
  */
 /**
- * TP 走 SDK Assist 回传时往往不再 POST callbackUrl。
- * App 拿到 Assist JSON 后主动提交，完成 ticket。
+ * TP Mobile-SDK 不会 POST callbackUrl，需 App 主动把签名结果交回 ticket。
+ * 注意：乱传 Assist 原文容易被服务端当成「重新 init」；必须带 address + sign + actionId。
  */
-export async function tpLoginSubmitAssistResult(rawJson: string): Promise<void> {
-	if (rawJson.length < 2) return
-	let body: UTSJSONObject | null = null
-	try {
-		body = JSON.parse(rawJson) as UTSJSONObject
-	} catch (e0) {
-		console.warn('[platform] tp-login submit parse fail')
-		return
+export async function tpLoginSubmitSignature(ticket: string, wallet: string, signature: string): Promise<boolean> {
+	const tid = ticket.trim()
+	const addr = wallet.trim()
+	const sig = signature.trim()
+	if (tid.length == 0 || addr.length < 10 || sig.length == 0) return false
+	const body: UTSJSONObject = {
+		actionId: tid,
+		ticket: tid,
+		address: addr,
+		wallet: addr,
+		sign: sig,
+		signature: sig,
+		result: '1'
 	}
-	if (body == null) return
-	// 兼容字段
-	const sign = pickStr(body, 'sign')
-	if (sign.length > 0 && pickStr(body, 'signature').length == 0) {
-		body['signature'] = sign
-	}
-	console.log('[platform] tp-login submit assist actionId=', pickStr(body, 'actionId'))
+	console.log('[platform] tp-login submit signature actionId=', tid, 'wallet=', addr, 'sigLen=', sig.length)
 	try {
-		await httpPostJson('/api/v1/auth/wallet/tp-login', body, false)
+		const root = await httpPostJson('/api/v1/auth/wallet/tp-login', body, false)
+		const code = pickNum(root, 'code')
+		const msg = pickStr(root, 'msg')
+		console.log('[platform] tp-login submit resp code=', code, 'msg=', msg)
+		// code=1 且带回新 deeplink = 被当成 init 了，不算成功
+		const data = pickObj(root, 'data')
+		if (data != null) {
+			const st = pickStr(data!, 'status')
+			if (st == 'success') return true
+			if (pickStr(data!, 'deeplink').length > 0 && pickStr(data!, 'ticket').length > 0) {
+				console.warn('[platform] tp-login submit treated as init')
+				return false
+			}
+		}
+		// 验签类错误直接失败；其它交由轮询判断
+		if (code == 50001 || code == 20001) return false
+		if (code == 1) return true
 	} catch (e1) {
-		console.warn('[platform] tp-login submit fail', e1)
-		// 部分网关要 form
+		console.warn('[platform] tp-login submit json fail', e1)
+	}
+	try {
 		const fields: UTSJSONObject = {
-			action: 'callback',
-			actionId: pickStr(body, 'actionId'),
-			wallet: pickStr(body, 'wallet'),
-			sign: sign,
-			signature: sign,
+			actionId: tid,
+			ticket: tid,
+			address: addr,
+			wallet: addr,
+			sign: sig,
+			signature: sig,
 			result: '1'
 		}
-		try {
-			await httpPostForm('/api/v1/auth/wallet/tp-login', fields, false)
-		} catch (e2) {
-			console.warn('[platform] tp-login submit form fail', e2)
+		const root2 = await httpPostForm('/api/v1/auth/wallet/tp-login', fields, false)
+		const code2 = pickNum(root2, 'code')
+		console.log('[platform] tp-login submit form code=', code2, 'msg=', pickStr(root2, 'msg'))
+		const data2 = pickObj(root2, 'data')
+		if (data2 != null && pickStr(data2!, 'deeplink').length > 0 && pickStr(data2!, 'ticket').length > 0) {
+			return false
 		}
+		return code2 == 1 || code2 == 0
+	} catch (e2) {
+		console.warn('[platform] tp-login submit form fail', e2)
+		return false
+	}
+}
+
+/** @deprecated 保留兼容；请用 tpLoginSubmitSignature */
+export async function tpLoginSubmitAssistResult(rawJson: string): Promise<void> {
+	if (rawJson.length < 2) return
+	try {
+		const body = JSON.parse(rawJson) as UTSJSONObject
+		const ticket = pickStr(body, 'actionId')
+		let wallet = pickStr(body, 'wallet')
+		if (wallet.length == 0) wallet = pickStr(body, 'address')
+		let sig = pickStr(body, 'sign')
+		if (sig.length == 0) sig = pickStr(body, 'signature')
+		if (ticket.length > 0 && wallet.length > 0 && sig.length > 0) {
+			await tpLoginSubmitSignature(ticket, wallet, sig)
+		}
+	} catch (e0) {
+		console.warn('[platform] tp-login submit assist parse fail')
 	}
 }
 

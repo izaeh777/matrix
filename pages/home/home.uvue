@@ -173,7 +173,7 @@
 		CmsFriendLink
 	} from '@/common/cms.uts'
 	import { tryConsumePendingFriend } from '@/common/deeplink.uts'
-	import { t } from '@/common/i18n.uts'
+	import { t, tx } from '@/common/i18n.uts'
 
 	type HomeI18n = {
 		banner1: string
@@ -226,7 +226,7 @@
 			if (platform.nickname.length > 0) name = platform.nickname
 			else name = platform.email
 		}
-		if (name.length == 0) return '游客'
+		if (name.length == 0) return tx('游客')
 		if (name.length <= 10) return name
 		return name.substring(0, 6) + '…' + name.substring(name.length - 4)
 	})
@@ -321,7 +321,7 @@
 	}
 	function goPublish(): void {
 		if (!canPublish.value) {
-			uni.showToast({ title: '游客无法发布项目，请先订阅', icon: 'none' })
+			uni.showToast({ title: t('pub.visitorBlock'), icon: 'none' })
 			return
 		}
 		uni.navigateTo({ url: '/pages/project/publish' })

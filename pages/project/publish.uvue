@@ -47,7 +47,7 @@
 
 					<text class="label"><text class="req">*</text>{{ i18n.category }}</text>
 					<view class="select" @click="pickCategory">
-						<text class="select-text" :class="{ 'ph': category.length == 0 }">{{ category.length > 0 ? category : i18n.categoryPh }}</text>
+						<text class="select-text" :class="{ 'ph': category.length == 0 }">{{ category.length > 0 ? catText(category) : i18n.categoryPh }}</text>
 						<text class="select-caret">▾</text>
 					</view>
 
@@ -125,7 +125,7 @@
 					<text class="review-title">{{ i18n.reviewTitle }}</text>
 					<view class="review-card">
 						<text class="review-line">{{ i18n.reviewName }}{{ name }}</text>
-						<text class="review-line">{{ i18n.reviewCat }}{{ category }}</text>
+						<text class="review-line">{{ i18n.reviewCat }}{{ catText(category) }}</text>
 						<text class="review-line">{{ i18n.reviewIntro }}{{ intro }}</text>
 						<text class="review-line">{{ i18n.reviewHighlight }}{{ highlight }}</text>
 					</view>
@@ -161,7 +161,7 @@
 		canPublishProject,
 		loadCachedVipLabel
 	} from '@/common/platform.uts'
-	import { t } from '@/common/i18n.uts'
+	import { t, tx } from '@/common/i18n.uts'
 
 	const DRAFT_KEY = 'cms_project_draft_v1'
 	const CATS: Array<string> = ['Web3', '金融', '直播', 'DeFi', '项目', '其他']
@@ -296,9 +296,17 @@
 		}
 	}
 
+	function catText(raw: string): string {
+		return tx(raw)
+	}
+
 	function pickCategory(): void {
+		const labels: Array<string> = []
+		for (let i = 0; i < CATS.length; i++) {
+			labels.push(tx(CATS[i]))
+		}
 		uni.showActionSheet({
-			itemList: CATS,
+			itemList: labels,
 			success: (res) => {
 				if (res.tapIndex >= 0 && res.tapIndex < CATS.length) {
 					category.value = CATS[res.tapIndex]

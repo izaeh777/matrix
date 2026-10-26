@@ -23,7 +23,7 @@
 					<view class="user-sub">
 						<text class="user-id">ID: {{ accountName }}</text>
 						<view class="vip-badge">
-							<text class="vip-text">{{ vipLabel }}</text>
+							<text class="vip-text">{{ vipLabelText }}</text>
 						</view>
 						<view v-if="teamName.length > 0" class="team-badge">
 							<text class="team-text">{{ teamName }}</text>
@@ -40,7 +40,7 @@
 
 			<view class="member-card">
 				<view class="vip-bar">
-					<text class="vip-bar-text">{{ vipPeriod }}</text>
+					<text class="vip-bar-text">{{ vipPeriodText }}</text>
 					<view class="renew-btn" @click="onSubscribe">
 						<text class="renew-text">{{ renewBtnText }}</text>
 					</view>
@@ -176,7 +176,7 @@
 						@click="selectPlan(item.plan_code)"
 					>
 						<view class="plan-card-top">
-							<text class="plan-name">{{ item.name }}</text>
+							<text class="plan-name">{{ planNameText(item.name) }}</text>
 							<view class="plan-price-col">
 								<text class="plan-price">{{ formatPlanPayPrice(item) }}</text>
 								<text v-if="hasPlanDiscount(item)" class="plan-price-origin">{{ formatPlanOriginPrice(item) }}</text>
@@ -219,7 +219,7 @@
 	import { inviteRegisterQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
 	import { openChat } from '@/common/app.uts'
 	import { scanAddFriendOrInvite } from '@/common/deeplink.uts'
-	import { getLocaleLabel, openLanguagePage, t } from '@/common/i18n.uts'
+	import { getLocaleLabel, openLanguagePage, t, tx } from '@/common/i18n.uts'
 
 	type ProfileI18n = {
 		balance: string
@@ -257,16 +257,18 @@
 		follow: t('profile.follow'),
 		invite: t('profile.invite')
 	} as ProfileI18n)
+	const vipLabelText = computed((): string => tx(vipLabel.value))
+	const vipPeriodText = computed((): string => tx(vipPeriod.value))
 	const renewBtnText = computed((): string => {
 		const label = vipLabel.value
 		const period = vipPeriod.value
 		if (label == '游客' || label == '普通用户' || label.toUpperCase() == 'VISITOR') {
-			return '去订阅'
+			return t('api.goSubscribe')
 		}
 		if (period.indexOf('待支付') >= 0 || period.indexOf('暂无') >= 0 || period.indexOf('过期') >= 0) {
-			return '去订阅'
+			return t('api.goSubscribe')
 		}
-		return '续费'
+		return t('api.renew')
 	})
 	const displayName = computed(() => {
 		const s = session.value
@@ -481,12 +483,16 @@
 		return '确认支付'
 	})
 
+	function planNameText(name: string): string {
+		return tx(name)
+	}
+
 	function formatPlanMeta(item: RolePlan): string {
 		let days = item.duration_days
 		if (days <= 0) days = 365
-		let tip = '' + days + ' 天'
+		let tip = '' + days + 'd'
 		if (days >= 365 && days % 365 == 0) {
-			tip = '' + (days / 365) + ' 年'
+			tip = '' + (days / 365) + 'y'
 		}
 		return tip + ' · ' + item.plan_code
 	}

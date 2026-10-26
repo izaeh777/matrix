@@ -145,7 +145,31 @@ fillPack(MSG_ZH_HANS, [
 	'pub.prev', '上一步',
 	'pub.submit', '提交审核',
 	'pub.submitting', '提交中…',
-	'pub.visitorBlock', '游客无法发布项目，请先订阅'
+	'pub.visitorBlock', '游客无法发布项目，请先订阅',
+	'api.visitor', '游客',
+	'api.normalUser', '普通用户',
+	'api.member', '会员',
+	'api.owner', '项目方',
+	'api.leader', '社区长',
+	'api.subActive', '订阅有效',
+	'api.subNone', '暂无有效订阅',
+	'api.subExpired', '订阅已过期',
+	'api.pendingPay', '待支付',
+	'api.periodRange', '有效期：{s} 至 {e}',
+	'api.periodUntil', '有效期至：{e}',
+	'api.remainDays', '剩余 {n} 天',
+	'api.goSubscribe', '去订阅',
+	'api.renew', '续费',
+	'api.catAll', '全部',
+	'api.catFinance', '金融',
+	'api.catLive', '直播',
+	'api.catWeb3', 'Web3',
+	'api.catDefi', 'DeFi',
+	'api.catProject', '项目',
+	'api.catOther', '其他',
+	'api.tagOriginal', '原创',
+	'api.tagFromX', '摘自于X',
+	'api.memberSuffix', '会员'
 ])
 fillPack(MSG_ZH_HANT, [
 	'lang.title', '語言',
@@ -257,7 +281,31 @@ fillPack(MSG_ZH_HANT, [
 	'pub.prev', '上一步',
 	'pub.submit', '提交審核',
 	'pub.submitting', '提交中…',
-	'pub.visitorBlock', '遊客無法發佈項目，請先訂閱'
+	'pub.visitorBlock', '遊客無法發佈項目，請先訂閱',
+	'api.visitor', '遊客',
+	'api.normalUser', '普通用戶',
+	'api.member', '會員',
+	'api.owner', '項目方',
+	'api.leader', '社區長',
+	'api.subActive', '訂閱有效',
+	'api.subNone', '暫無有效訂閱',
+	'api.subExpired', '訂閱已過期',
+	'api.pendingPay', '待支付',
+	'api.periodRange', '有效期：{s} 至 {e}',
+	'api.periodUntil', '有效期至：{e}',
+	'api.remainDays', '剩餘 {n} 天',
+	'api.goSubscribe', '去訂閱',
+	'api.renew', '續費',
+	'api.catAll', '全部',
+	'api.catFinance', '金融',
+	'api.catLive', '直播',
+	'api.catWeb3', 'Web3',
+	'api.catDefi', 'DeFi',
+	'api.catProject', '項目',
+	'api.catOther', '其他',
+	'api.tagOriginal', '原創',
+	'api.tagFromX', '摘自於X',
+	'api.memberSuffix', '會員'
 ])
 fillPack(MSG_EN, [
 	'lang.title', 'Language',
@@ -369,7 +417,31 @@ fillPack(MSG_EN, [
 	'pub.prev', 'Back',
 	'pub.submit', 'Submit',
 	'pub.submitting', 'Submitting…',
-	'pub.visitorBlock', 'Visitors cannot publish. Please subscribe.'
+	'pub.visitorBlock', 'Visitors cannot publish. Please subscribe.',
+	'api.visitor', 'Visitor',
+	'api.normalUser', 'Free',
+	'api.member', 'Member',
+	'api.owner', 'Project owner',
+	'api.leader', 'Community lead',
+	'api.subActive', 'Subscription active',
+	'api.subNone', 'No active subscription',
+	'api.subExpired', 'Subscription expired',
+	'api.pendingPay', 'Pending payment',
+	'api.periodRange', 'Valid: {s} – {e}',
+	'api.periodUntil', 'Valid until {e}',
+	'api.remainDays', '{n} days left',
+	'api.goSubscribe', 'Subscribe',
+	'api.renew', 'Renew',
+	'api.catAll', 'All',
+	'api.catFinance', 'Finance',
+	'api.catLive', 'Live',
+	'api.catWeb3', 'Web3',
+	'api.catDefi', 'DeFi',
+	'api.catProject', 'Projects',
+	'api.catOther', 'Other',
+	'api.tagOriginal', 'Original',
+	'api.tagFromX', 'From X',
+	'api.memberSuffix', ' Member'
 ])
 fillPack(MSG_JA, [
 	'lang.title', '言語',
@@ -481,7 +553,31 @@ fillPack(MSG_JA, [
 	'pub.prev', '戻る',
 	'pub.submit', '提出',
 	'pub.submitting', '提出中…',
-	'pub.visitorBlock', 'ゲストは公開できません。購読してください。'
+	'pub.visitorBlock', 'ゲストは公開できません。購読してください。',
+	'api.visitor', 'ゲスト',
+	'api.normalUser', '一般',
+	'api.member', '会員',
+	'api.owner', 'プロジェクト側',
+	'api.leader', 'コミュニティ長',
+	'api.subActive', '購読中',
+	'api.subNone', '有効な購読なし',
+	'api.subExpired', '購読期限切れ',
+	'api.pendingPay', '支払い待ち',
+	'api.periodRange', '有効期間：{s} ～ {e}',
+	'api.periodUntil', '有効期限：{e}',
+	'api.remainDays', '残り {n} 日',
+	'api.goSubscribe', '購読する',
+	'api.renew', '更新',
+	'api.catAll', 'すべて',
+	'api.catFinance', '金融',
+	'api.catLive', 'ライブ',
+	'api.catWeb3', 'Web3',
+	'api.catDefi', 'DeFi',
+	'api.catProject', 'プロジェクト',
+	'api.catOther', 'その他',
+	'api.tagOriginal', 'オリジナル',
+	'api.tagFromX', 'Xより',
+	'api.memberSuffix', '会員'
 ])
 fillPack(MSG_KO, [
 	'lang.title', '언어',
@@ -593,7 +689,31 @@ fillPack(MSG_KO, [
 	'pub.prev', '이전',
 	'pub.submit', '제출',
 	'pub.submitting', '제출 중…',
-	'pub.visitorBlock', '게스트는 게시할 수 없습니다. 구독하세요.'
+	'pub.visitorBlock', '게스트는 게시할 수 없습니다. 구독하세요.',
+	'api.visitor', '게스트',
+	'api.normalUser', '일반',
+	'api.member', '회원',
+	'api.owner', '프로젝트측',
+	'api.leader', '커뮤니티장',
+	'api.subActive', '구독 중',
+	'api.subNone', '유효 구독 없음',
+	'api.subExpired', '구독 만료',
+	'api.pendingPay', '결제 대기',
+	'api.periodRange', '유효기간: {s} ~ {e}',
+	'api.periodUntil', '유효기간: {e}',
+	'api.remainDays', '{n}일 남음',
+	'api.goSubscribe', '구독하기',
+	'api.renew', '갱신',
+	'api.catAll', '전체',
+	'api.catFinance', '금융',
+	'api.catLive', '라이브',
+	'api.catWeb3', 'Web3',
+	'api.catDefi', 'DeFi',
+	'api.catProject', '프로젝트',
+	'api.catOther', '기타',
+	'api.tagOriginal', '원작',
+	'api.tagFromX', 'X에서',
+	'api.memberSuffix', '회원'
 ])
 fillPack(MSG_RU, [
 	'lang.title', 'Язык',
@@ -705,7 +825,31 @@ fillPack(MSG_RU, [
 	'pub.prev', 'Назад',
 	'pub.submit', 'Отправить',
 	'pub.submitting', 'Отправка…',
-	'pub.visitorBlock', 'Гости не могут публиковать. Оформите подписку.'
+	'pub.visitorBlock', 'Гости не могут публиковать. Оформите подписку.',
+	'api.visitor', 'Гость',
+	'api.normalUser', 'Обычный',
+	'api.member', 'Участник',
+	'api.owner', 'Владелец проекта',
+	'api.leader', 'Лидер сообщества',
+	'api.subActive', 'Подписка активна',
+	'api.subNone', 'Нет активной подписки',
+	'api.subExpired', 'Подписка истекла',
+	'api.pendingPay', 'Ожидает оплаты',
+	'api.periodRange', 'Срок: {s} – {e}',
+	'api.periodUntil', 'До {e}',
+	'api.remainDays', 'Осталось {n} дн.',
+	'api.goSubscribe', 'Подписаться',
+	'api.renew', 'Продлить',
+	'api.catAll', 'Все',
+	'api.catFinance', 'Финансы',
+	'api.catLive', 'Эфир',
+	'api.catWeb3', 'Web3',
+	'api.catDefi', 'DeFi',
+	'api.catProject', 'Проекты',
+	'api.catOther', 'Другое',
+	'api.tagOriginal', 'Оригинал',
+	'api.tagFromX', 'Из X',
+	'api.memberSuffix', ' участник'
 ])
 fillPack(MSG_VI, [
 	'lang.title', 'Ngôn ngữ',
@@ -817,7 +961,31 @@ fillPack(MSG_VI, [
 	'pub.prev', 'Trước',
 	'pub.submit', 'Gửi duyệt',
 	'pub.submitting', 'Đang gửi…',
-	'pub.visitorBlock', 'Khách không thể đăng. Vui lòng đăng ký gói.'
+	'pub.visitorBlock', 'Khách không thể đăng. Vui lòng đăng ký gói.',
+	'api.visitor', 'Khách',
+	'api.normalUser', 'Thường',
+	'api.member', 'Hội viên',
+	'api.owner', 'Chủ dự án',
+	'api.leader', 'Trưởng cộng đồng',
+	'api.subActive', 'Đang hiệu lực',
+	'api.subNone', 'Chưa có gói',
+	'api.subExpired', 'Gói đã hết hạn',
+	'api.pendingPay', 'Chờ thanh toán',
+	'api.periodRange', 'Hiệu lực: {s} – {e}',
+	'api.periodUntil', 'Đến {e}',
+	'api.remainDays', 'Còn {n} ngày',
+	'api.goSubscribe', 'Đăng ký',
+	'api.renew', 'Gia hạn',
+	'api.catAll', 'Tất cả',
+	'api.catFinance', 'Tài chính',
+	'api.catLive', 'Live',
+	'api.catWeb3', 'Web3',
+	'api.catDefi', 'DeFi',
+	'api.catProject', 'Dự án',
+	'api.catOther', 'Khác',
+	'api.tagOriginal', 'Gốc',
+	'api.tagFromX', 'Từ X',
+	'api.memberSuffix', ' hội viên'
 ])
 
 function packOf(locale: string): Map<string, string> {
@@ -899,6 +1067,69 @@ export function t(key: string): string {
 		if (hit2 != null) return hit2
 	}
 	return key
+}
+
+function replaceAllToken(src: string, token: string, value: string): string {
+	let out = src
+	while (out.indexOf(token) >= 0) {
+		const i = out.indexOf(token)
+		out = out.substring(0, i) + value + out.substring(i + token.length)
+	}
+	return out
+}
+
+/**
+ * 翻译接口/后台返回的固定中文枚举与状态文案。
+ * 资讯标题、正文等自由文本无词典时原样返回（需后台多语言或翻译服务）。
+ */
+export function tx(raw: string): string {
+	const s = raw.trim()
+	if (s.length == 0) return s
+	if (s == '游客' || s.toUpperCase() == 'VISITOR') return t('api.visitor')
+	if (s == '普通用户') return t('api.normalUser')
+	if (s == '会员') return t('api.member')
+	if (s == '项目方') return t('api.owner')
+	if (s == '社区长') return t('api.leader')
+	if (s == '订阅有效') return t('api.subActive')
+	if (s == '暂无有效订阅') return t('api.subNone')
+	if (s == '订阅已过期') return t('api.subExpired')
+	if (s == '待支付') return t('api.pendingPay')
+	if (s == '全部') return t('api.catAll')
+	if (s == '金融') return t('api.catFinance')
+	if (s == '直播') return t('api.catLive')
+	if (s == 'Web3' || s == 'Web3.0') return t('api.catWeb3')
+	if (s == 'DeFi' || s == 'Defi' || s == 'defi') return t('api.catDefi')
+	if (s == '项目') return t('api.catProject')
+	if (s == '其他') return t('api.catOther')
+	if (s == '原创') return t('api.tagOriginal')
+	if (s == '摘自于X') return t('api.tagFromX')
+	if (s == '去订阅') return t('api.goSubscribe')
+	if (s == '续费') return t('api.renew')
+
+	if (s.indexOf('有效期：') == 0) {
+		const rest = s.substring(4)
+		const sep = ' 至 '
+		const idx = rest.indexOf(sep)
+		if (idx >= 0) {
+			const a = rest.substring(0, idx)
+			const b = rest.substring(idx + sep.length)
+			return replaceAllToken(replaceAllToken(t('api.periodRange'), '{s}', a), '{e}', b)
+		}
+	}
+	if (s.indexOf('有效期至：') == 0) {
+		return replaceAllToken(t('api.periodUntil'), '{e}', s.substring(5))
+	}
+	if (s.indexOf('剩余 ') == 0 && s.indexOf(' 天') == s.length - 2) {
+		const n = s.substring(3, s.length - 2).trim()
+		return replaceAllToken(t('api.remainDays'), '{n}', n)
+	}
+	// 如 「VIP会员」「PLAN_xxx会员」
+	if (s.length > 2 && s.substring(s.length - 2) == '会员') {
+		const prefix = s.substring(0, s.length - 2)
+		if (prefix == '项目方' || prefix == '社区长') return tx(prefix)
+		return prefix + t('api.memberSuffix')
+	}
+	return s
 }
 
 export function openLanguagePage(): void {

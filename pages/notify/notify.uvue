@@ -97,7 +97,7 @@
 		openArchiveDetail,
 		CmsArchiveItem
 	} from '@/common/cms.uts'
-	import { getLocaleLabel, openLanguagePage, t } from '@/common/i18n.uts'
+	import { getLocaleLabel, openLanguagePage, t, tx } from '@/common/i18n.uts'
 
 	type NotifyI18n = {
 		t1a: string
@@ -148,9 +148,9 @@
 	}
 
 	function tagOf(idx: number): string {
-		if (idx % 3 == 0) return '原创'
-		if (idx % 3 == 1) return '摘自于X'
-		return '原创'
+		if (idx % 3 == 0) return tx('原创')
+		if (idx % 3 == 1) return tx('摘自于X')
+		return tx('原创')
 	}
 
 	function onOpen(item: CmsArchiveItem): void {
