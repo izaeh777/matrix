@@ -77,7 +77,7 @@
 				</view>
 				<view class="entry-btn" @click="onCreateGroup">
 					<text class="entry-btn-icon">👥</text>
-					<text class="entry-btn-text">发起群聊</text>
+					<text class="entry-btn-text">发起洽谈室</text>
 				</view>
 				<view class="entry-btn" @click="onOpenDiscover">
 					<text class="entry-btn-icon">🌍</text>

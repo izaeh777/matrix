@@ -1,7 +1,9 @@
 /**
  * 平台认证（itiklink /api/v1/auth）
  * 鉴权头: token: <access_token>
+ * 多语言头: think-lang: zh-cn | en | zh-tw | ja | ko | fr | de | es | ru | ar | pt
  */
+import { getThinkLang } from '@/common/i18n.uts'
 
 const API_HOST = 'https://m.itiklink.com'
 const KEY_PLATFORM = 'platform_session_v1'
@@ -160,9 +162,18 @@ export function platformToken(): string {
 	return s.token
 }
 
+function withThinkLang(header: UTSJSONObject): UTSJSONObject {
+	try {
+		header['think-lang'] = getThinkLang()
+	} catch (e) {
+		header['think-lang'] = 'zh-cn'
+	}
+	return header
+}
+
 function httpGet(path: string, withAuth: boolean): Promise<UTSJSONObject> {
 	const url = apiBase() + path
-	const header: UTSJSONObject = {}
+	const header: UTSJSONObject = withThinkLang({})
 	if (withAuth) {
 		const t = platformToken()
 		if (t.length > 0) header['token'] = t
@@ -199,9 +210,9 @@ function httpGet(path: string, withAuth: boolean): Promise<UTSJSONObject> {
 
 function httpPostJson(path: string, body: UTSJSONObject, withAuth: boolean): Promise<UTSJSONObject> {
 	const url = apiBase() + path
-	const header: UTSJSONObject = {
+	const header: UTSJSONObject = withThinkLang({
 		'Content-Type': 'application/json'
-	}
+	} as UTSJSONObject)
 	if (withAuth) {
 		const t = platformToken()
 		if (t.length > 0) header['token'] = t
@@ -239,9 +250,9 @@ function httpPostJson(path: string, body: UTSJSONObject, withAuth: boolean): Pro
 
 function httpPostForm(path: string, fields: UTSJSONObject, withAuth: boolean): Promise<UTSJSONObject> {
 	const url = apiBase() + path
-	const header: UTSJSONObject = {
+	const header: UTSJSONObject = withThinkLang({
 		'Content-Type': 'application/x-www-form-urlencoded'
-	}
+	} as UTSJSONObject)
 	if (withAuth) {
 		const t = platformToken()
 		if (t.length > 0) header['token'] = t
@@ -279,9 +290,9 @@ function httpPostForm(path: string, fields: UTSJSONObject, withAuth: boolean): P
 
 function httpPutForm(path: string, fields: UTSJSONObject, withAuth: boolean): Promise<UTSJSONObject> {
 	const url = apiBase() + path
-	const header: UTSJSONObject = {
+	const header: UTSJSONObject = withThinkLang({
 		'Content-Type': 'application/x-www-form-urlencoded'
-	}
+	} as UTSJSONObject)
 	if (withAuth) {
 		const t = platformToken()
 		if (t.length > 0) header['token'] = t
@@ -319,9 +330,9 @@ function httpPutForm(path: string, fields: UTSJSONObject, withAuth: boolean): Pr
 
 function httpPutJson(path: string, body: UTSJSONObject, withAuth: boolean): Promise<UTSJSONObject> {
 	const url = apiBase() + path
-	const header: UTSJSONObject = {
+	const header: UTSJSONObject = withThinkLang({
 		'Content-Type': 'application/json'
-	}
+	} as UTSJSONObject)
 	if (withAuth) {
 		const t = platformToken()
 		if (t.length > 0) header['token'] = t
@@ -496,7 +507,7 @@ export type PlatformMe = {
 	avatar: string
 	/** 会员展示名，如 VIP1会员 */
 	vip_label: string
-	/** 有效期文案，如 有效期：2026-09-11 至 2026-10-11 */
+	/** 有效期文案，如 有效期至：2026-10-11 */
 	vip_period: string
 	/** 团队等级名，如 lv_team_name；空则不展示 */
 	team_name: string
@@ -810,14 +821,9 @@ export function formatVipLabel(sub: PlatformSubscription): string {
 }
 
 export function formatVipPeriod(sub: PlatformSubscription): string {
-	// 过滤占位 0 / 1970
-	const s = sub.start_at
+	// 过滤占位 0 / 1970；只展示结束时间，不展示开始时间
 	const e = sub.end_at
-	const sOk = s.length > 0 && s != '0' && s.indexOf('1970') < 0
 	const eOk = e.length > 0 && e != '0' && e.indexOf('1970') < 0
-	if (sOk && eOk) {
-		return '有效期：' + s + ' 至 ' + e
-	}
 	if (eOk) {
 		return '有效期至：' + e
 	}

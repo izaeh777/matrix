@@ -960,7 +960,7 @@
 		try {
 			await matrix.joinRoom(roomId)
 			uni.hideLoading()
-			uni.showToast({ title: '已加入房间', icon: 'success' })
+			uni.showToast({ title: '已加入洽谈室', icon: 'success' })
 			await loadInvites()
 			await loadRooms()
 		} catch (e: any) {
@@ -1084,7 +1084,7 @@
 
 	function joinExistingRoom() {
 		uni.showModal({
-			title: '加入房间',
+			title: '加入洽谈室',
 			editable: true,
 			placeholderText: '输入房间号 #room:server 或房间别名',
 			success: (res) => {
@@ -1099,7 +1099,7 @@
 
 	function onJoin() {
 		uni.showActionSheet({
-			itemList: ['发起群聊', '添加好友', '加入已有房间'],
+			itemList: ['发起洽谈室', '添加好友', '加入已有洽谈室'],
 			success: (res) => {
 				if (res.tapIndex == 0) {
 					openGroupPick('create')

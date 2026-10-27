@@ -63,7 +63,7 @@
 	const selectedIds = ref<Array<string>>([])
 	const selectedUsers: Array<PickUser> = []
 	let searchTimer: number | null = null
-	const pageTitle = ref<string>('发起群聊')
+	const pageTitle = ref<string>('发起洽谈室')
 	const emptyHint = ref<string>('搜索用户，或从最近聊天里选人')
 
 	function goBack(): void {

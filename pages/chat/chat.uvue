@@ -471,7 +471,7 @@
 
 	const roomId = ref<string>('')
 	const highlightEventId = ref<string>('')
-	const roomName = ref<string>('聊天')
+	const roomName = ref<string>('洽谈')
 	const isGroup = ref<boolean>(false)
 	const memberCount = ref<number>(0)
 	const groupMembers = ref<Array<RoomMember>>([])
@@ -481,7 +481,7 @@
 	const chatHeaderStyle = 'background-color:#F3F8FE;'
 	const roomTitleBar = computed((): string => {
 		let title = roomName.value
-		if (title.length == 0) title = '聊天'
+		if (title.length == 0) title = '洽谈'
 		const n = memberCount.value
 		if (isGroup.value) {
 			// Matrix 未命名群常把成员名用顿号拼在一起，标题会挤爆顶栏

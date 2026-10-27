@@ -2,7 +2,9 @@
  * CMS 接口（itiklink）
  * OpenAPI: https://m.itiklink.com/openapi.yaml
  * 友链: GET /api/cms/friendlink  operationId=index_friendlink
+ * 多语言头: think-lang
  */
+import { getThinkLang } from '@/common/i18n.uts'
 
 export type CmsFriendLink = {
 	id: number
@@ -132,13 +134,25 @@ function parseList(raw: any | null): Array<UTSJSONObject> {
 	return out
 }
 
+function cmsLangHeader(): UTSJSONObject {
+	const header: UTSJSONObject = {}
+	try {
+		header['think-lang'] = getThinkLang()
+	} catch (e) {
+		header['think-lang'] = 'zh-cn'
+	}
+	return header
+}
+
 function httpGetJson(path: string): Promise<UTSJSONObject> {
 	const url = cmsHttpBase() + path
+	const header = cmsLangHeader()
 	return new Promise((resolve, reject) => {
 		uni.request({
 			url: url,
 			method: 'GET',
 			timeout: 15000,
+			header: header,
 			success: (res) => {
 				try {
 					const code = res.statusCode
@@ -445,9 +459,8 @@ export function formatPublishAgo(ts: number): string {
 
 function httpPostForm(path: string, fields: UTSJSONObject): Promise<UTSJSONObject> {
 	const url = cmsHttpBase() + path
-	const header: UTSJSONObject = {
-		'Content-Type': 'application/x-www-form-urlencoded'
-	}
+	const header = cmsLangHeader()
+	header['Content-Type'] = 'application/x-www-form-urlencoded'
 	try {
 		const raw = uni.getStorageSync('platform_session_v1')
 		if (raw != null) {

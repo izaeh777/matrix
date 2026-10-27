@@ -45,7 +45,7 @@
 		{
 			"path": "pages/rooms/rooms",
 			"style": {
-				"navigationBarTitleText": "聊天",
+				"navigationBarTitleText": "洽谈",
 				"navigationStyle": "custom",
 				"navigationBarBackgroundColor": "#F3F8FE",
 				"backgroundColor": "#F3F8FE",
@@ -57,7 +57,7 @@
 		{
 			"path": "pages/chat/chat",
 			"style": {
-				"navigationBarTitleText": "聊天",
+				"navigationBarTitleText": "洽谈",
 				"navigationStyle": "custom",
 				"navigationBarBackgroundColor": "#FFFFFF",
 				"backgroundColor": "#F3F8FE",
