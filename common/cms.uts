@@ -144,9 +144,31 @@ function cmsLangHeader(): UTSJSONObject {
 	return header
 }
 
+function logCmsHeaders(method: string, url: string, header: UTSJSONObject): void {
+	try {
+		const safe: UTSJSONObject = {}
+		const keys: Array<string> = ['think-lang', 'Content-Type', 'token']
+		for (let i = 0; i < keys.length; i++) {
+			const k = keys[i]
+			const v = header[k]
+			if (v == null) continue
+			if (k == 'token') {
+				const t = '' + v
+				safe[k] = t.length > 8 ? (t.substring(0, 6) + '…' + t.substring(t.length - 4)) : 'yes'
+			} else {
+				safe[k] = '' + v
+			}
+		}
+		console.log('[cms-http] header', method, url, JSON.stringify(safe))
+	} catch (e) {
+		console.log('[cms-http] header log fail', e)
+	}
+}
+
 function httpGetJson(path: string): Promise<UTSJSONObject> {
 	const url = cmsHttpBase() + path
 	const header = cmsLangHeader()
+	logCmsHeaders('GET', url, header)
 	return new Promise((resolve, reject) => {
 		uni.request({
 			url: url,
@@ -476,6 +498,7 @@ function httpPostForm(path: string, fields: UTSJSONObject): Promise<UTSJSONObjec
 			}
 		}
 	} catch (e1) {}
+	logCmsHeaders('POST-FORM', url, header)
 	return new Promise((resolve, reject) => {
 		uni.request({
 			url: url,

@@ -34,8 +34,13 @@
 			</view>
 
 			<view class="balance-row">
-				<text class="balance-label">{{ i18n.balance }}</text>
-				<text class="balance-value">{{ usdtBalance }}</text>
+				<view class="balance-left">
+					<text class="balance-label">{{ i18n.balance }}</text>
+					<text class="balance-value">{{ usdtBalance }}</text>
+				</view>
+				<view class="withdraw-btn" @click="openWithdraw">
+					<text class="withdraw-btn-text">{{ i18n.withdraw }}</text>
+				</view>
 			</view>
 
 			<view class="member-card">
@@ -157,15 +162,40 @@
 			</view>
 		</view>
 
+		<view v-if="showWithdraw" class="invite-mask" @click="closeWithdraw">
+			<view class="plan-sheet" @click.stop="">
+				<text class="invite-title">{{ i18n.withdrawTitle }}</text>
+				<text class="invite-desc">{{ i18n.withdrawDesc }}</text>
+				<view class="wd-field">
+					<text class="wd-label">{{ i18n.withdrawAmount }}</text>
+					<input class="wd-input" type="digit" v-model="wdAmount" :placeholder="i18n.withdrawAmountPh" />
+				</view>
+				<view class="wd-field">
+					<text class="wd-label">{{ i18n.withdrawAddr }}</text>
+					<input class="wd-input" type="text" v-model="wdAddress" :placeholder="i18n.withdrawAddrPh" />
+				</view>
+				<view class="wd-field">
+					<text class="wd-label">{{ i18n.withdrawCode }}</text>
+					<view class="wd-code-row">
+						<input class="wd-input wd-input-code" type="number" v-model="wdCode" :placeholder="i18n.withdrawCodePh" />
+						<text class="wd-code-btn" :class="wdCodeWait > 0 ? 'wd-code-btn-off' : ''" @click="onSendWithdrawCode">{{ wdCodeWait > 0 ? (wdCodeWait + 's') : i18n.withdrawGetCode }}</text>
+					</view>
+				</view>
+				<view class="invite-btn" :class="{ 'invite-btn-disabled': wdSubmitting }" @click="onSubmitWithdraw">
+					<text class="invite-btn-text">{{ wdSubmitting ? i18n.withdrawSubmitting : i18n.withdrawSubmit }}</text>
+				</view>
+			</view>
+		</view>
+
 		<view v-if="showPlans" class="invite-mask" @click="closePlans">
 			<view class="plan-sheet" @click.stop="">
-				<text class="invite-title">选择套餐</text>
-				<text class="invite-desc">使用 TokenPocket 链上支付 USDT（BSC），转账成功后自动开通</text>
+				<text class="invite-title">{{ i18n.planTitle }}</text>
+				<text class="invite-desc">{{ i18n.planDesc }}</text>
 				<view v-if="plansLoading" class="plan-state">
-					<text class="plan-state-text">加载中…</text>
+					<text class="plan-state-text">{{ i18n.loading }}</text>
 				</view>
 				<view v-else-if="planList.length == 0" class="plan-state">
-					<text class="plan-state-text">暂无套餐</text>
+					<text class="plan-state-text">{{ i18n.planEmpty }}</text>
 				</view>
 				<scroll-view v-else class="plan-scroll" scroll-y="true">
 					<view
@@ -187,7 +217,7 @@
 					</view>
 				</scroll-view>
 				<view class="invite-btn" :class="{ 'invite-btn-disabled': paying || selectedPlanCode.length == 0 }" @click="onPayPlan">
-					<text class="invite-btn-text">{{ paying ? '支付中…' : payBtnLabel }}</text>
+					<text class="invite-btn-text">{{ paying ? i18n.planPaying : payBtnLabel }}</text>
 				</view>
 			</view>
 		</view>
@@ -213,8 +243,11 @@
 		planPayPriceText,
 		isPlanDiscountActive,
 		findFriendByUsername,
+		sendWithdrawEmailCode,
+		billingWithdraw,
 		RolePlan
 	} from '@/common/platform.uts'
+	import { loadTpWalletAddress } from '@/common/tp-wallet.uts'
 	import { tpTransferUsdt, waitBscTxConfirmed, isTpAppInstalled } from '@/common/tp-wallet.uts'
 	import { inviteRegisterQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
 	import { openChat } from '@/common/app.uts'
@@ -234,6 +267,66 @@
 		myPublish: string
 		follow: string
 		invite: string
+		withdraw: string
+		withdrawTitle: string
+		withdrawDesc: string
+		withdrawAmount: string
+		withdrawAmountPh: string
+		withdrawAddr: string
+		withdrawAddrPh: string
+		withdrawCode: string
+		withdrawCodePh: string
+		withdrawGetCode: string
+		withdrawSubmit: string
+		withdrawSubmitting: string
+		planTitle: string
+		planDesc: string
+		planEmpty: string
+		planPaying: string
+		loading: string
+	}
+
+	function buildProfileI18n(): ProfileI18n {
+		return {
+			balance: t('profile.balance'),
+			fav: t('profile.fav'),
+			history: t('profile.history'),
+			emptyRec: t('profile.emptyRec'),
+			analytics: t('profile.analytics'),
+			chat: t('profile.chat'),
+			share: t('profile.share'),
+			service: t('profile.service'),
+			center: t('profile.center'),
+			myPublish: t('profile.myPublish'),
+			follow: t('profile.follow'),
+			invite: t('profile.invite'),
+			withdraw: t('profile.withdraw'),
+			withdrawTitle: t('profile.withdrawTitle'),
+			withdrawDesc: t('profile.withdrawDesc'),
+			withdrawAmount: t('profile.withdrawAmount'),
+			withdrawAmountPh: t('profile.withdrawAmountPh'),
+			withdrawAddr: t('profile.withdrawAddr'),
+			withdrawAddrPh: t('profile.withdrawAddrPh'),
+			withdrawCode: t('profile.withdrawCode'),
+			withdrawCodePh: t('profile.withdrawCodePh'),
+			withdrawGetCode: t('profile.withdrawGetCode'),
+			withdrawSubmit: t('profile.withdrawSubmit'),
+			withdrawSubmitting: t('profile.withdrawSubmitting'),
+			planTitle: t('profile.planTitle'),
+			planDesc: t('profile.planDesc'),
+			planEmpty: t('profile.planEmpty'),
+			planPaying: t('profile.planPaying'),
+			loading: t('common.loading')
+		} as ProfileI18n
+	}
+
+	function fillTpl(tpl: string, token: string, value: string): string {
+		let out = tpl
+		while (out.indexOf(token) >= 0) {
+			const i = out.indexOf(token)
+			out = out.substring(0, i) + value + out.substring(i + token.length)
+		}
+		return out
 	}
 
 	const session = ref<SessionInfo | null>(loadSession())
@@ -243,20 +336,14 @@
 	const vipPeriod = ref<string>('暂无有效订阅')
 	const teamName = ref<string>('')
 	const langLabel = ref<string>(getLocaleLabel())
-	const i18n = ref<ProfileI18n>({
-		balance: t('profile.balance'),
-		fav: t('profile.fav'),
-		history: t('profile.history'),
-		emptyRec: t('profile.emptyRec'),
-		analytics: t('profile.analytics'),
-		chat: t('profile.chat'),
-		share: t('profile.share'),
-		service: t('profile.service'),
-		center: t('profile.center'),
-		myPublish: t('profile.myPublish'),
-		follow: t('profile.follow'),
-		invite: t('profile.invite')
-	} as ProfileI18n)
+	const showWithdraw = ref<boolean>(false)
+	const wdAmount = ref<string>('')
+	const wdAddress = ref<string>('')
+	const wdCode = ref<string>('')
+	const wdSubmitting = ref<boolean>(false)
+	const wdCodeWait = ref<number>(0)
+	let wdCodeTimer: number | null = null
+	const i18n = ref<ProfileI18n>(buildProfileI18n())
 	const vipLabelText = computed((): string => tx(vipLabel.value))
 	const vipPeriodText = computed((): string => tx(vipPeriod.value))
 	const renewBtnText = computed((): string => {
@@ -407,26 +494,18 @@
 		session.value = loadSession()
 		platform.value = loadPlatformSession()
 		langLabel.value = getLocaleLabel()
-		i18n.value = {
-			balance: t('profile.balance'),
-			fav: t('profile.fav'),
-			history: t('profile.history'),
-			emptyRec: t('profile.emptyRec'),
-			analytics: t('profile.analytics'),
-			chat: t('profile.chat'),
-			share: t('profile.share'),
-			service: t('profile.service'),
-			center: t('profile.center'),
-			myPublish: t('profile.myPublish'),
-			follow: t('profile.follow'),
-			invite: t('profile.invite')
-		} as ProfileI18n
+		i18n.value = buildProfileI18n()
 		loadUsdtBalance()
 	})
 
 	onUnmounted(() => {
 		stopOff(offSync)
 		offSync = null
+		const t = wdCodeTimer
+		wdCodeTimer = null
+		if (t != null) {
+			clearInterval(t as number)
+		}
 	})
 
 	function onSoon() {
@@ -456,31 +535,35 @@
 	}
 
 	function formatPlanOriginPrice(item: RolePlan): string {
-		return '原价 USDT ' + item.price
+		return t('profile.planOrigin') + ('' + item.price)
 	}
 
 	function formatPlanDiscount(item: RolePlan): string {
-		return '优惠 -' + item.dis + ' USDT'
+		return t('profile.planDiscountPrefix') + ('' + item.dis) + ' USDT'
 	}
 
 	function formatPayConfirm(item: RolePlan): string {
 		const pay = planPayPriceText(item)
 		if (isPlanDiscountActive(item)) {
-			return '实付 USDT ' + pay + '（原价 ' + item.price + '，已减 ' + item.dis + '）\n将打开 TokenPocket（BSC）转账，请确认后签名。'
+			let s = t('profile.planConfirmBodyDis')
+			s = fillTpl(s, '{pay}', pay)
+			s = fillTpl(s, '{price}', '' + item.price)
+			s = fillTpl(s, '{dis}', '' + item.dis)
+			return s
 		}
-		return '实付 USDT ' + pay + '\n将打开 TokenPocket（BSC）转账，请确认后签名。'
+		return fillTpl(t('profile.planConfirmBody'), '{pay}', pay)
 	}
 
 	const payBtnLabel = computed((): string => {
 		const code = selectedPlanCode.value
-		if (code.length == 0) return '确认支付'
+		if (code.length == 0) return t('profile.planPayConfirm')
 		const list = planList.value
 		for (let i = 0; i < list.length; i++) {
 			if (list[i].plan_code == code) {
-				return '支付 USDT ' + planPayPriceText(list[i])
+				return t('profile.planPayUsdt') + planPayPriceText(list[i])
 			}
 		}
-		return '确认支付'
+		return t('profile.planPayConfirm')
 	})
 
 	function planNameText(name: string): string {
@@ -506,9 +589,107 @@
 		showPlans.value = false
 	}
 
+	function openWithdraw(): void {
+		if (platformTokenEmpty()) {
+			uni.showToast({ title: t('profile.loginFirst'), icon: 'none' })
+			return
+		}
+		wdAmount.value = ''
+		wdCode.value = ''
+		let addr = loadTpWalletAddress().trim()
+		if (addr.length < 10) {
+			try {
+				const raw = uni.getStorageSync('tp_wallet_address_v1')
+				if (raw != null) addr = ('' + raw).trim()
+			} catch (e0) {}
+		}
+		wdAddress.value = addr
+		showWithdraw.value = true
+	}
+
+	function closeWithdraw(): void {
+		if (wdSubmitting.value) return
+		showWithdraw.value = false
+	}
+
+	function startWdCodeCountdown(): void {
+		wdCodeWait.value = 60
+		const old = wdCodeTimer
+		wdCodeTimer = null
+		if (old != null) clearInterval(old as number)
+		wdCodeTimer = setInterval(() => {
+			if (wdCodeWait.value <= 1) {
+				wdCodeWait.value = 0
+				const t = wdCodeTimer
+				wdCodeTimer = null
+				if (t != null) clearInterval(t as number)
+				return
+			}
+			wdCodeWait.value = wdCodeWait.value - 1
+		}, 1000)
+	}
+
+	async function onSendWithdrawCode(): Promise<void> {
+		if (wdCodeWait.value > 0 || wdSubmitting.value) return
+		const p = loadPlatformSession()
+		const em = p != null ? p.email.trim() : ''
+		if (em.length == 0 || em.indexOf('@') < 1) {
+			uni.showToast({ title: t('profile.withdrawNoEmail'), icon: 'none' })
+			return
+		}
+		uni.showLoading({ title: t('profile.withdrawSending') })
+		try {
+			await sendWithdrawEmailCode(em)
+			uni.hideLoading()
+			uni.showToast({ title: t('profile.withdrawCodeSent'), icon: 'none' })
+			startWdCodeCountdown()
+		} catch (e) {
+			uni.hideLoading()
+			let msg = t('profile.withdrawSendFail')
+			try { msg = '' + e } catch (e2) {}
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? msg : t('profile.withdrawSendFail'), icon: 'none' })
+		}
+	}
+
+	async function onSubmitWithdraw(): Promise<void> {
+		if (wdSubmitting.value) return
+		const amt = wdAmount.value.trim()
+		const addr = wdAddress.value.trim()
+		const cd = wdCode.value.trim()
+		if (amt.length == 0) {
+			uni.showToast({ title: t('profile.withdrawNeedAmount'), icon: 'none' })
+			return
+		}
+		if (addr.length < 10) {
+			uni.showToast({ title: t('profile.withdrawNeedAddr'), icon: 'none' })
+			return
+		}
+		if (cd.length == 0) {
+			uni.showToast({ title: t('profile.withdrawNeedCode'), icon: 'none' })
+			return
+		}
+		wdSubmitting.value = true
+		uni.showLoading({ title: t('profile.withdrawSubmitting') })
+		try {
+			const r = await billingWithdraw(amt, addr, cd)
+			uni.hideLoading()
+			uni.showToast({ title: r.msg.length > 0 ? tx(r.msg) : t('profile.withdrawOk'), icon: 'none' })
+			showWithdraw.value = false
+			await loadUsdtBalance()
+		} catch (e) {
+			uni.hideLoading()
+			let msg = t('profile.withdrawFail')
+			try { msg = '' + e } catch (e2) {}
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? tx(msg) : t('profile.withdrawFail'), icon: 'none', duration: 3000 })
+		}
+		wdSubmitting.value = false
+	}
+
 	async function onSubscribe(): Promise<void> {
 		if (platformTokenEmpty()) {
-			uni.showToast({ title: '请先登录平台账号', icon: 'none' })
+			uni.showToast({ title: t('profile.loginFirst'), icon: 'none' })
 			return
 		}
 		showPlans.value = true
@@ -533,16 +714,18 @@
 		if (paying.value) return
 		const code = selectedPlanCode.value
 		if (code.length == 0) {
-			uni.showToast({ title: '请选择套餐', icon: 'none' })
+			uni.showToast({ title: t('profile.planPick'), icon: 'none' })
 			return
 		}
 		const picked = selectedPlan()
 		const amtTip = picked != null ? planPayPriceText(picked!) : ''
-		const confirmText = picked != null ? formatPayConfirm(picked!) : ('将打开 TokenPocket 支付 ' + code)
+		const confirmText = picked != null ? formatPayConfirm(picked!) : (t('profile.planConfirmFallback') + code)
 		const ok = await new Promise((resolve: (v: boolean) => void) => {
 			uni.showModal({
-				title: '确认支付',
+				title: t('profile.planPayConfirm'),
 				content: confirmText,
+				confirmText: t('common.confirm'),
+				cancelText: t('common.cancel'),
 				success: (res) => {
 					resolve(res.confirm == true)
 				},
@@ -553,23 +736,21 @@
 		})
 		if (ok != true) return
 		if (!isTpAppInstalled()) {
-			uni.showToast({ title: '请先安装 TokenPocket', icon: 'none' })
+			uni.showToast({ title: t('profile.planNeedTp'), icon: 'none' })
 			return
 		}
 		paying.value = true
-		uni.showLoading({ title: '下单中…', mask: true })
+		uni.showLoading({ title: t('profile.planOrdering'), mask: true })
 		try {
-			const isRenew = renewBtnText.value == '续费'
+			const isRenew = renewBtnText.value == t('api.renew')
 			const order = isRenew ? await renewBillingSubscription(code) : await createBillingOrder(code)
 			let orderNo = order.order_no
-			// 收款地址：GET /api/v1/billing/wallet
 			let payTo = ''
 			try {
 				payTo = await fetchBillingWallet()
 			} catch (eWal) {
 				console.warn('[profile] billing/wallet fail', eWal)
 			}
-			// 实付优先用套餐优惠价；下单接口常返回原价 amount，不能直接用来转账
 			let amount = amtTip
 			if (amount.length == 0) amount = order.amount
 			if (orderNo.length > 0) {
@@ -577,7 +758,6 @@
 					const detail = await fetchOrderDetail(orderNo)
 					if (detail.order_no.length > 0) orderNo = detail.order_no
 					if (amount.length == 0 && detail.amount.length > 0) amount = detail.amount
-					// 钱包接口失败时再尝试订单里的地址
 					if (payTo.length == 0 && detail.pay_address.length > 0) payTo = detail.pay_address
 				} catch (eDet) {
 					console.warn('[profile] order detail skip', eDet)
@@ -585,42 +765,45 @@
 			}
 			if (payTo.length == 0 && order.pay_address.length > 0) payTo = order.pay_address
 			if (payTo.length == 0) {
-				throw new Error('未获取到收款地址（billing/wallet）')
+				throw new Error(t('profile.planNoAddr'))
 			}
-			if (amount.length == 0) throw new Error('未获取到支付金额')
-			if (orderNo.length == 0) throw new Error('下单成功但未返回订单号')
+			if (amount.length == 0) throw new Error(t('profile.planNoAmount'))
+			if (orderNo.length == 0) throw new Error(t('profile.planNoOrder'))
 
-			uni.showLoading({ title: '打开钱包…', mask: true })
+			uni.showLoading({ title: t('profile.planOpenWallet'), mask: true })
 			console.log('[profile] pay order=', orderNo, 'to=', payTo, 'amt=', amount, 'orderAmt=', order.amount, 'planPay=', amtTip)
 			const tx = await tpTransferUsdt(payTo, amount, 'plan:' + code)
 			console.log('[profile] txHash=', tx.txHash)
 
-			uni.showLoading({ title: '确认链上结果…', mask: true })
+			uni.showLoading({ title: t('profile.planConfirming'), mask: true })
 			const conf = await waitBscTxConfirmed(tx.txHash, 40000)
 			console.log('[profile] confirm', conf.status, conf.message)
 			uni.hideLoading()
 
 			if (conf.status == 'failed') {
-				throw new Error((conf.message.length > 0 ? conf.message : '链上交易失败') + '。常见原因：BSC 钱包 USDT 余额不足（需有 USDT，BNB 只付手续费）')
+				const failBase = conf.message.length > 0 ? conf.message : t('profile.planTxFail')
+				throw new Error(failBase + t('profile.planTxFailTip'))
 			}
 			if (conf.status == 'confirmed') {
-				uni.showLoading({ title: '同步订单…', mask: true })
+				uni.showLoading({ title: t('profile.planSyncing'), mask: true })
 				await billingPayNotify(orderNo, tx.txHash, 'USDT')
 				uni.hideLoading()
-				uni.showToast({ title: '支付成功', icon: 'success' })
+				uni.showToast({ title: t('profile.planPayOk'), icon: 'success' })
 				showPlans.value = false
 				await loadUsdtBalance()
 				paying.value = false
 				return
 			}
-			// network / timeout：让用户选择是否手动同步（RPC 在国内常不可达）
-			const tip = conf.message.length > 0 ? conf.message : '无法自动确认链上结果'
+			const tip = conf.message.length > 0 ? conf.message : t('profile.planConfirmFail')
+			let manualBody = t('profile.planManualBody')
+			manualBody = fillTpl(manualBody, '{tip}', tip)
+			manualBody = fillTpl(manualBody, '{hash}', tx.txHash)
 			const manualOk = await new Promise((resolve: (v: boolean) => void) => {
 				uni.showModal({
-					title: '链上确认受阻',
-					content: tip + '\n\n哈希：' + tx.txHash + '\n\n若钱包里已显示转账成功，可点「继续同步」；否则请取消后到 BscScan 核对。',
-					confirmText: '继续同步',
-					cancelText: '取消',
+					title: t('profile.planChainBlocked'),
+					content: manualBody,
+					confirmText: t('profile.planContinueSync'),
+					cancelText: t('common.cancel'),
 					success: (res) => {
 						resolve(res.confirm == true)
 					},
@@ -630,12 +813,12 @@
 				})
 			})
 			if (manualOk != true) {
-				throw new Error('未确认链上成功，订单仍待支付。哈希：' + tx.txHash.substring(0, 18) + '…')
+				throw new Error(t('profile.planUnconfirmed') + tx.txHash.substring(0, 18) + '…')
 			}
-			uni.showLoading({ title: '同步订单…', mask: true })
+			uni.showLoading({ title: t('profile.planSyncing'), mask: true })
 			await billingPayNotify(orderNo, tx.txHash, 'USDT')
 			uni.hideLoading()
-			uni.showToast({ title: '已提交同步', icon: 'success' })
+			uni.showToast({ title: t('profile.planSynced'), icon: 'success' })
 			showPlans.value = false
 			await loadUsdtBalance()
 		} catch (e) {
@@ -803,15 +986,71 @@
 		background-color: #ffffff;
 		border-radius: 20rpx;
 	}
+	.balance-left {
+		flex: 1;
+		flex-direction: column;
+	}
 	.balance-label {
 		font-size: 28rpx;
 		color: #6b7280;
 		font-weight: 600;
+		margin-bottom: 8rpx;
 	}
 	.balance-value {
 		font-size: 34rpx;
 		color: #1861c8;
 		font-weight: 700;
+	}
+	.withdraw-btn {
+		padding: 14rpx 28rpx;
+		border-radius: 999rpx;
+		background-color: #1861c8;
+		align-items: center;
+		justify-content: center;
+	}
+	.withdraw-btn-text {
+		font-size: 26rpx;
+		color: #ffffff;
+		font-weight: 700;
+	}
+	.wd-field {
+		margin-bottom: 20rpx;
+	}
+	.wd-label {
+		font-size: 24rpx;
+		color: #64748b;
+		font-weight: 600;
+		margin-bottom: 10rpx;
+	}
+	.wd-input {
+		height: 84rpx;
+		background-color: #f4f8fd;
+		border-radius: 14rpx;
+		padding: 0 24rpx;
+		font-size: 28rpx;
+		color: #0f172a;
+		border-width: 2rpx;
+		border-style: solid;
+		border-color: #e2eef8;
+	}
+	.wd-code-row {
+		flex-direction: row;
+		align-items: center;
+	}
+	.wd-input-code {
+		flex: 1;
+		margin-right: 16rpx;
+	}
+	.wd-code-btn {
+		padding: 0 20rpx;
+		height: 84rpx;
+		line-height: 84rpx;
+		font-size: 24rpx;
+		color: #1861c8;
+		font-weight: 700;
+	}
+	.wd-code-btn-off {
+		color: #94a3b8;
 	}
 	.user-avatar {
 		width: 112rpx;

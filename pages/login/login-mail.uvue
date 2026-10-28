@@ -14,7 +14,16 @@
 		<scroll-view class="form-scroll" scroll-y="true">
 			<image class="brand-logo" src="/static/login/logo.png" mode="aspectFit"></image>
 			<text class="card-title">{{ isRegister ? '创建账号' : '欢迎回来' }}</text>
-			<text class="card-subtitle">使用邮箱验证码{{ isRegister ? '注册' : '登录' }}</text>
+			<text class="card-subtitle">{{ cardSub }}</text>
+
+			<view v-if="!isRegister" class="mode-tabs">
+				<view class="mode-tab" :class="loginByPwd ? 'mode-tab-on' : ''" @click="setLoginByPwd(true)">
+					<text class="mode-tab-text" :class="loginByPwd ? 'mode-tab-text-on' : ''">密码登录</text>
+				</view>
+				<view class="mode-tab" :class="!loginByPwd ? 'mode-tab-on' : ''" @click="setLoginByPwd(false)">
+					<text class="mode-tab-text" :class="!loginByPwd ? 'mode-tab-text-on' : ''">验证码登录</text>
+				</view>
+			</view>
 
 			<view class="field">
 				<text class="field-label">邮箱</text>
@@ -29,7 +38,7 @@
 				</view>
 			</view>
 
-			<view class="field">
+			<view v-if="isRegister || !loginByPwd" class="field">
 				<text class="field-label">验证码</text>
 				<view class="input-box">
 					<input
@@ -60,14 +69,14 @@
 				</view>
 			</view>
 
-			<view v-if="isRegister" class="field">
+			<view v-if="isRegister || loginByPwd" class="field">
 				<text class="field-label">密码</text>
 				<view class="input-box">
 					<input
 						class="input"
 						:type="showPwd ? 'text' : 'password'"
 						v-model="password"
-						placeholder="不少于 6 位"
+						:placeholder="isRegister ? '不少于 6 位' : '请输入密码'"
 						placeholder-class="placeholder"
 					/>
 					<text class="input-eye" @click="togglePwd">{{ showPwd ? '隐藏' : '显示' }}</text>
@@ -101,10 +110,11 @@
 </template>
 
 <script setup lang="uts">
-	import { ref, onUnmounted } from 'vue'
+	import { ref, onUnmounted, computed } from 'vue'
 	import {
 		sendEmailCode,
 		emailLogin,
+		emailPasswordLogin,
 		emailRegister,
 		consumePendingInviteCode,
 		savePendingInviteCode,
@@ -113,6 +123,8 @@
 	import { startMatrixFromPlatform } from '@/common/app.uts'
 
 	const isRegister = ref<boolean>(false)
+	/** 登录页：true=密码登录，false=验证码登录 */
+	const loginByPwd = ref<boolean>(true)
 	const email = ref<string>('')
 	const code = ref<string>('')
 	const nickname = ref<string>('')
@@ -122,6 +134,12 @@
 	const loading = ref<boolean>(false)
 	const codeWait = ref<number>(0)
 	let codeTimer: number | null = null
+
+	const cardSub = computed((): string => {
+		if (isRegister.value) return '邮箱验证码 + 密码注册'
+		if (loginByPwd.value) return '使用邮箱密码登录'
+		return '使用邮箱验证码登录'
+	})
 
 	function resolveInviteForSubmit(): string {
 		let inv = inviteCode.value.trim()
@@ -169,6 +187,10 @@
 
 	function togglePwd() {
 		showPwd.value = !showPwd.value
+	}
+
+	function setLoginByPwd(v: boolean): void {
+		loginByPwd.value = v
 	}
 
 	function toggleMode() {
@@ -230,17 +252,28 @@
 		if (loading.value) return
 		const em = email.value.trim()
 		const cd = code.value.trim()
+		const pwd = password.value
 		if (!validEmail(em)) {
 			uni.showToast({ title: '请输入正确邮箱', icon: 'none' })
 			return
 		}
-		if (cd.length == 0) {
-			uni.showToast({ title: '请输入验证码', icon: 'none' })
-			return
-		}
 		if (isRegister.value) {
-			if (password.value.length < 6) {
+			if (cd.length == 0) {
+				uni.showToast({ title: '请输入验证码', icon: 'none' })
+				return
+			}
+			if (pwd.length < 6) {
 				uni.showToast({ title: '密码不少于 6 位', icon: 'none' })
+				return
+			}
+		} else if (loginByPwd.value) {
+			if (pwd.length == 0) {
+				uni.showToast({ title: '请输入密码', icon: 'none' })
+				return
+			}
+		} else {
+			if (cd.length == 0) {
+				uni.showToast({ title: '请输入验证码', icon: 'none' })
 				return
 			}
 		}
@@ -251,7 +284,10 @@
 			if (isRegister.value) {
 				const invite = resolveInviteForSubmit()
 				console.log('[mail] register invite=', invite)
-				await emailRegister(em, cd, password.value, nickname.value.trim(), invite)
+				await emailRegister(em, cd, pwd, nickname.value.trim(), invite)
+			} else if (loginByPwd.value) {
+				console.log('[mail] password-login')
+				await emailPasswordLogin(em, pwd)
 			} else {
 				await emailLogin(em, cd)
 			}
@@ -334,7 +370,33 @@
 	.card-subtitle {
 		font-size: 26rpx;
 		color: #64748b;
-		margin-bottom: 48rpx;
+		margin-bottom: 28rpx;
+	}
+	.mode-tabs {
+		flex-direction: row;
+		align-items: center;
+		background-color: #eef4fb;
+		border-radius: 16rpx;
+		padding: 6rpx;
+		margin-bottom: 32rpx;
+	}
+	.mode-tab {
+		flex: 1;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
+		border-radius: 12rpx;
+	}
+	.mode-tab-on {
+		background-color: #ffffff;
+	}
+	.mode-tab-text {
+		font-size: 26rpx;
+		color: #64748b;
+		font-weight: 600;
+	}
+	.mode-tab-text-on {
+		color: #1e6fff;
 	}
 
 	.field {

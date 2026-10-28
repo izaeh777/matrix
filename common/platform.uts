@@ -171,6 +171,27 @@ function withThinkLang(header: UTSJSONObject): UTSJSONObject {
 	return header
 }
 
+function logRequestHeaders(method: string, url: string, header: UTSJSONObject): void {
+	try {
+		const safe: UTSJSONObject = {}
+		const keys: Array<string> = ['think-lang', 'Content-Type', 'token']
+		for (let i = 0; i < keys.length; i++) {
+			const k = keys[i]
+			const v = header[k]
+			if (v == null) continue
+			if (k == 'token') {
+				const t = '' + v
+				safe[k] = t.length > 8 ? (t.substring(0, 6) + '…' + t.substring(t.length - 4)) : 'yes'
+			} else {
+				safe[k] = '' + v
+			}
+		}
+		console.log('[http] header', method, url, JSON.stringify(safe))
+	} catch (e) {
+		console.log('[http] header log fail', e)
+	}
+}
+
 function httpGet(path: string, withAuth: boolean): Promise<UTSJSONObject> {
 	const url = apiBase() + path
 	const header: UTSJSONObject = withThinkLang({})
@@ -178,6 +199,7 @@ function httpGet(path: string, withAuth: boolean): Promise<UTSJSONObject> {
 		const t = platformToken()
 		if (t.length > 0) header['token'] = t
 	}
+	logRequestHeaders('GET', url, header)
 	return new Promise((resolve, reject) => {
 		uni.request({
 			url: url,
@@ -217,6 +239,7 @@ function httpPostJson(path: string, body: UTSJSONObject, withAuth: boolean): Pro
 		const t = platformToken()
 		if (t.length > 0) header['token'] = t
 	}
+	logRequestHeaders('POST-JSON', url, header)
 	return new Promise((resolve, reject) => {
 		uni.request({
 			url: url,
@@ -257,6 +280,7 @@ function httpPostForm(path: string, fields: UTSJSONObject, withAuth: boolean): P
 		const t = platformToken()
 		if (t.length > 0) header['token'] = t
 	}
+	logRequestHeaders('POST-FORM', url, header)
 	return new Promise((resolve, reject) => {
 		uni.request({
 			url: url,
@@ -297,6 +321,7 @@ function httpPutForm(path: string, fields: UTSJSONObject, withAuth: boolean): Pr
 		const t = platformToken()
 		if (t.length > 0) header['token'] = t
 	}
+	logRequestHeaders('PUT-FORM', url, header)
 	return new Promise((resolve, reject) => {
 		uni.request({
 			url: url,
@@ -337,6 +362,7 @@ function httpPutJson(path: string, body: UTSJSONObject, withAuth: boolean): Prom
 		const t = platformToken()
 		if (t.length > 0) header['token'] = t
 	}
+	logRequestHeaders('PUT-JSON', url, header)
 	return new Promise((resolve, reject) => {
 		uni.request({
 			url: url,
@@ -454,7 +480,7 @@ export async function sendEmailCode(email: string, event: string): Promise<void>
 	assertOk(root, '验证码发送失败')
 }
 
-/** 邮箱验证码登录 */
+/** 邮箱验证码登录 POST /api/v1/auth/email/login */
 export async function emailLogin(email: string, code: string): Promise<PlatformSession> {
 	const fields: UTSJSONObject = {
 		email: email,
@@ -467,7 +493,23 @@ export async function emailLogin(email: string, code: string): Promise<PlatformS
 	return session
 }
 
-/** 邮箱注册（可选透传邀请码） */
+/**
+ * 邮箱密码登录 POST /api/v1/auth/email/password-login
+ * 与验证码登录返回结构一致（user_id / token / matrix）
+ */
+export async function emailPasswordLogin(email: string, password: string): Promise<PlatformSession> {
+	const fields: UTSJSONObject = {
+		email: email,
+		password: password
+	}
+	const root = await httpPostForm('/api/v1/auth/email/password-login', fields, false)
+	const data = assertOk(root, '登录失败')
+	const session = parseSession(data, email)
+	savePlatformSession(session)
+	return session
+}
+
+/** 邮箱注册（必填密码≥6；可选透传邀请码）POST /api/v1/auth/email/register */
 export async function emailRegister(email: string, code: string, password: string, nickname: string, inviteCode: string = ''): Promise<PlatformSession> {
 	const fields: UTSJSONObject = {
 		email: email,
@@ -479,13 +521,20 @@ export async function emailRegister(email: string, code: string, password: strin
 	if (inv.length > 0) fields['invite_code'] = inv
 	const root = await httpPostForm('/api/v1/auth/email/register', fields, false)
 	const data = assertOk(root, '注册失败')
-	// 注册成功后可能不带 token，再走一次登录
+	// 注册成功后可能不带 token：优先密码登录，再退回验证码登录
 	let token = pickStr(data, 'token')
 	if (token.length == 0) token = pickStr(data, 'access_token')
 	if (token.length > 0) {
 		const session = parseSession(data, email)
 		savePlatformSession(session)
 		return session
+	}
+	if (password.length >= 6) {
+		try {
+			return await emailPasswordLogin(email, password)
+		} catch (ePwd) {
+			console.warn('[platform] register→password-login fail', ePwd)
+		}
 	}
 	return await emailLogin(email, code)
 }
@@ -895,6 +944,207 @@ function applyMeToLocalSession(me: PlatformMe): void {
 	savePlatformSession(s)
 }
 
+export type UserBindings = {
+	emailBound: boolean
+	email: string
+	walletBound: boolean
+	wallet: string
+}
+
+function truthyFlag(obj: UTSJSONObject, keys: Array<string>): boolean {
+	for (let i = 0; i < keys.length; i++) {
+		const k = keys[i]
+		try {
+			const n = pickNum(obj, k)
+			if (n == 1) return true
+		} catch (eN) {}
+		try {
+			const v = obj[k]
+			if (v == null) continue
+			const s = ('' + v).trim().toLowerCase()
+			if (s == '1' || s == 'true' || s == 'yes' || s == 'bound' || s == '绑定') return true
+		} catch (e0) {}
+	}
+	return false
+}
+
+function parseEmailFromBindingsData(data: UTSJSONObject): UserBindings {
+	let email = pickStrAny(data, [
+		'email', 'email_mask', 'emailMask', 'masked_email', 'maskedEmail',
+		'email_address', 'emailAddress', 'bound_email', 'boundEmail'
+	])
+	let wallet = pickStrAny(data, [
+		'wallet', 'wallet_address', 'walletAddress', 'address',
+		'wallet_mask', 'walletMask', 'bound_wallet', 'boundWallet'
+	])
+	let emailBound = truthyFlag(data, [
+		'email_bound', 'emailBound', 'has_email', 'hasEmail',
+		'email_bind', 'emailBind', 'is_email_bound', 'isEmailBound'
+	])
+	let walletBound = truthyFlag(data, [
+		'wallet_bound', 'walletBound', 'has_wallet', 'hasWallet',
+		'wallet_bind', 'walletBind', 'is_wallet_bound', 'isWalletBound'
+	])
+	const emailObj = pickObj(data, 'email')
+	if (emailObj != null) {
+		const em = pickStrAny(emailObj!, ['value', 'address', 'email', 'mask', 'masked'])
+		if (em.length > 0) email = em
+		if (truthyFlag(emailObj!, ['bound', 'bind', 'linked', 'has'])) emailBound = true
+	}
+	const walletObj = pickObj(data, 'wallet')
+	if (walletObj != null) {
+		const wa = pickStrAny(walletObj!, ['value', 'address', 'wallet', 'mask', 'masked'])
+		if (wa.length > 0) wallet = wa
+		if (truthyFlag(walletObj!, ['bound', 'bind', 'linked', 'has'])) walletBound = true
+	}
+	if (!emailBound && email.length > 0 && email.indexOf('@') > 0) emailBound = true
+	if (!walletBound && wallet.length > 10) walletBound = true
+	const out: UserBindings = {
+		emailBound: emailBound,
+		email: email,
+		walletBound: walletBound,
+		wallet: wallet
+	}
+	return out
+}
+
+function readIdentityRows(data: UTSJSONObject): Array<UTSJSONObject> {
+	const out: Array<UTSJSONObject> = []
+	const nestKeys = ['list', 'identities', 'items', 'data']
+	for (let k = 0; k < nestKeys.length; k++) {
+		try {
+			const raw = data[nestKeys[k]]
+			if (raw == null) continue
+			const list = raw as Array<UTSJSONObject>
+			if (list == null || list.length == 0) continue
+			for (let i = 0; i < list.length; i++) {
+				out.push(list[i])
+			}
+			if (out.length > 0) return out
+		} catch (e0) {}
+	}
+	try {
+		const asArr = data as Array<UTSJSONObject>
+		if (asArr != null && asArr.length > 0) {
+			for (let j = 0; j < asArr.length; j++) out.push(asArr[j])
+		}
+	} catch (e1) {}
+	return out
+}
+
+function parseEmailFromIdentitiesData(data: UTSJSONObject): UserBindings {
+	let email = ''
+	let wallet = ''
+	let emailBound = false
+	let walletBound = false
+	const rows = readIdentityRows(data)
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i]
+		const typ = pickStrAny(row, ['type', 'kind', 'channel', 'provider', 'identity_type']).toLowerCase()
+		const val = pickStrAny(row, ['value', 'identity', 'mask', 'masked', 'email', 'address', 'account'])
+		if (typ.indexOf('email') >= 0 || typ.indexOf('mail') >= 0 || val.indexOf('@') > 0) {
+			emailBound = true
+			if (val.length > 0) email = val
+		}
+		if (typ.indexOf('wallet') >= 0 || typ.indexOf('address') >= 0) {
+			walletBound = true
+			if (val.length > 0) wallet = val
+		}
+	}
+	if (!emailBound && !walletBound) {
+		return parseEmailFromBindingsData(data)
+	}
+	const out: UserBindings = {
+		emailBound: emailBound,
+		email: email,
+		walletBound: walletBound,
+		wallet: wallet
+	}
+	return out
+}
+
+/**
+ * 邮箱/钱包绑定状态
+ * GET /api/v1/users/me/bindings ；失败时回退 identities
+ */
+function syncBoundEmailToSession(email: string): void {
+	const em = email.trim()
+	if (em.length == 0 || em.indexOf('@') < 1) return
+	const s = loadPlatformSession()
+	if (s == null) return
+	if (s.email.length == 0) {
+		s.email = em
+		savePlatformSession(s)
+	}
+}
+
+/**
+ * 邮箱/钱包绑定状态
+ * GET /api/v1/users/me/bindings ；失败时回退 identities，再回退本地 session.email
+ */
+export async function fetchUserBindings(): Promise<UserBindings> {
+	try {
+		const root = await httpGet('/api/v1/users/me/bindings', true)
+		const data = assertOk(root, '获取绑定状态失败')
+		logJson('[platform] users/me/bindings', data)
+		const b = parseEmailFromBindingsData(data)
+		if (b.emailBound) syncBoundEmailToSession(b.email)
+		return b
+	} catch (e0) {
+		console.warn('[platform] bindings fail', e0)
+	}
+	try {
+		const root2 = await httpGet('/api/v1/users/me/identities', true)
+		const data2 = assertOk(root2, '获取绑定身份失败')
+		logJson('[platform] users/me/identities', data2)
+		const b2 = parseEmailFromIdentitiesData(data2)
+		if (b2.emailBound) syncBoundEmailToSession(b2.email)
+		return b2
+	} catch (e1) {
+		console.warn('[platform] identities fail', e1)
+	}
+	const local = loadPlatformSession()
+	const em = local != null ? local.email.trim() : ''
+	const out: UserBindings = {
+		emailBound: em.length > 0 && em.indexOf('@') > 0,
+		email: em,
+		walletBound: false,
+		wallet: ''
+	}
+	return out
+}
+
+/** 绑定邮箱-发送验证码 POST /api/v1/users/me/email/send-code */
+export async function sendBindEmailCode(email: string): Promise<void> {
+	const em = email.trim()
+	if (em.length == 0 || em.indexOf('@') < 1) throw new Error('请输入正确邮箱')
+	const fields: UTSJSONObject = {
+		email: em
+	}
+	const root = await httpPostForm('/api/v1/users/me/email/send-code', fields, true)
+	assertOk(root, '发送验证码失败')
+}
+
+/** 绑定邮箱-校验验证码 POST /api/v1/users/me/email/bind */
+export async function bindPlatformEmail(email: string, code: string): Promise<void> {
+	const em = email.trim()
+	const cd = code.trim()
+	if (em.length == 0 || em.indexOf('@') < 1) throw new Error('请输入正确邮箱')
+	if (cd.length == 0) throw new Error('请输入验证码')
+	const fields: UTSJSONObject = {
+		email: em,
+		code: cd
+	}
+	const root = await httpPostForm('/api/v1/users/me/email/bind', fields, true)
+	assertOk(root, '绑定邮箱失败')
+	syncBoundEmailToSession(em)
+	const s = loadPlatformSession()
+	if (s != null) {
+		s.email = em
+		savePlatformSession(s)
+	}
+}
+
 export async function fetchPlatformMe(): Promise<PlatformMe> {
 	const root = await httpGet('/api/v1/users/me', true)
 	const data = assertOk(root, '获取用户信息失败')
@@ -1233,6 +1483,53 @@ export async function renewBillingSubscription(planCode: string = ''): Promise<B
 	logJson('[platform] billing/renew', root)
 	const data = assertOk(root, '续费失败')
 	return parseBillingOrder(data, root, planCode)
+}
+
+/** 提现验证码邮件 event（后台约定拼写） */
+export const WITHDRAW_CODE_EVENT = 'withfraw'
+
+/** 发送提现邮箱验证码 */
+export async function sendWithdrawEmailCode(email: string): Promise<void> {
+	const em = email.trim()
+	if (em.length == 0) throw new Error('邮箱为空')
+	await sendEmailCode(em, WITHDRAW_CODE_EVENT)
+}
+
+export type BillingWithdrawResult = {
+	ok: boolean
+	msg: string
+	raw: UTSJSONObject
+}
+
+/**
+ * 申请提现
+ * POST /api/v1/billing/withdraw
+ * 需登录；须带邮箱验证码（event=withfraw）
+ */
+export async function billingWithdraw(amount: string, address: string, code: string): Promise<BillingWithdrawResult> {
+	if (platformToken().length == 0) throw new Error('请先登录平台账号')
+	const amt = amount.trim()
+	const addr = address.trim()
+	const cd = code.trim()
+	if (amt.length == 0) throw new Error('请输入提现金额')
+	if (addr.length < 10) throw new Error('请输入提现地址')
+	if (cd.length == 0) throw new Error('请输入验证码')
+	const fields: UTSJSONObject = {
+		amount: amt,
+		address: addr,
+		wallet_address: addr,
+		code: cd
+	}
+	console.log('[platform] billing/withdraw amount=', amt, 'addr=', addr, 'codeLen=', cd.length)
+	const root = await httpPostForm('/api/v1/billing/withdraw', fields, true)
+	logJson('[platform] billing/withdraw resp', root)
+	const data = assertOk(root, '提现失败')
+	const out: BillingWithdrawResult = {
+		ok: true,
+		msg: pickStr(root, 'msg'),
+		raw: data
+	}
+	return out
 }
 
 /**
