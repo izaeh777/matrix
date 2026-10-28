@@ -1,3 +1,4 @@
+import { t } from './i18n.uts'
 /**
  * TokenPocket App 钱包：优先 Mobile-SDK（authorize / ethPersonalSign）
  * DeepLink 仅作兜底（需 callbackUrl + 自定义 scheme）
@@ -322,7 +323,7 @@ export async function waitBscTxConfirmed(txHash: string, maxWaitMs: number = 450
 	}
 	if (txHash.length < 66 || txHash.indexOf('0x') != 0) {
 		out.status = 'failed'
-		out.message = '无效交易哈希'
+		out.message = t('tp.invalidHash')
 		return out
 	}
 	await sleepMs(1200)
@@ -340,12 +341,12 @@ export async function waitBscTxConfirmed(txHash: string, maxWaitMs: number = 450
 			console.log('[tp] receipt', rpc, 'st=', st)
 			if (st == '0x1' || st == '0x01' || st == '1') {
 				out.status = 'confirmed'
-				out.message = '链上已确认'
+				out.message = t('tp.confirmed')
 				return out
 			}
 			if (st == '0x0' || st == '0x00' || st == '0') {
 				out.status = 'failed'
-				out.message = '链上交易失败（已回滚）'
+				out.message = t('tp.txFail')
 				return out
 			}
 			if (st == 'pending' || st == 'unknown') {
@@ -362,12 +363,12 @@ export async function waitBscTxConfirmed(txHash: string, maxWaitMs: number = 450
 			const bs = await checkBscScanStatus(txHash)
 			if (bs == '0x1') {
 				out.status = 'confirmed'
-				out.message = '链上已确认(BscScan)'
+				out.message = t('tp.confirmedScan')
 				return out
 			}
 			if (bs == '0x0') {
 				out.status = 'failed'
-				out.message = '链上交易失败（BscScan）'
+				out.message = t('tp.txFailScan')
 				return out
 			}
 		}
@@ -376,10 +377,10 @@ export async function waitBscTxConfirmed(txHash: string, maxWaitMs: number = 450
 	// 超时：若几乎全是网络失败 → network；若见过 pending → timeout
 	if (pendingHits == 0 && netFails > 0) {
 		out.status = 'network'
-		out.message = '无法连接 BSC 节点确认交易，可到钱包/BscScan 核对后手动同步'
+		out.message = t('tp.nodeFail')
 	} else {
 		out.status = 'timeout'
-		out.message = '等待确认超时，请到 BscScan 核对：' + txHash
+		out.message = t('tp.confirmTimeout') + txHash
 	}
 	return out
 }
@@ -389,13 +390,13 @@ export async function waitBscTxConfirmed(txHash: string, maxWaitMs: number = 450
  * to=收款地址 amount=人类可读数量（如 "100"）
  */
 export async function tpTransferUsdt(to: string, amount: string, desc: string = ''): Promise<TpTransferResult> {
-	if (to.length == 0) throw new Error('收款地址为空')
-	if (amount.length == 0) throw new Error('金额为空')
+	if (to.length == 0) throw new Error(t('tp.emptyAddr'))
+	if (amount.length == 0) throw new Error(t('tp.emptyAmount'))
 	let from = loadTpWalletAddress()
 	if (from.length == 0) {
 		// 未缓存地址时先授权拿 from
 		const auth = await tpSdkAuthorize()
-		if (!auth.ok || auth.wallet.length == 0) throw new Error('请先连接钱包')
+		if (!auth.ok || auth.wallet.length == 0) throw new Error(t('tp.connectWallet'))
 		from = auth.wallet
 	}
 	const actionId = newActionId()
@@ -422,9 +423,9 @@ export async function tpTransferUsdt(to: string, amount: string, desc: string = 
 		raw: r.raw
 	}
 	if (!out.ok && r.code == 0) {
-		throw new Error('转账已提交但未解析到交易哈希，请稍后在钱包核对')
+		throw new Error(t('tp.noHash'))
 	}
-	if (!out.ok) throw new Error(r.raw.length > 0 ? r.raw : '转账失败')
+	if (!out.ok) throw new Error(r.raw.length > 0 ? r.raw : t('tp.transferFail'))
 	return out
 }
 

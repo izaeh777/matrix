@@ -3,6 +3,7 @@
  * 用 uni-app 的 getApp() globalData 模式
  */
 import { MatrixClient, setMatrix, clearMatrix, getMatrix } from './matrix.uts'
+	import { t } from '@/common/i18n.uts'
 import { saveSession, loadSession, clearSession, SessionInfo } from './storage.uts'
 import { loadPlatformSession } from './platform.uts'
 import { bindCallToMatrix, getCallManager } from './call.uts'
@@ -41,7 +42,7 @@ export function startMatrixFromPlatform(): boolean {
 
 /** 引导补登 Matrix（聊天账号），不清除平台 session */
 export function openMatrixLogin(): void {
-	uni.showToast({ title: '聊天需先登录 Matrix 账号', icon: 'none' })
+	uni.showToast({ title: t('app.needMatrix'), icon: 'none' })
 	uni.navigateTo({ url: '/pages/login/login-email' })
 }
 

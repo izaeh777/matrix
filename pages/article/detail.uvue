@@ -7,18 +7,18 @@
 			<view class="back-btn" @click="goBack">
 				<text class="back-text">‹</text>
 			</view>
-			<text class="topbar-title">资讯详情</text>
+			<text class="topbar-title">{{ t('article.title') }}</text>
 			<view class="topbar-right"></view>
 		</view>
 
 		<scroll-view class="body" direction="vertical" :show-scrollbar="false" :rebound="false">
 			<view v-if="loading" class="state">
-				<text class="state-text">加载中…</text>
+				<text class="state-text">{{ t('article.loading') }}</text>
 			</view>
 			<view v-else-if="errorText.length > 0" class="state">
 				<text class="state-text">{{ errorText }}</text>
 				<view class="retry" @click="loadDetail">
-					<text class="retry-text">重试</text>
+					<text class="retry-text">{{ t('article.retry') }}</text>
 				</view>
 			</view>
 			<view v-else-if="hasDetail" class="article">
@@ -29,9 +29,9 @@
 					<text class="meta-text">{{ timeText }}</text>
 				</view>
 				<view class="stat-row">
-					<text class="stat">阅读 {{ viewsText }}</text>
-					<text class="stat">点赞 {{ likesText }}</text>
-					<text class="stat">评论 {{ commentsText }}</text>
+					<text class="stat">{{ t('article.views') }} {{ viewsText }}</text>
+					<text class="stat">{{ t('article.likes') }} {{ likesText }}</text>
+					<text class="stat">{{ t('article.comments') }} {{ commentsText }}</text>
 				</view>
 				<image
 					v-if="cover.length > 0"
@@ -44,7 +44,7 @@
 				</view>
 				<text class="content">{{ contentText }}</text>
 				<view v-if="outlinkText.length > 0" class="outlink" @click="openOutlink">
-					<text class="outlink-text">查看原文 ›</text>
+					<text class="outlink-text">{{ t('article.origin') }}</text>
 				</view>
 
 				<view class="nav-block">
@@ -53,7 +53,7 @@
 						class="nav-item"
 						@click="openSibling(prevId)"
 					>
-						<text class="nav-label">上一篇</text>
+						<text class="nav-label">{{ t('article.prev') }}</text>
 						<text class="nav-title">{{ prevTitle }}</text>
 					</view>
 					<view
@@ -61,7 +61,7 @@
 						class="nav-item"
 						@click="openSibling(nextId)"
 					>
-						<text class="nav-label">下一篇</text>
+						<text class="nav-label">{{ t('article.next') }}</text>
 						<text class="nav-title">{{ nextTitle }}</text>
 					</view>
 				</view>
@@ -73,6 +73,7 @@
 
 <script setup lang="uts">
 	import { ref, computed } from 'vue'
+	import { t } from '@/common/i18n.uts'
 	import {
 		fetchArchiveDetail,
 		cmsAssetUrl,
@@ -165,7 +166,7 @@
 	async function loadDetail(): Promise<void> {
 		const id = articleId.value
 		if (id <= 0) {
-			errorText.value = '缺少资讯 id'
+			errorText.value = t('article.noId')
 			loading.value = false
 			return
 		}
@@ -175,7 +176,7 @@
 			detail.value = await fetchArchiveDetail(id)
 		} catch (e) {
 			detail.value = null
-			errorText.value = '加载失败，请稍后重试'
+			errorText.value = t('article.loadFail')
 			console.warn('加载资讯详情失败', e)
 		}
 		loading.value = false

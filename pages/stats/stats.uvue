@@ -7,15 +7,15 @@
 			<view class="back-btn" @click="goBack">
 				<text class="back-text">‹</text>
 			</view>
-			<text class="topbar-title">数据统计</text>
-			<text class="topbar-link" @click="onEarnings">收益明细</text>
+			<text class="topbar-title">{{ t('stats.title') }}</text>
+			<text class="topbar-link" @click="onEarnings">{{ t('stats.earnings') }}</text>
 		</view>
 
 		<scroll-view class="body" direction="vertical" :show-scrollbar="false" :rebound="false">
 			<view class="overview-head">
 				<view class="overview-left">
-					<text class="overview-title">数据总览</text>
-					<text class="overview-time">数据更新时间{{ updateTime }}</text>
+					<text class="overview-title">{{ t('stats.overview') }}</text>
+					<text class="overview-time">{{ t('stats.updated') }}{{ updateTime }}</text>
 				</view>
 				<view class="range-row">
 					<view
@@ -23,17 +23,17 @@
 						:class="rangeKey == '1d' ? 'range-on' : ''"
 						@click="setRange('1d')"
 					>
-						<text class="range-text" :class="rangeKey == '1d' ? 'range-text-on' : ''">近1天</text>
+						<text class="range-text" :class="rangeKey == '1d' ? 'range-text-on' : ''">{{ t('stats.d1') }}</text>
 					</view>
 					<view
 						class="range-chip"
 						:class="rangeKey == '7d' ? 'range-on' : ''"
 						@click="setRange('7d')"
 					>
-						<text class="range-text" :class="rangeKey == '7d' ? 'range-text-on' : ''">近7天</text>
+						<text class="range-text" :class="rangeKey == '7d' ? 'range-text-on' : ''">{{ t('stats.d7') }}</text>
 					</view>
 					<view class="range-chip" @click="onMoreRange">
-						<text class="range-text">更多</text>
+						<text class="range-text">{{ t('stats.more') }}</text>
 						<text class="range-caret">▾</text>
 					</view>
 				</view>
@@ -50,7 +50,7 @@
 					<text class="metric-label">{{ item.label }}</text>
 					<text class="metric-value">{{ item.value }}</text>
 					<view class="metric-diff">
-						<text class="diff-prefix">较前一日 </text>
+						<text class="diff-prefix">{{ t('stats.diffPrev') }}</text>
 						<text
 							v-if="item.trend == 'up'"
 							class="diff-up"
@@ -114,6 +114,7 @@
 
 <script setup lang="uts">
 	import { ref } from 'vue'
+	import { t } from '@/common/i18n.uts'
 
 	type MetricItem = {
 		key: string
@@ -140,12 +141,12 @@
 	const updateTime = ref('2026.05.26 12:00')
 
 	const metricList = ref([
-		{ key: 'total', label: '总收益', value: '2,569.40', diff: '100.00%', trend: 'down' } as MetricItem,
-		{ key: 'direct', label: '直推收益', value: '8600.00', diff: '100.00%', trend: 'up' } as MetricItem,
-		{ key: 'team', label: '团队收益', value: '0', diff: '', trend: 'flat' } as MetricItem,
-		{ key: 'reward', label: '平台奖励', value: '0', diff: '', trend: 'flat' } as MetricItem,
-		{ key: 'refund_n', label: '发起退款笔数', value: '0', diff: '', trend: 'flat' } as MetricItem,
-		{ key: 'refund_m', label: '发起退款金额', value: '0', diff: '', trend: 'flat' } as MetricItem
+		{ key: 'total', label: t('stats.total'), value: '2,569.40', diff: '100.00%', trend: 'down' } as MetricItem,
+		{ key: 'direct', label: t('stats.direct'), value: '8600.00', diff: '100.00%', trend: 'up' } as MetricItem,
+		{ key: 'team', label: t('stats.team'), value: '0', diff: '', trend: 'flat' } as MetricItem,
+		{ key: 'reward', label: t('stats.reward'), value: '0', diff: '', trend: 'flat' } as MetricItem,
+		{ key: 'refund_n', label: t('stats.refundN'), value: '0', diff: '', trend: 'flat' } as MetricItem,
+		{ key: 'refund_m', label: t('stats.refundM'), value: '0', diff: '', trend: 'flat' } as MetricItem
 	] as MetricItem[])
 
 	const xLabels = ref(['20260519', '20260521', '20260523', '20260526'] as string[])
@@ -179,7 +180,7 @@
 	}
 
 	function onEarnings() {
-		uni.showToast({ title: '收益明细即将开放', icon: 'none' })
+		uni.showToast({ title: t('stats.earnSoon'), icon: 'none' })
 	}
 
 	function setRange(key: string) {
@@ -190,7 +191,7 @@
 		uni.showActionSheet({
 			itemList: ['近30天', '近90天', '自定义'],
 			success: (_res) => {
-				uni.showToast({ title: '更多筛选即将开放', icon: 'none' })
+				uni.showToast({ title: t('stats.filterSoon'), icon: 'none' })
 			}
 		})
 	}

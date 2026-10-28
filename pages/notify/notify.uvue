@@ -122,7 +122,7 @@
 		likes: t('notify.likes')
 	} as NotifyI18n)
 
-	const weekNames: Array<string> = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+	const weekNames: Array<string> = [t('week.sun'), t('week.mon'), t('week.tue'), t('week.wed'), t('week.thu'), t('week.fri'), t('week.sat')]
 
 	const dayText = computed((): string => {
 		const d = new Date()

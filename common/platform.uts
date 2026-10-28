@@ -3,7 +3,7 @@
  * 鉴权头: token: <access_token>
  * 多语言头: think-lang: zh-cn | en | zh-tw | ja | ko | fr | de | es | ru | ar | pt
  */
-import { getThinkLang } from '@/common/i18n.uts'
+import { getThinkLang, t } from '@/common/i18n.uts'
 
 const API_HOST = 'https://m.itiklink.com'
 const KEY_PLATFORM = 'platform_session_v1'
@@ -418,7 +418,7 @@ function parseSession(data: UTSJSONObject, emailFallback: string): PlatformSessi
 			if (token.length == 0) token = pickStr(user!, 'access_token')
 		}
 	}
-	if (token.length == 0) throw new Error('登录成功但未返回 token')
+	if (token.length == 0) throw new Error(t('platform.noToken'))
 
 	let email = pickStr(data, 'email')
 	let nickname = pickStr(data, 'nickname')
@@ -477,7 +477,7 @@ export async function sendEmailCode(email: string, event: string): Promise<void>
 		event: event
 	}
 	const root = await httpPostForm('/api/v1/auth/email/send-code', fields, false)
-	assertOk(root, '验证码发送失败')
+	assertOk(root, t('platform.codeFail'))
 }
 
 /** 邮箱验证码登录 POST /api/v1/auth/email/login */
@@ -487,7 +487,7 @@ export async function emailLogin(email: string, code: string): Promise<PlatformS
 		code: code
 	}
 	const root = await httpPostForm('/api/v1/auth/email/login', fields, false)
-	const data = assertOk(root, '登录失败')
+	const data = assertOk(root, t('platform.loginFail'))
 	const session = parseSession(data, email)
 	savePlatformSession(session)
 	return session
@@ -503,7 +503,7 @@ export async function emailPasswordLogin(email: string, password: string): Promi
 		password: password
 	}
 	const root = await httpPostForm('/api/v1/auth/email/password-login', fields, false)
-	const data = assertOk(root, '登录失败')
+	const data = assertOk(root, t('platform.loginFail'))
 	const session = parseSession(data, email)
 	savePlatformSession(session)
 	return session
@@ -520,7 +520,7 @@ export async function emailRegister(email: string, code: string, password: strin
 	const inv = inviteCode.trim()
 	if (inv.length > 0) fields['invite_code'] = inv
 	const root = await httpPostForm('/api/v1/auth/email/register', fields, false)
-	const data = assertOk(root, '注册失败')
+	const data = assertOk(root, t('platform.registerFail'))
 	// 注册成功后可能不带 token：优先密码登录，再退回验证码登录
 	let token = pickStr(data, 'token')
 	if (token.length == 0) token = pickStr(data, 'access_token')

@@ -59,7 +59,7 @@
 		</view>
 
 		<view v-if="roomEncrypted" class="encrypt-banner">
-			<text class="encrypt-banner-text">此对话已加密，对方消息需解密后才能完整显示</text>
+			<text class="encrypt-banner-text">{{ t('chat.encrypted') }}</text>
 		</view>
 		<view v-if="incomingCall" class="incoming-call-bar">
 			<view class="incoming-call-info">
@@ -68,10 +68,10 @@
 			</view>
 			<view class="incoming-call-actions">
 				<view class="incoming-call-reject" @click="rejectIncomingCall">
-					<text class="incoming-call-btn-text">拒绝</text>
+					<text class="incoming-call-btn-text">{{ t('chat.rejectCall') }}</text>
 				</view>
 				<view class="incoming-call-accept" @click="acceptIncomingCall">
-					<text class="incoming-call-btn-text">接听</text>
+					<text class="incoming-call-btn-text">{{ t('chat.acceptCall') }}</text>
 				</view>
 			</view>
 		</view>
@@ -86,11 +86,11 @@
 			@scrolltoupper="onScrollToUpper"
 		>
 			<view v-if="loadingHistory" class="loading-history">
-				<text>加载历史消息…</text>
+				<text>{{ t('chat.loadingHistory') }}</text>
 			</view>
 
 			<view v-if="!loadingHistory && messages.length == 0" class="empty-chat">
-				<text class="empty-chat-text">还没有消息，发个招呼吧 👋</text>
+				<text class="empty-chat-text">{{ t('chat.emptySayHi') }}</text>
 			</view>
 
 			<view
@@ -119,7 +119,7 @@
 					</view>
 					<view v-else-if="isTextMsg(msg)" class="msg-content">
 						<text class="msg-text">{{ msg.body }}</text>
-						<text v-if="msg.edited" class="msg-edited">已编辑</text>
+						<text v-if="msg.edited" class="msg-edited">{{ t('chat.edited') }}</text>
 					</view>
 
 					<!-- 图片 -->
@@ -164,7 +164,7 @@
 
 					<!-- 已撤回 -->
 					<view v-else-if="msg.redacted" class="msg-content">
-						<text class="msg-redacted">消息已撤回</text>
+						<text class="msg-redacted">{{ t('chat.redacted') }}</text>
 					</view>
 
 					<view v-if="msg.msgtype != 'm.text' && msg.msgtype != 'm.notice' && msg.msgtype != 'm.emote' && msg.msgtype != 'm.image' && msg.msgtype != 'm.audio' && msg.msgtype != 'm.location' && msg.msgtype != 'm.file' && msg.msgtype != 'm.encrypted' && msg.msgtype != 'm.call' && msg.type != 'm.room.calling' && !isAudioMsg(msg) && !isCallMsg(msg)" class="msg-content">
@@ -172,7 +172,7 @@
 					</view>
 					<view v-else-if="msg.type == 'm.room.calling'" class="msg-call" @click="onCallRecordTap(msg)">
 						<image class="msg-call-icon-img" src="/static/login/t4.png" mode="aspectFit"></image>
-						<text class="msg-call-text">视频通话</text>
+						<text class="msg-call-text">{{ t('chat.videoCall') }}</text>
 					</view>
 				</view>
 				<view v-if="hasReactions(msg)" class="msg-reactions">
@@ -204,7 +204,7 @@
 				@touchend="onVoiceTouchEnd"
 				@touchcancel="onVoiceTouchCancel"
 			>
-				<text class="voice-hold-text">{{ isRecording ? voiceStatusText : '按住 说话' }}</text>
+				<text class="voice-hold-text">{{ isRecording ? voiceStatusText : t('chat.holdTalk') }}</text>
 			</view>
 			<view v-else class="input-field-wrap">
 					<input
@@ -237,25 +237,25 @@
 					<view class="more-icon-bg">
 						<image class="more-icon-img" src="/static/login/t1.png" mode="aspectFit"></image>
 					</view>
-					<text class="more-label">图片</text>
+					<text class="more-label">{{ t('chat.moreImage') }}</text>
 				</view>
 				<view class="more-item" @click="onPickFile">
 					<view class="more-icon-bg">
 						<image class="more-icon-img" src="/static/login/t2.png" mode="aspectFit"></image>
 					</view>
-					<text class="more-label">文件</text>
+					<text class="more-label">{{ t('chat.moreFile') }}</text>
 				</view>
 				<view class="more-item" @click.stop="startCallVoice">
 					<view class="more-icon-bg">
 						<image class="more-icon-img" src="/static/login/t3.png" mode="aspectFit"></image>
 					</view>
-					<text class="more-label">{{ isGroup ? '群语音' : '语音通话' }}</text>
+					<text class="more-label">{{ isGroup ? t('chat.groupVoice') : t('chat.voiceCall') }}</text>
 				</view>
 				<view class="more-item" @click.stop="startCallVideo">
 					<view class="more-icon-bg">
 						<image class="more-icon-img" src="/static/login/t4.png" mode="aspectFit"></image>
 					</view>
-					<text class="more-label">{{ isGroup ? '群视频' : '视频通话' }}</text>
+					<text class="more-label">{{ isGroup ? t('chat.groupVideo') : t('chat.videoCall') }}</text>
 				</view>
 			</view>
 		</view>
@@ -263,7 +263,7 @@
 		<view v-if="showAtPicker" class="at-mask" @click="closeAtPicker">
 			<view class="at-panel" @click.stop="">
 				<view class="at-item" @click="pickAtAll">
-					<text class="at-item-text">所有人</text>
+					<text class="at-item-text">{{ t('chat.atAll') }}</text>
 				</view>
 				<scroll-view class="at-list" scroll-y>
 					<view v-for="m in atMembers" :key="m.user_id" class="at-item" @click="pickAtMember(m)">
@@ -318,7 +318,7 @@
 				</view>
 				<view class="voice-floating-sub">
 					<text class="voice-floating-sub-text">
-						{{ voiceCancelHint ? '松开手指，取消发送' : '上滑取消，松开发送' }}
+						{{ voiceCancelHint ? t('chat.releaseCancel') : t('chat.slideCancel') }}
 					</text>
 				</view>
 			</view>
@@ -328,22 +328,22 @@
 			<view class="audio-panel-bg" @click="closeAudioRecorder"></view>
 			<view class="audio-panel-content">
 				<view class="audio-record-tip">
-					<text v-if="recordingState == 'idle'" class="audio-tip-text">点击开始录音</text>
-					<text v-else-if="recordingState == 'recording'" class="audio-tip-text recording">录音中… {{ recordDuration }}s</text>
-					<text v-else-if="recordingState == 'recorded'" class="audio-tip-text">录音完成 ({{ recordDuration }}s)</text>
+					<text v-if="recordingState == 'idle'" class="audio-tip-text">{{ t('chat.tapRecord') }}</text>
+					<text v-else-if="recordingState == 'recording'" class="audio-tip-text recording">{{ t('chat.recording') }} {{ recordDuration }}s</text>
+					<text v-else-if="recordingState == 'recorded'" class="audio-tip-text">{{ t('chat.recordDone') }} ({{ recordDuration }}s)</text>
 				</view>
 				<view class="audio-record-actions">
 					<view v-if="recordingState == 'idle'" class="audio-btn audio-btn-start" @click="startRecord">
-						<text class="audio-btn-text">🎙 开始</text>
+						<text class="audio-btn-text">🎙 {{ t('chat.start') }}</text>
 					</view>
 					<view v-else-if="recordingState == 'recording'" class="audio-btn audio-btn-stop" @click="stopRecord">
-						<text class="audio-btn-text">⏹ 停止</text>
+						<text class="audio-btn-text">⏹ {{ t('chat.stop') }}</text>
 					</view>
 					<view v-if="recordingState == 'recorded'" class="audio-btn audio-btn-cancel" @click="cancelRecord">
-						<text class="audio-btn-text">✕ 取消</text>
+						<text class="audio-btn-text">✕ {{ t('chat.cancel') }}</text>
 					</view>
 					<view v-if="recordingState == 'recorded'" class="audio-btn audio-btn-send" @click="sendAudioMsg">
-						<text class="audio-btn-text">✓ 发送</text>
+						<text class="audio-btn-text">✓ {{ t('chat.sendAudio') }}</text>
 					</view>
 				</view>
 			</view>
@@ -356,27 +356,27 @@
 				<view class="action-list">
 					<view v-if="!actionSheet.mine" class="action-item" @click="doAction('react', '👍')">
 						<text class="action-icon">👍</text>
-						<text class="action-label">表情回应</text>
+						<text class="action-label">{{ t('chat.react') }}</text>
 					</view>
 					<view v-if="!actionSheet.mine" class="action-item" @click="doAction('react', '❤️')">
 						<text class="action-icon">❤️</text>
-						<text class="action-label">表情回应</text>
+						<text class="action-label">{{ t('chat.react') }}</text>
 					</view>
 					<view class="action-item" @click="doAction('reply', '')">
 						<text class="action-icon">↩</text>
-						<text class="action-label">回复</text>
+						<text class="action-label">{{ t('chat.reply') }}</text>
 					</view>
 					<view v-if="actionSheet.mine" class="action-item" @click="doAction('edit', '')">
 						<text class="action-icon">✏</text>
-						<text class="action-label">编辑</text>
+						<text class="action-label">{{ t('chat.edit') }}</text>
 					</view>
 					<view v-if="actionSheet.mine" class="action-item action-item-danger" @click="doAction('redact', '')">
 						<text class="action-icon">🗑</text>
-						<text class="action-label">撤回</text>
+						<text class="action-label">{{ t('chat.recall') }}</text>
 					</view>
 				</view>
 				<view class="action-cancel" @click="hideActionSheet">
-					<text class="action-cancel-text">取消</text>
+					<text class="action-cancel-text">{{ t('common.cancel') }}</text>
 				</view>
 			</view>
 		</view>
@@ -471,7 +471,7 @@
 
 	const roomId = ref<string>('')
 	const highlightEventId = ref<string>('')
-	const roomName = ref<string>('洽谈')
+	const roomName = ref<string>(t('chat.title'))
 	const isGroup = ref<boolean>(false)
 	const memberCount = ref<number>(0)
 	const groupMembers = ref<Array<RoomMember>>([])
@@ -481,7 +481,7 @@
 	const chatHeaderStyle = 'background-color:#F3F8FE;'
 	const roomTitleBar = computed((): string => {
 		let title = roomName.value
-		if (title.length == 0) title = '洽谈'
+		if (title.length == 0) title = t('chat.title')
 		const n = memberCount.value
 		if (isGroup.value) {
 			// Matrix 未命名群常把成员名用顿号拼在一起，标题会挤爆顶栏
@@ -490,9 +490,9 @@
 			if (sep >= 0) {
 				let first = title.substring(0, sep).trim()
 				if (first.length > 10) first = first.substring(0, 8) + '…'
-				if (n > 1) return first + '等' + n + '人'
+				if (n > 1) { let s=t('chat.andOthers'); const i=s.indexOf('{n}'); return first+(i>=0?s.substring(0,i)+n+s.substring(i+3):(''+n)) }
 				if (first.length > 0) return first
-				return n > 0 ? '群聊(' + n + ')' : '群聊'
+				return n > 0 ? (t('chat.groupChat') + '(' + n + ')') : t('chat.groupChat')
 			}
 			if (title.length > 12) title = title.substring(0, 10) + '…'
 			if (n > 0) return title + '(' + n + ')'
@@ -912,7 +912,7 @@
 		}
 		return out
 	})
-	const myInitial = ref<string>('我')
+	const myInitial = ref<string>(t('chat.me'))
 	const myAvatarSrc = ref<string>('')
 	const senderMap = ref<UTSJSONObject>({})
 	const nameFetching: Array<string> = []
@@ -1015,12 +1015,12 @@
 	}
 
 	const voiceFloatingTip = computed<string>(() => {
-		if (voiceCancelHint.value) return '松开取消'
-		if (isRecording.value) return '正在录音…'
+		if (voiceCancelHint.value) return t('chat.releaseToCancel')
+		if (isRecording.value) return t('chat.recordingNow')
 		return ''
 	})
 	const voiceStatusText = computed<string>(() => {
-		if (voiceCancelHint.value) return '松开 取消'
+		if (voiceCancelHint.value) return t('chat.releaseToCancel')
 		return `${recordDuration.value}s`
 	})
 
@@ -1147,11 +1147,23 @@
 		if (sameDay) return hm
 		const yest = new Date(now.getTime() - 86400000)
 		const isYest = d.getFullYear() == yest.getFullYear() && d.getMonth() == yest.getMonth() && d.getDate() == yest.getDate()
-		if (isYest) return '昨天 ' + hm
+		if (isYest) return t('time.yesterday') + ' ' + hm
 		if (d.getFullYear() == now.getFullYear()) {
-			return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm
+			let s = t('time.md')
+			const m = '' + (d.getMonth() + 1)
+			const day = '' + d.getDate()
+			let i = s.indexOf('{m}'); if (i >= 0) s = s.substring(0, i) + m + s.substring(i + 3)
+			i = s.indexOf('{d}'); if (i >= 0) s = s.substring(0, i) + day + s.substring(i + 3)
+			return s + hm
 		}
-		return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm
+		let s2 = t('time.ymd')
+		const y = '' + d.getFullYear()
+		const m2 = '' + (d.getMonth() + 1)
+		const day2 = '' + d.getDate()
+		let j = s2.indexOf('{y}'); if (j >= 0) s2 = s2.substring(0, j) + y + s2.substring(j + 3)
+		j = s2.indexOf('{m}'); if (j >= 0) s2 = s2.substring(0, j) + m2 + s2.substring(j + 3)
+		j = s2.indexOf('{d}'); if (j >= 0) s2 = s2.substring(0, j) + day2 + s2.substring(j + 3)
+		return s2 + hm
 	}
 	function shouldShowTime(msg: ChatMsg): boolean {
 		if (msg.ts == 0) return false
@@ -1387,9 +1399,9 @@
 		if (msgtype != 'm.audio' && mime.indexOf('audio/') == 0) msgtype = 'm.audio'
 		if (type == 'm.room.encrypted') {
 			msgtype = 'm.encrypted'
-			body = '加密消息，当前版本无法解密'
+			body = t('chat.encryptedBody')
 		}
-		if (msgtype == 'm.audio' && body.length == 0) body = '语音'
+		if (msgtype == 'm.audio' && body.length == 0) body = t('chat.voice')
 		const msg = emptyChatMsg()
 		msg.event_id = eventId
 		msg.sender = sender
@@ -1410,7 +1422,7 @@
 		if (callDur > 0) info['call_duration'] = callDur
 		const callId = pickStr(content, 'call_id')
 		if (callId.length > 0) info['call_id'] = callId
-		if (msgtype == 'm.call' && body.length == 0) body = '语音通话'
+		if (msgtype == 'm.call' && body.length == 0) body = t('chat.voiceCall')
 		msg.body = body
 		if (msgtype == 'm.image' && mxc.length > 0) {
 			msg._src = getMxcUrl(mxc, 800, 800)
@@ -1458,7 +1470,7 @@
 	}
 	function callRecordText(msg: ChatMsg): string {
 		const video = pickStr(msg.info, 'call_type') == 'video' || msg.type == 'm.room.calling'
-		const kind = video ? '视频通话' : '语音通话'
+		const kind = video ? t('chat.videoCall') : t('chat.voiceCall')
 		const status = pickStr(msg.info, 'call_status')
 		const initiator = pickStr(msg.info, 'call_initiator')
 		const me = currentUserId.value
@@ -1469,13 +1481,13 @@
 			return kind
 		}
 		if (status == 'cancelled') {
-			return iAmInitiator ? '已取消' : '对方已取消'
+			return iAmInitiator ? t('chat.callCancelled') : t('chat.callPeerCancelled')
 		}
 		if (status == 'rejected') {
-			return iAmInitiator ? '对方已拒绝' : '已拒绝'
+			return iAmInitiator ? t('chat.callPeerRejected') : t('chat.callRejected')
 		}
 		if (status == 'missed') {
-			return iAmInitiator ? '对方无应答' : '未接听'
+			return iAmInitiator ? t('chat.callNoAnswer') : t('chat.callMissed')
 		}
 		if (msg.body.length > 0) return msg.body.replace('[', '').replace(']', '')
 		return kind
@@ -1555,7 +1567,7 @@
 			} catch (e) {}
 		})
 		rec.onError((_err) => {
-			uni.showToast({ title: '录音失败', icon: 'none' })
+			uni.showToast({ title: t('chat.recFail'), icon: 'none' })
 		})
 		const opt: RecorderManagerStartOptions = {
 			duration: 60000,
@@ -1666,7 +1678,7 @@
 			msgObj.event_id = tempId
 			msgObj.sender = matrix.userId
 			msgObj.type = 'm.room.message'
-			msgObj.body = '语音'
+			msgObj.body = t('chat.voiceBody')
 			msgObj.msgtype = 'm.audio'
 			msgObj.mxc = ''
 			msgObj.url = tempPath
@@ -1680,7 +1692,7 @@
 			scrollToBottom()
 			let mxc = ''
 			if (tempPath.length > 0) {
-				uni.showLoading({ title: '发送中…' })
+				uni.showLoading({ title: t('chat.sending') })
 				try {
 					mxc = await matrix.uploadMedia(tempPath, mime, filename)
 				} catch (upErr) {
@@ -1695,7 +1707,7 @@
 					messages.value[idx0]._failed = true
 					messages.value = messages.value.slice()
 				}
-				uni.showToast({ title: '语音发送失败', icon: 'none' })
+				uni.showToast({ title: t('chat.voiceFail'), icon: 'none' })
 				sending.value = false
 				return
 			}
@@ -1713,7 +1725,7 @@
 			}
 			schedulePersist()
 		} catch (e) {
-			uni.showToast({ title: errText(e, '语音发送失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('chat.voiceFail')), icon: 'none' })
 		}
 		sending.value = false
 	}
@@ -1769,7 +1781,7 @@
 		isRecording.value = false
 		recordingState.value = 'idle'
 		if (dur <= 0 || tempPath.length == 0) {
-			uni.showToast({ title: '录音太短', icon: 'none' })
+			uni.showToast({ title: t('chat.recShort'), icon: 'none' })
 			return
 		}
 		await sendAudioMsg(tempPath, dur)
@@ -1784,16 +1796,16 @@
 			isRecording.value = false
 			voiceCancelHint.value = false
 			uni.showModal({
-				title: '请用浏览器打开',
-				content: '微信内置浏览器不支持 H5 录音。点击右上角 ··· 选择「在浏览器打开」即可使用语音功能。',
+				title: t('chat.openBrowser'),
+				content: t('chat.wxRecLimit'),
 				showCancel: false,
-				confirmText: '我知道了'
+				confirmText: t('chat.gotIt')
 			})
 			return
 		}
 		var hasMd = (typeof navigator != 'undefined') && (navigator.mediaDevices != null)
 		if (!hasMd) {
-			uni.showToast({ title: '当前环境不支持录音', icon: 'none' })
+			uni.showToast({ title: t('chat.noRecSupport'), icon: 'none' })
 			isRecording.value = false
 			return
 		}
@@ -1963,7 +1975,7 @@
 			var W = (typeof window != 'undefined') ? window : null
 			var Ctx: any = (W != null && W.AudioContext != null) ? W.AudioContext : (W != null ? W.webkitAudioContext : null)
 			if (Ctx == null) {
-				uni.showToast({ title: '当前环境不支持录音', icon: 'none' })
+				uni.showToast({ title: t('chat.noRecSupport'), icon: 'none' })
 				isRecording.value = false
 				return
 			}
@@ -1999,7 +2011,7 @@
 			}, 200)
 		} catch (e) {
 			console.warn('wav 降级失败', e)
-			uni.showToast({ title: '当前环境不支持录音', icon: 'none' })
+			uni.showToast({ title: t('chat.noRecSupport'), icon: 'none' })
 			isRecording.value = false
 		}
 	}

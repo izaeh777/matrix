@@ -11,6 +11,7 @@ import {
 	consumePendingFriendMxid,
 	loadPlatformSession
 } from './platform.uts'
+import { t } from './i18n.uts'
 
 function queryParam(uri: string, key: string): string {
 	const q = uri.indexOf('?')
@@ -60,22 +61,22 @@ async function openFriendDm(mxid: string): Promise<void> {
 	}
 	if (matrix == null) {
 		savePendingFriendMxid(mxid)
-		uni.showToast({ title: '请先登录后再加好友', icon: 'none' })
+		uni.showToast({ title: t('deeplink.loginFirst'), icon: 'none' })
 		uni.navigateTo({ url: '/pages/login/login' })
 		return
 	}
 	if (mxid == matrix.userId) {
-		uni.showToast({ title: '不能添加自己', icon: 'none' })
+		uni.showToast({ title: t('deeplink.noSelf'), icon: 'none' })
 		return
 	}
-	uni.showLoading({ title: '正在添加…', mask: true })
+	uni.showLoading({ title: t('deeplink.adding'), mask: true })
 	try {
 		const rid = await matrix.startDM(mxid)
 		uni.hideLoading()
 		openChat(rid)
 	} catch (e) {
 		uni.hideLoading()
-		uni.showToast({ title: '加好友失败', icon: 'none' })
+		uni.showToast({ title: t('deeplink.addFail'), icon: 'none' })
 	}
 }
 
@@ -125,14 +126,14 @@ export function handleItiklinkUri(uri: string): boolean {
 			}
 		}
 		if (code.length == 0) {
-			uni.showToast({ title: '邀请码无效', icon: 'none' })
+			uni.showToast({ title: t('deeplink.inviteInvalid'), icon: 'none' })
 			return true
 		}
 		savePendingInviteCode(code)
 		if (hasPlatformLogin() || loadPlatformSession() != null) {
-			uni.showToast({ title: '邀请码已记录，仅新注册生效', icon: 'none' })
+			uni.showToast({ title: t('deeplink.inviteLogged'), icon: 'none' })
 		} else {
-			uni.showToast({ title: '邀请码已记录，请注册/登录', icon: 'none' })
+			uni.showToast({ title: t('deeplink.inviteNeedLogin'), icon: 'none' })
 			goLoginWithInvite()
 		}
 		return true
@@ -147,14 +148,14 @@ export function handleItiklinkUri(uri: string): boolean {
 			if (u.indexOf('@') != 0) u = '@' + u + ':matrix.itiklink.com'
 		}
 		if (!isMatrixId(u)) {
-			uni.showToast({ title: '好友二维码无效', icon: 'none' })
+			uni.showToast({ title: t('deeplink.qrInvalid'), icon: 'none' })
 			return true
 		}
 		if (hasPlatformLogin() || getMatrix() != null) {
 			openFriendDm(u)
 		} else {
 			savePendingFriendMxid(u)
-			uni.showToast({ title: '请先登录后加好友', icon: 'none' })
+			uni.showToast({ title: t('deeplink.loginAdd'), icon: 'none' })
 			goLoginWithInvite()
 		}
 		return true
@@ -186,24 +187,24 @@ export function tryConsumePendingFriend(): void {
 }
 
 function applyScannedText(text: string): void {
-	const t = text.trim()
-	if (t.length == 0) {
-		uni.showToast({ title: '未识别到内容', icon: 'none' })
+	const scanned = text.trim()
+	if (scanned.length == 0) {
+		uni.showToast({ title: t('deeplink.emptyScan'), icon: 'none' })
 		return
 	}
-	const ok = handleItiklinkUri(t)
+	const ok = handleItiklinkUri(scanned)
 	if (!ok) {
-		uni.showToast({ title: '无法识别该二维码', icon: 'none' })
+		uni.showToast({ title: t('deeplink.unknownQr'), icon: 'none' })
 	}
 }
 
 /** 基座未含扫码时：从剪贴板粘贴链接/邀请码 */
 function pasteLinkFallback(reason: string): void {
 	uni.showModal({
-		title: '扫码不可用',
-		content: reason + '。可粘贴邀请链接或好友链接（itiklink://…），或重新「制作自定义调试基座」后再扫。',
-		confirmText: '粘贴处理',
-		cancelText: '取消',
+		title: t('deeplink.scanUnavailable'),
+		content: (() => { let x=t('deeplink.scanFallback'); const i=x.indexOf('{reason}'); return i>=0?x.substring(0,i)+reason+x.substring(i+8):reason })(),
+		confirmText: t('deeplink.paste'),
+		cancelText: t('common.cancel'),
 		success: (r) => {
 			if (r.confirm != true) return
 			uni.getClipboardData({
@@ -215,7 +216,7 @@ function pasteLinkFallback(reason: string): void {
 					applyScannedText(data)
 				},
 				fail: () => {
-					uni.showToast({ title: '读取剪贴板失败', icon: 'none' })
+					uni.showToast({ title: t('deeplink.clipboardFail'), icon: 'none' })
 				}
 			})
 		}
@@ -225,7 +226,7 @@ function pasteLinkFallback(reason: string): void {
 /** 扫一扫入口（需自定义基座包含 uni.scanCode） */
 export function scanAddFriendOrInvite(): void {
 	// #ifndef APP
-	pasteLinkFallback('当前端不支持扫码')
+	pasteLinkFallback(t('deeplink.noScan'))
 	return
 	// #endif
 	// #ifdef APP
@@ -246,14 +247,14 @@ export function scanAddFriendOrInvite(): void {
 					msg = '' + err
 				} catch (e2) {}
 				if (msg.indexOf('scanCode') >= 0 || msg.indexOf('基座') >= 0 || msg.indexOf('未包含') >= 0) {
-					pasteLinkFallback('当前自定义基座未包含扫码能力')
+					pasteLinkFallback(t('deeplink.noScanBase'))
 					return
 				}
-				uni.showToast({ title: '扫码取消或失败', icon: 'none' })
+				uni.showToast({ title: t('deeplink.scanCancel'), icon: 'none' })
 			}
 		})
 	} catch (e) {
-		pasteLinkFallback('当前自定义基座未包含扫码能力')
+		pasteLinkFallback(t('deeplink.noScanBase'))
 	}
 	// #endif
 }

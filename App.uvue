@@ -4,6 +4,7 @@
 	import { bindCallToMatrix } from '@/common/call.uts'
 	import { captureTpCallbackFromIntent, readAndroidLaunchUri } from '@/common/tp-wallet.uts'
 	import { handleLaunchDeepLink } from '@/common/deeplink.uts'
+	import { t } from '@/common/i18n.uts'
 
 	// #ifdef APP-ANDROID || APP-HARMONY
 	let firstBackTime = 0
@@ -55,7 +56,7 @@
 		console.log('App LastPageBackPress')
 		if (firstBackTime == 0) {
 			uni.showToast({
-				title: '再按一次退出应用',
+				title: t('app.exitAgain'),
 				position: 'bottom',
 			})
 			firstBackTime = Date.now()

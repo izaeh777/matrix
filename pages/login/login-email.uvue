@@ -7,54 +7,55 @@
 			<view class="back-btn" @click="onBack">
 				<text class="back-icon">‹</text>
 			</view>
-			<text class="top-title">登录</text>
+			<text class="top-title">{{ t('login.signIn') }}</text>
 			<view class="top-spacer"></view>
 		</view>
 
 		<image class="brand-logo" src="/static/login/logo.png" mode="aspectFit"></image>
-		<text class="card-title">欢迎回来</text>
-		<text class="card-subtitle">使用账号密码登录</text>
+		<text class="card-title">{{ t('login.welcome') }}</text>
+		<text class="card-subtitle">{{ t('login.pwdLoginSub') }}</text>
 
 		<view class="field">
-			<text class="field-label">用户名</text>
+			<text class="field-label">{{ t('login.username') }}</text>
 			<view class="input-box">
 				<input
 					class="input"
 					type="text"
 					v-model="username"
-					placeholder="用户名（不含 @server）"
+					:placeholder="t('login.usernamePh')"
 					placeholder-class="placeholder"
 				/>
 			</view>
 		</view>
 
 		<view class="field">
-			<text class="field-label">密码</text>
+			<text class="field-label">{{ t('login.password') }}</text>
 			<view class="input-box">
 				<input
 					class="input"
 					:type="showPwd ? 'text' : 'password'"
 					v-model="password"
-					placeholder="请输入密码"
+					:placeholder="t('login.passwordPh')"
 					placeholder-class="placeholder"
 				/>
-				<text class="input-eye" @click="togglePwd">{{ showPwd ? '隐藏' : '显示' }}</text>
+				<text class="input-eye" @click="togglePwd">{{ showPwd ? t('login.hide') : t('login.show') }}</text>
 			</view>
 		</view>
 
 		<view class="btn-login" :class="loading ? 'btn-login-off' : ''" @click="onLogin">
-			<text class="btn-login-text">{{ loading ? '登录中…' : '登录' }}</text>
+			<text class="btn-login-text">{{ loading ? t('login.loggingIn') : t('login.signIn') }}</text>
 		</view>
 
 		<view class="signup-row">
-			<text class="signup-text">还没有账号？</text>
-			<text class="signup-link" @click="onSignup">注册账号</text>
+			<text class="signup-text">{{ t('login.noAccount') }}</text>
+			<text class="signup-link" @click="onSignup">{{ t('login.signUp') }}</text>
 		</view>
 	</view>
 </template>
 
 <script setup lang="uts">
 	import { ref } from 'vue'
+	import { t } from '@/common/i18n.uts'
 	import { MatrixClient, errText } from '@/common/matrix.uts'
 	import { startMatrixSession } from '@/common/app.uts'
 	import { saveSession } from '@/common/storage.uts'
@@ -74,7 +75,7 @@
 	}
 
 	function onSignup() {
-		uni.showToast({ title: '请联系管理员开通账号', icon: 'none' })
+		uni.showToast({ title: t('login.contactAdmin'), icon: 'none' })
 	}
 
 	async function onLogin() {
@@ -82,16 +83,16 @@
 		const user = username.value.trim()
 		const pwd = password.value
 		if (user.length == 0) {
-			uni.showToast({ title: '请输入用户名', icon: 'none' })
+			uni.showToast({ title: t('login.needUsername'), icon: 'none' })
 			return
 		}
 		if (pwd.length == 0) {
-			uni.showToast({ title: '请输入密码', icon: 'none' })
+			uni.showToast({ title: t('login.needPwd'), icon: 'none' })
 			return
 		}
 
 		loading.value = true
-		uni.showLoading({ title: '登录中…' })
+		uni.showLoading({ title: t('login.loggingIn') })
 		try {
 			const client = new MatrixClient()
 			const session = await client.login(homeserver.value.trim(), user, pwd)
@@ -107,7 +108,7 @@
 			}
 
 			uni.hideLoading()
-			uni.showToast({ title: '登录成功', icon: 'success' })
+			uni.showToast({ title: t('login.ok'), icon: 'success' })
 
 			setTimeout(() => {
 				uni.reLaunch({ url: '/pages/home/home' })
@@ -115,7 +116,7 @@
 		} catch (e: any) {
 			uni.hideLoading()
 			loading.value = false
-			const msg = errText(e, '登录失败')
+			const msg = errText(e, t('login.fail'))
 			uni.showToast({ title: msg, icon: 'none', duration: 3000 })
 		}
 	}

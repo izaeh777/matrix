@@ -21,17 +21,17 @@
 			<image class="slogan-img" src="/static/login/ls.png" mode="widthFix"></image>
 
 			<view class="btn-primary" @click="goLogin">
-				<text class="btn-primary-text">登录</text>
+				<text class="btn-primary-text">{{ i18n.signIn }}</text>
 			</view>
 		</view>
 
 		<view class="btn-outline" @click="onRegister">
-			<text class="btn-outline-text">注册账号</text>
+			<text class="btn-outline-text">{{ i18n.signUp }}</text>
 		</view>
 
 		<view class="other-row">
 			<view class="other-line"></view>
-			<text class="other-text">其他方式登录</text>
+			<text class="other-text">{{ i18n.otherWays }}</text>
 			<view class="other-line"></view>
 		</view>
 
@@ -49,8 +49,21 @@
 <script setup lang="uts">
 	import { ref } from 'vue'
 	import { savePendingInviteCode } from '@/common/platform.uts'
-	import { getLocaleLabel, openLanguagePage } from '@/common/i18n.uts'
+	import { getLocaleLabel, openLanguagePage, t } from '@/common/i18n.uts'
 
+	type LoginI18n = {
+		signIn: string
+		signUp: string
+		otherWays: string
+	}
+	function buildLoginI18n(): LoginI18n {
+		return {
+			signIn: t('login.signIn'),
+			signUp: t('login.signUp'),
+			otherWays: t('login.otherWays')
+		} as LoginI18n
+	}
+	const i18n = ref<LoginI18n>(buildLoginI18n())
 	const langLabel = ref<string>(getLocaleLabel())
 
 	onLoad((opts: UTSJSONObject) => {
@@ -84,6 +97,7 @@
 
 	onShow(() => {
 		langLabel.value = getLocaleLabel()
+		i18n.value = buildLoginI18n()
 	})
 
 	function onOther(name: string) {
@@ -91,7 +105,7 @@
 			uni.navigateTo({ url: '/pages/login/login-wallet' })
 			return
 		}
-		uni.showToast({ title: '该登录方式暂未开放', icon: 'none' })
+		uni.showToast({ title: t('login.waySoon'), icon: 'none' })
 	}
 </script>
 

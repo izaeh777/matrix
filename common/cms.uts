@@ -4,7 +4,7 @@
  * 友链: GET /api/cms/friendlink  operationId=index_friendlink
  * 多语言头: think-lang
  */
-import { getThinkLang } from '@/common/i18n.uts'
+import { getThinkLang, t } from '@/common/i18n.uts'
 
 export type CmsFriendLink = {
 	id: number
@@ -261,7 +261,7 @@ export async function fetchFriendLinks(): Promise<Array<CmsFriendLink>> {
 	const code = pickNum(root, 'code')
 	if (code != 1) {
 		const msg = pickStr(root, 'msg')
-		throw new Error(msg.length > 0 ? msg : '加载友链失败')
+		throw new Error(msg.length > 0 ? msg : t('cms.linkFail'))
 	}
 	const data = root['data'] as UTSJSONObject
 	const out = parseFriendLinkRows(listFromData(data, 'list'))
@@ -304,7 +304,7 @@ export async function fetchCmsHome(): Promise<CmsHomeData> {
 	const code = pickNum(root, 'code')
 	if (code != 1) {
 		const msg = pickStr(root, 'msg')
-		throw new Error(msg.length > 0 ? msg : '加载首页失败')
+		throw new Error(msg.length > 0 ? msg : t('cms.homeFail'))
 	}
 	const data = root['data'] as UTSJSONObject
 	const empty: CmsHomeData = { latest: [], hot: [] }
@@ -322,7 +322,7 @@ export async function fetchCmsHome(): Promise<CmsHomeData> {
  */
 export async function fetchChannelArchives(channelId: number, keyword: string = '', diyname: string = ''): Promise<Array<CmsArchiveItem>> {
 	if (channelId <= 0 && diyname.length == 0) {
-		throw new Error('缺少栏目标识（channel_id 或 diyname）')
+		throw new Error(t('cms.needChannel'))
 	}
 	let path = '/api/cms/channels/archives?include_children=1'
 	if (channelId > 0) {
@@ -335,7 +335,7 @@ export async function fetchChannelArchives(channelId: number, keyword: string = 
 	const code = pickNum(root, 'code')
 	if (code != 1) {
 		const msg = pickStr(root, 'msg')
-		throw new Error(msg.length > 0 ? msg : '加载内容失败')
+		throw new Error(msg.length > 0 ? msg : t('cms.contentFail'))
 	}
 	const data = root['data'] as UTSJSONObject
 	if (data == null) return []
@@ -351,19 +351,19 @@ export async function fetchChannelArchives(channelId: number, keyword: string = 
  * 接口一般只返回摘要 description，无独立 HTML 正文时用 description 作为正文
  */
 export async function fetchArchiveDetail(id: number): Promise<CmsArchiveDetail> {
-	if (id <= 0) throw new Error('缺少资讯 id')
+	if (id <= 0) throw new Error(t('cms.needId'))
 	const root = await httpGetJson('/api/cms/archives/detail?id=' + id)
 	const code = pickNum(root, 'code')
 	if (code != 1) {
 		const msg = pickStr(root, 'msg')
-		throw new Error(msg.length > 0 ? msg : '加载详情失败')
+		throw new Error(msg.length > 0 ? msg : t('cms.detailFail'))
 	}
 	const data = root['data'] as UTSJSONObject
-	if (data == null) throw new Error('详情为空')
+	if (data == null) throw new Error(t('cms.detailEmpty'))
 	let archives = data['archives'] as UTSJSONObject
 	if (archives == null) archives = data
 	const title = pickStr(archives, 'title')
-	if (title.length == 0) throw new Error('详情无效')
+	if (title.length == 0) throw new Error(t('cms.detailInvalid'))
 	const description = pickStr(archives, 'description')
 	let content = pickStr(archives, 'content')
 	if (content.length == 0) content = pickStr(data, 'content')
@@ -440,7 +440,7 @@ export async function fetchArchiveDetail(id: number): Promise<CmsArchiveDetail> 
 
 export function openArchiveDetail(id: number): void {
 	if (id <= 0) {
-		uni.showToast({ title: '资讯无效', icon: 'none' })
+		uni.showToast({ title: t('cms.newsInvalid'), icon: 'none' })
 		return
 	}
 	uni.navigateTo({ url: '/pages/article/detail?id=' + id })
@@ -457,7 +457,7 @@ export async function searchCmsArchives(keyword: string): Promise<Array<CmsArchi
 	const code = pickNum(root, 'code')
 	if (code != 1) {
 		const msg = pickStr(root, 'msg')
-		throw new Error(msg.length > 0 ? msg : '搜索失败')
+		throw new Error(msg.length > 0 ? msg : t('cms.searchFail'))
 	}
 	const data = root['data'] as UTSJSONObject
 	if (data == null) return []
@@ -471,12 +471,34 @@ export function formatPublishAgo(ts: number): string {
 	let ms = ts
 	if (ts < 10000000000) ms = ts * 1000
 	const diff = Date.now() - ms
-	if (diff < 60000) return '刚刚'
-	if (diff < 3600000) return '发布于' + Math.floor(diff / 60000) + '分钟前'
-	if (diff < 86400000) return '发布于' + Math.floor(diff / 3600000) + '小时前'
-	if (diff < 86400000 * 7) return '发布于' + Math.floor(diff / 86400000) + '天前'
+	if (diff < 60000) return t('time.justNow')
+	if (diff < 3600000) {
+		let s = t('time.publishedMin')
+		const n = '' + Math.floor(diff / 60000)
+		const i = s.indexOf('{n}')
+		if (i >= 0) s = s.substring(0, i) + n + s.substring(i + 3)
+		return s
+	}
+	if (diff < 86400000) {
+		let s = t('time.publishedHour')
+		const n = '' + Math.floor(diff / 3600000)
+		const i = s.indexOf('{n}')
+		if (i >= 0) s = s.substring(0, i) + n + s.substring(i + 3)
+		return s
+	}
+	if (diff < 86400000 * 7) {
+		let s = t('time.publishedDay')
+		const n = '' + Math.floor(diff / 86400000)
+		const i = s.indexOf('{n}')
+		if (i >= 0) s = s.substring(0, i) + n + s.substring(i + 3)
+		return s
+	}
 	const d = new Date(ms)
-	return '发布于' + (d.getMonth() + 1) + '-' + d.getDate()
+	let s = t('time.publishedDate')
+	const dstr = (d.getMonth() + 1) + '-' + d.getDate()
+	const i = s.indexOf('{d}')
+	if (i >= 0) return s.substring(0, i) + dstr + s.substring(i + 3)
+	return dstr
 }
 
 function httpPostForm(path: string, fields: UTSJSONObject): Promise<UTSJSONObject> {
@@ -558,7 +580,7 @@ export async function createCmsProject(draft: CmsProjectDraft): Promise<number> 
 	const code = pickNum(root, 'code')
 	if (code != 1) {
 		const msg = pickStr(root, 'msg')
-		throw new Error(msg.length > 0 ? msg : '创建项目失败')
+		throw new Error(msg.length > 0 ? msg : t('cms.createFail'))
 	}
 	const data = root['data'] as UTSJSONObject
 	if (data == null) return 0
@@ -574,7 +596,7 @@ export async function submitCmsProject(id: number): Promise<void> {
 	const code = pickNum(root, 'code')
 	if (code != 1) {
 		const msg = pickStr(root, 'msg')
-		throw new Error(msg.length > 0 ? msg : '提交审核失败')
+		throw new Error(msg.length > 0 ? msg : t('cms.submitFail'))
 	}
 }
 
@@ -646,7 +668,7 @@ export function openCmsLink(url: string): void {
 	uni.setClipboardData({
 		data: url,
 		success: () => {
-			uni.showToast({ title: '链接已复制，请到浏览器打开', icon: 'none' })
+			uni.showToast({ title: t('cms.copyOpen'), icon: 'none' })
 		}
 	})
 }

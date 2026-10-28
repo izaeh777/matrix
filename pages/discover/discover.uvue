@@ -7,14 +7,14 @@
 			<view class="search-box" @click="onSearchBoxTap">
 				<view v-if="keyword.length == 0 && !searchFocused" class="search-placeholder">
 					<text class="search-ico">⌕</text>
-					<text class="search-ph-text">开始搜索</text>
+					<text class="search-ph-text">{{ t('discover.searchPh') }}</text>
 				</view>
 				<view v-else class="search-inner">
 					<text class="search-ico">⌕</text>
 					<input
 						class="search-input"
 						v-model="keyword"
-						placeholder="开始搜索"
+						:placeholder="t('discover.searchPh')"
 						placeholder-class="search-ph"
 						confirm-type="search"
 						:focus="searchFocused"
@@ -61,21 +61,21 @@
 		<scroll-view class="body" direction="vertical" :show-scrollbar="false">
 			<view class="banner">
 				<view class="banner-text">
-					<text class="banner-title">智聚未来 AI共生</text>
-					<text class="banner-sub">202X全球互联网AI峰会</text>
+					<text class="banner-title">{{ t('discover.bannerTitle') }}</text>
+					<text class="banner-sub">{{ t('discover.bannerSub') }}</text>
 					<view v-if="canPublish" class="banner-btn" @click="goPublish">
-						<text class="banner-btn-text">发布项目</text>
+						<text class="banner-btn-text">{{ t('home.publish') }}</text>
 					</view>
 				</view>
 			</view>
 
 			<view v-if="loading && hotList.length == 0" class="empty">
-				<text class="empty-text">加载中…</text>
+				<text class="empty-text">{{ t('common.loading') }}</text>
 			</view>
 
 			<view class="section">
 				<view class="section-head">
-					<text class="section-title">Web3.0的体验</text>
+					<text class="section-title">{{ t('discover.sectionWeb3') }}</text>
 					<view class="section-more" @click="onSearch">
 						<text class="section-more-ico">›</text>
 					</view>
@@ -93,11 +93,11 @@
 								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
 								<view v-else class="card-cover card-cover-fallback"></view>
 								<view class="badge" :class="idx % 2 == 0 ? 'badge-hot' : 'badge-new'">
-									<text class="badge-text">{{ idx % 2 == 0 ? '热门' : '最新' }}</text>
+									<text class="badge-text">{{ idx % 2 == 0 ? t('discover.hot') : t('discover.latest') }}</text>
 								</view>
 							</view>
 							<text class="card-title">{{ item.title }}</text>
-							<text class="card-meta">${{ tvlOf(item) }} TVL 起</text>
+							<text class="card-meta">${{ tvlOf(item) }} {{ t('discover.tvlFrom') }}</text>
 							<view class="stat-row">
 								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
 								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>
@@ -120,11 +120,11 @@
 								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
 								<view v-else class="card-cover card-cover-fallback"></view>
 								<view class="badge" :class="idx % 2 == 0 ? 'badge-hot' : 'badge-new'">
-									<text class="badge-text">{{ idx % 2 == 0 ? '热门' : '最新' }}</text>
+									<text class="badge-text">{{ idx % 2 == 0 ? t('discover.hot') : t('discover.latest') }}</text>
 								</view>
 							</view>
 							<text class="card-title">{{ item.title }}</text>
-							<text class="card-meta">${{ tvlOf(item) }} TVL 起</text>
+							<text class="card-meta">${{ tvlOf(item) }} {{ t('discover.tvlFrom') }}</text>
 							<view class="stat-row">
 								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
 								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>
@@ -138,7 +138,7 @@
 
 			<view class="section">
 				<view class="section-head">
-					<text class="section-title">Web3.0的体验</text>
+					<text class="section-title">{{ t('discover.sectionWeb3') }}</text>
 					<view class="section-more" @click="goNotify">
 						<text class="section-more-ico">›</text>
 					</view>
@@ -156,11 +156,11 @@
 								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
 								<view v-else class="card-cover card-cover-fallback"></view>
 								<view class="badge" :class="idx % 2 == 0 ? 'badge-new' : 'badge-hot'">
-									<text class="badge-text">{{ idx % 2 == 0 ? '最新' : '热门' }}</text>
+									<text class="badge-text">{{ idx % 2 == 0 ? t('discover.latest') : t('discover.hot') }}</text>
 								</view>
 							</view>
 							<text class="card-title">{{ item.title }}</text>
-							<text class="card-meta">${{ tvlOf(item) }} TVL 起</text>
+							<text class="card-meta">${{ tvlOf(item) }} {{ t('discover.tvlFrom') }}</text>
 							<view class="stat-row">
 								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
 								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>
@@ -183,11 +183,11 @@
 								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
 								<view v-else class="card-cover card-cover-fallback"></view>
 								<view class="badge" :class="idx % 2 == 0 ? 'badge-new' : 'badge-hot'">
-									<text class="badge-text">{{ idx % 2 == 0 ? '最新' : '热门' }}</text>
+									<text class="badge-text">{{ idx % 2 == 0 ? t('discover.latest') : t('discover.hot') }}</text>
 								</view>
 							</view>
 							<text class="card-title">{{ item.title }}</text>
-							<text class="card-meta">${{ tvlOf(item) }} TVL 起</text>
+							<text class="card-meta">${{ tvlOf(item) }} {{ t('discover.tvlFrom') }}</text>
 							<view class="stat-row">
 								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
 								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>

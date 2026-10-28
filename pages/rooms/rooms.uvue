@@ -485,10 +485,10 @@
 	})
 	const syncText = computed(() => {
 		const s = syncState.value
-		if (s == 'PREPARED') return '已同步'
-		if (s == 'SYNCING') return '同步中'
-		if (s == 'ERROR') return '同步异常'
-		return '未同步'
+		if (s == 'PREPARED') return t('rooms.synced')
+		if (s == 'SYNCING') return t('rooms.syncing')
+		if (s == 'ERROR') return t('rooms.syncError')
+		return t('rooms.notSynced')
 	})
 
 	let timer: number | null = null
@@ -626,13 +626,13 @@
 
 	function previewFromChatRow(o: UTSJSONObject): string {
 		const mt = pickStr(o, 'msgtype')
-		if (mt == 'm.audio') return '[语音]'
-		if (mt == 'm.image') return '[图片]'
-		if (mt == 'm.file') return '[文件]'
+		if (mt == 'm.audio') return t('rooms.previewVoice')
+		if (mt == 'm.image') return t('rooms.previewImage')
+		if (mt == 'm.file') return t('rooms.previewFile')
 		if (mt == 'm.call') {
 			const body = pickStr(o, 'body')
 			if (body.length > 0) return body
-			return '[通话]'
+			return t('rooms.previewCall')
 		}
 		const body = pickStr(o, 'body')
 		if (body.length > 0) return body
@@ -744,7 +744,7 @@
 		needMatrixLogin.value = true
 		rooms.value = []
 		if (hasPlatformLogin()) {
-			uni.showToast({ title: '聊天登录已失效，请重新登录', icon: 'none' })
+			uni.showToast({ title: t('rooms.sessionExpired'), icon: 'none' })
 			return
 		}
 		uni.reLaunch({ url: '/pages/login/login' })
@@ -798,13 +798,13 @@
 			const c = event.content != null ? event.content : ({} as UTSJSONObject)
 			const mt = pickStr(c, 'msgtype')
 			let body = pickStr(c, 'body')
-			if (mt == 'm.audio') body = '[语音]'
-			else if (mt == 'm.image') body = '[图片]'
-			else if (mt == 'm.file') body = '[文件]'
+			if (mt == 'm.audio') body = t('rooms.previewVoice')
+			else if (mt == 'm.image') body = t('rooms.previewImage')
+			else if (mt == 'm.file') body = t('rooms.previewFile')
 			else if (mt == 'm.call') {
-				if (body.length == 0) body = '[通话]'
+				if (body.length == 0) body = t('rooms.previewCall')
 			}
-			else if (body.length == 0) body = '[消息]'
+			else if (body.length == 0) body = t('rooms.previewMsg')
 			const ts: number = event.origin_server_ts != null ? event.origin_server_ts : Date.now()
 			const sender: string = event.sender != null ? event.sender : ''
 			const cur = rooms.value[idx]
@@ -874,13 +874,13 @@
 		stopOff(offCall)
 		offCall = callMgr.onChange((s: CallSnapshot) => {
 			incomingCall.value = s.phase == 'ringing' && s.isIncoming
-			incomingCallTitle.value = s.isVideo ? '视频来电' : s.peerName
-			incomingCallSub.value = s.isVideo ? (s.peerName + ' 邀请你视频通话') : s.sub
+			incomingCallTitle.value = s.isVideo ? t('rooms.videoIncoming') : s.peerName
+			incomingCallSub.value = s.isVideo ? (s.peerName + t('rooms.videoInvite')) : s.sub
 		})
 		const snap = callMgr.getSnapshot()
 		incomingCall.value = snap.phase == 'ringing' && snap.isIncoming
-		incomingCallTitle.value = snap.isVideo ? '视频来电' : snap.peerName
-		incomingCallSub.value = snap.isVideo ? (snap.peerName + ' 邀请你视频通话') : snap.sub
+		incomingCallTitle.value = snap.isVideo ? t('rooms.videoIncoming') : snap.peerName
+		incomingCallSub.value = snap.isVideo ? (snap.peerName + t('rooms.videoInvite')) : snap.sub
 		const unreadHandler = (rid: string, count: number) => {
 			const idx = rooms.value.findIndex((r: MatrixRoom) => r.room_id == rid)
 			if (idx >= 0) {
@@ -956,16 +956,16 @@
 	async function onAcceptInvite(roomId: string) {
 		const matrix = getMatrix()
 		if (matrix == null) return
-		uni.showLoading({ title: '正在加入…' })
+		uni.showLoading({ title: t('rooms.joining') })
 		try {
 			await matrix.joinRoom(roomId)
 			uni.hideLoading()
-			uni.showToast({ title: '已加入洽谈室', icon: 'success' })
+			uni.showToast({ title: t('rooms.joined'), icon: 'success' })
 			await loadInvites()
 			await loadRooms()
 		} catch (e: any) {
 			uni.hideLoading()
-			uni.showToast({ title: '加入失败: ' + errText(e, ''), icon: 'none' })
+			uni.showToast({ title: t('rooms.joinFail') + ': ' + errText(e, ''), icon: 'none' })
 		}
 	}
 
@@ -976,7 +976,7 @@
 			await matrix.leaveRoom(roomId)
 			await loadInvites()
 		} catch (e) {
-			uni.showToast({ title: '操作失败', icon: 'none' })
+			uni.showToast({ title: t('rooms.opFail'), icon: 'none' })
 		}
 	}
 
@@ -984,8 +984,8 @@
 		const matrix = getMatrix()
 		if (matrix == null) return
 		uni.showModal({
-			title: '拒绝邀请？',
-			content: '拒绝后将看不到这个房间的聊天内容',
+			title: t('rooms.rejectTitle'),
+			content: t('rooms.rejectContent'),
 			success: (res) => {
 				if (res.confirm) {
 					rejectInvite(roomId)
@@ -1005,32 +1005,32 @@
 	async function createRoomNow(name: string, inviteUsers: Array<string>): Promise<void> {
 		const matrix = getMatrix()
 		if (matrix == null) return
-		uni.showLoading({ title: '创建中…' })
+		uni.showLoading({ title: t('rooms.creating') })
 		try {
 			const opts: CreateRoomOpts = {
 				name: name,
-				topic: '由 MatrixApp 创建',
+				topic: t('rooms.topicCreated'),
 				preset: 'private_chat',
 				invite: inviteUsers,
 				is_direct: false
 			}
 			const roomId = await matrix.createRoom(opts)
 			uni.hideLoading()
-			uni.showToast({ title: '创建成功', icon: 'success' })
+			uni.showToast({ title: t('rooms.createOk'), icon: 'success' })
 			setTimeout(() => {
 				openChat(roomId)
 			}, 500)
 		} catch (e) {
 			uni.hideLoading()
-			uni.showToast({ title: errText(e, '创建失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('rooms.createFail')), icon: 'none' })
 		}
 	}
 
 	function askInviteThenCreate(name: string) {
 		uni.showModal({
-			title: '邀请成员（选填）',
+			title: t('rooms.inviteTitle'),
 			editable: true,
-			placeholderText: '输入用户ID，如 @zhang:matrix.itiklink.com（留空则不邀请）',
+			placeholderText: t('rooms.invitePh'),
 			success: (r) => {
 				const inviteUsers: Array<string> = []
 				const raw = r.content
@@ -1045,9 +1045,9 @@
 
 	function createNewRoom() {
 		uni.showModal({
-			title: '创建新房间',
+			title: t('rooms.createTitle'),
 			editable: true,
-			placeholderText: '房间名称（如：测试群）',
+			placeholderText: t('rooms.namePh'),
 			success: (res) => {
 				if (!res.confirm) return
 				let name = ''
@@ -1055,7 +1055,7 @@
 					name = res.content.trim()
 				}
 				if (name.length == 0) {
-					name = '新房间'
+					name = t('rooms.defaultName')
 				}
 				askInviteThenCreate(name)
 			}
@@ -1065,28 +1065,28 @@
 	async function joinRoomByInput(input: string): Promise<void> {
 		const matrix = getMatrix()
 		if (matrix == null) return
-		uni.showLoading({ title: '加入中…' })
+		uni.showLoading({ title: t('rooms.joiningShort') })
 		try {
 			const hash = input.startsWith('#')
 			const bang = input.startsWith('!')
 			const target = (hash || bang) ? input : '#' + input
 			const joined = await matrix.joinRoom(target)
 			uni.hideLoading()
-			uni.showToast({ title: '加入成功', icon: 'success' })
+			uni.showToast({ title: t('rooms.joinOk'), icon: 'success' })
 			setTimeout(() => {
 				openChat(joined.room_id)
 			}, 500)
 		} catch (e) {
 			uni.hideLoading()
-			uni.showToast({ title: errText(e, '加入失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('rooms.joinFail')), icon: 'none' })
 		}
 	}
 
 	function joinExistingRoom() {
 		uni.showModal({
-			title: '加入洽谈室',
+			title: t('rooms.joinRoomTitle'),
 			editable: true,
-			placeholderText: '输入房间号 #room:server 或房间别名',
+			placeholderText: t('rooms.joinPh'),
 			success: (res) => {
 				if (!res.confirm) return
 				const raw = res.content
@@ -1099,7 +1099,7 @@
 
 	function onJoin() {
 		uni.showActionSheet({
-			itemList: ['发起洽谈室', '添加好友', '加入已有洽谈室'],
+			itemList: [t('rooms.actionCreate'), t('rooms.actionAddFriend'), t('rooms.actionJoin')],
 			success: (res) => {
 				if (res.tapIndex == 0) {
 					openGroupPick('create')
@@ -1155,9 +1155,9 @@
 		const userId = trimmed.startsWith('@') ? trimmed : '@' + trimmed
 		try {
 			await matrix.inviteUser(roomId, userId)
-			uni.showToast({ title: '已发送邀请', icon: 'success' })
+			uni.showToast({ title: t('rooms.invited'), icon: 'success' })
 		} catch (e) {
-			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('rooms.opFail')), icon: 'none' })
 		}
 	}
 
@@ -1167,10 +1167,10 @@
 		if (matrix == null) return
 		try {
 			await matrix.setRoomName(roomId, content)
-			uni.showToast({ title: '已修改', icon: 'success' })
+			uni.showToast({ title: t('rooms.updated'), icon: 'success' })
 			loadRooms()
 		} catch (e) {
-			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('rooms.opFail')), icon: 'none' })
 		}
 	}
 
@@ -1180,10 +1180,10 @@
 		if (matrix == null) return
 		try {
 			await matrix.setRoomTopic(roomId, content)
-			uni.showToast({ title: '已修改', icon: 'success' })
+			uni.showToast({ title: t('rooms.updated'), icon: 'success' })
 			loadRooms()
 		} catch (e) {
-			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('rooms.opFail')), icon: 'none' })
 		}
 	}
 
@@ -1192,10 +1192,10 @@
 		if (matrix == null) return
 		try {
 			await matrix.leaveRoom(roomId)
-			uni.showToast({ title: '已退出', icon: 'success' })
+			uni.showToast({ title: t('rooms.left'), icon: 'success' })
 			loadRooms()
 		} catch (e) {
-			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('rooms.opFail')), icon: 'none' })
 		}
 	}
 
@@ -1216,19 +1216,19 @@
 				sortRoomList(rooms.value)
 				rooms.value = rooms.value.slice()
 				schedulePersistRooms()
-				uni.showToast({ title: next ? '已置顶' : '已取消置顶', icon: 'success' })
+				uni.showToast({ title: next ? t('rooms.pinned') : t('rooms.unpinned'), icon: 'success' })
 			} else if (action == 'mute') {
 				const next = room.muted != true
 				await matrix.setRoomMuted(room.room_id, next)
 				room.muted = next
 				rooms.value = rooms.value.slice()
 				schedulePersistRooms()
-				uni.showToast({ title: next ? '已开启免打扰' : '已关闭免打扰', icon: 'success' })
+				uni.showToast({ title: next ? t('rooms.mutedOn') : t('rooms.mutedOff'), icon: 'success' })
 			} else if (action == 'leave') {
-				const leaveName = (room.name != null) ? room.name : '此房间'
+				const leaveName = (room.name != null) ? room.name : t('rooms.thisRoom')
 				uni.showModal({
-					title: '退出房间',
-					content: '确定要退出「' + leaveName + '」吗？',
+					title: t('rooms.leaveTitle'),
+					content: (() => { let s=t('rooms.leaveConfirm'); const i=s.indexOf('{name}'); return i>=0?s.substring(0,i)+leaveName+s.substring(i+6):leaveName })(),
 					success: (res) => {
 						if (res.confirm) {
 							leaveRoomConfirmed(room.room_id)
@@ -1237,7 +1237,7 @@
 				})
 			}
 		} catch (e) {
-			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('rooms.opFail')), icon: 'none' })
 		}
 	}
 </script>

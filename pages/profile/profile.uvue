@@ -130,34 +130,34 @@
 
 		<view v-if="showInvite" class="invite-mask" @click="closeInvite">
 			<view class="invite-sheet" @click.stop="">
-				<text class="invite-title">邀请好友注册</text>
-				<text class="invite-desc">分享邀请码，新用户注册时绑定推荐关系，可提前获得新项目信息与会员特权</text>
+				<text class="invite-title">{{ t('invite.title') }}</text>
+				<text class="invite-desc">{{ t('invite.desc') }}</text>
 				<image class="invite-qr" :src="inviteQr" mode="aspectFit"></image>
 				<view class="code-pill" @click="copyInviteCode">
-					<text class="code-text">我的邀请码 {{ inviteCodeDisplay }}</text>
+					<text class="code-text">{{ t('invite.myCode') }} {{ inviteCodeDisplay }}</text>
 					<text class="code-copy">⧉</text>
 				</view>
 				<view class="or-row">
 					<view class="or-line"></view>
-					<text class="or-text">加好友</text>
+					<text class="or-text">{{ t('invite.orFriend') }}</text>
 					<view class="or-line"></view>
 				</view>
 				<view class="invite-actions">
 					<view class="invite-action" @click="onScanFriend">
-						<text class="invite-action-text">扫码加好友</text>
+						<text class="invite-action-text">{{ t('invite.scan') }}</text>
 					</view>
 					<view class="invite-action" @click="onGoAddFriend">
-						<text class="invite-action-text">搜用户名</text>
+						<text class="invite-action-text">{{ t('invite.searchUser') }}</text>
 					</view>
 				</view>
 				<view v-if="showCodeInput" class="code-input-wrap">
-					<input class="code-input" v-model="enterCode" placeholder="输入用户名或 Matrix ID" />
+					<input class="code-input" v-model="enterCode" :placeholder="t('invite.inputPh')" />
 					<view class="code-go" @click="applyFriendCode">
-						<text class="code-go-text">添加</text>
+						<text class="code-go-text">{{ t('invite.add') }}</text>
 					</view>
 				</view>
 				<view class="invite-btn" @click="onEnterCode">
-					<text class="invite-btn-text">{{ showCodeInput ? '收起' : '输入用户名加好友' }}</text>
+					<text class="invite-btn-text">{{ showCodeInput ? t('invite.collapse') : t('invite.enterUser') }}</text>
 				</view>
 			</view>
 		</view>
@@ -332,8 +332,8 @@
 	const session = ref<SessionInfo | null>(loadSession())
 	const platform = ref<PlatformSession | null>(loadPlatformSession())
 	const usdtBalance = ref<string>('--')
-	const vipLabel = ref<string>('普通用户')
-	const vipPeriod = ref<string>('暂无有效订阅')
+	const vipLabel = ref<string>(t('api.normalUser'))
+	const vipPeriod = ref<string>(t('api.subNone'))
 	const teamName = ref<string>('')
 	const langLabel = ref<string>(getLocaleLabel())
 	const showWithdraw = ref<boolean>(false)
@@ -509,7 +509,7 @@
 	})
 
 	function onSoon() {
-		uni.showToast({ title: '即将开放', icon: 'none' })
+		uni.showToast({ title: t('common.soon'), icon: 'none' })
 	}
 
 	function onLang(): void {
@@ -857,7 +857,7 @@
 	function onInvite() {
 		const id = userId.value as string
 		if (id.length == 0) {
-			uni.showToast({ title: '暂无账号', icon: 'none' })
+			uni.showToast({ title: t('invite.noAccount'), icon: 'none' })
 			return
 		}
 		showCodeInput.value = false
@@ -872,13 +872,13 @@
 	function copyInviteCode(): void {
 		const code = inviteCodeDisplay.value as string
 		if (code.length == 0) {
-			uni.showToast({ title: '暂无邀请码', icon: 'none' })
+			uni.showToast({ title: t('invite.noCode'), icon: 'none' })
 			return
 		}
 		uni.setClipboardData({
 			data: code,
 			success: () => {
-				uni.showToast({ title: '邀请码已复制', icon: 'none' })
+				uni.showToast({ title: t('invite.copied'), icon: 'none' })
 			}
 		})
 	}
@@ -900,12 +900,12 @@
 	async function applyFriendCode(): Promise<void> {
 		const code = enterCode.value.trim()
 		if (code.length == 0) {
-			uni.showToast({ title: '请输入用户名', icon: 'none' })
+			uni.showToast({ title: t('invite.needUser'), icon: 'none' })
 			return
 		}
 		const matrix = getMatrix()
 		if (matrix == null) return
-		uni.showLoading({ title: '查找中…', mask: true })
+		uni.showLoading({ title: t('invite.searching'), mask: true })
 		try {
 			let target = ''
 			if (code.indexOf('@') == 0) {
@@ -924,7 +924,7 @@
 			openChat(rid)
 		} catch (e) {
 			uni.hideLoading()
-			uni.showToast({ title: '未找到该用户', icon: 'none' })
+			uni.showToast({ title: t('invite.notFound'), icon: 'none' })
 		}
 	}
 </script>

@@ -7,13 +7,13 @@
 			<view class="back-btn" @click="onBack">
 				<text class="back-icon">‹</text>
 			</view>
-			<text class="top-title">钱包登录</text>
+			<text class="top-title">{{ t('login.wallet') }}</text>
 			<view class="top-spacer"></view>
 		</view>
 
 		<scroll-view class="form-scroll" scroll-y="true">
 			<text class="brand">i-tiklink</text>
-			<text class="card-title">钱包授权登录</text>
+			<text class="card-title">{{ t('login.walletAuth') }}</text>
 			<text class="card-subtitle">{{ subTitle }}</text>
 
 			<view class="status-card">
@@ -22,13 +22,13 @@
 			</view>
 
 			<view class="invite-field">
-				<text class="invite-label">好友码 / 邀请码（新用户选填）</text>
+				<text class="invite-label">{{ t('login.walletInvite') }}</text>
 				<view class="invite-box">
 					<input
 						class="invite-input"
 						type="text"
 						v-model="inviteCode"
-						placeholder="请输入好友邀请码"
+						:placeholder="t('login.invitePh')"
 						placeholder-class="invite-ph"
 					/>
 				</view>
@@ -46,6 +46,7 @@
 
 <script setup lang="uts">
 	import { ref, computed } from 'vue'
+	import { t } from '@/common/i18n.uts'
 	import {
 		walletChallenge,
 		walletVerify,
@@ -148,26 +149,26 @@
 	})
 
 	const subTitle = computed((): string => {
-		if (appMode.value) return 'TokenPocket 一次签名登录'
-		return '支持 TokenPocket / DeBox / MetaMask 等（EIP-4361）'
+		if (appMode.value) return t('login.walletTpOnce')
+		return t('login.walletSupport')
 	})
 
 	const statusText = computed((): string => {
 		if (waitTip.value.length > 0) return waitTip.value
 		if (address.value.length > 0) return shortAddr.value
-		return '未连接钱包'
+		return t('login.walletNotConnected')
 	})
 
 	const mainBtnText = computed((): string => {
-		if (loading.value) return '请稍候…'
-		return appMode.value ? '授权登录' : '一键签名登录/注册'
+		if (loading.value) return t('login.wait')
+		return appMode.value ? t('login.walletAuthBtn') : t('login.walletSignBtn')
 	})
 
 	const hintText = computed((): string => {
 		if (appMode.value) {
-			return '点「授权登录」后在 TokenPocket 确认一次签名即可完成登录。'
+			return t('login.walletTipApp')
 		}
-		return '流程：连接钱包 → 获取挑战 → personal_sign → 校验登录'
+		return t('login.walletTipH5')
 	})
 
 	type WalletBridge = {
@@ -180,13 +181,13 @@
 	}
 
 	function errMsg(e: any): string {
-		let msg = '操作失败'
+		let msg = t('login.walletOpFail')
 		try { msg = '' + e } catch (e2) {}
 		if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
 		if (msg.indexOf('HTTP_525') >= 0 || msg.indexOf('CDN') >= 0) {
-			return '网络暂时不可用，请再点一次授权登录'
+			return t('login.walletNet')
 		}
-		return msg.length > 0 ? msg : '操作失败'
+		return msg.length > 0 ? msg : t('login.walletOpFail')
 	}
 
 	function ensureWalletBridge(): WalletBridge | null {
@@ -211,14 +212,14 @@
 				const bridge: WalletBridge = {
 					connect: async (): Promise<string> => {
 						const eth = provider()
-						if (eth == null) throw new Error('未检测到钱包，请在 TokenPocket / DeBox / MetaMask 等钱包浏览器内打开')
+						if (eth == null) throw new Error(t('login.noWallet'))
 						const accounts = await eth.request({ method: 'eth_requestAccounts', params: [] }) as string[]
-						if (accounts == null || accounts.length == 0) throw new Error('未获取到钱包地址')
+						if (accounts == null || accounts.length == 0) throw new Error(t('login.noAddr'))
 						return accounts[0]
 					},
 					personalSign: async (message: string, addr: string): Promise<string> => {
 						const eth = provider()
-						if (eth == null) throw new Error('未检测到钱包，请在 TokenPocket / DeBox / MetaMask 等钱包浏览器内打开')
+						if (eth == null) throw new Error(t('login.noWallet'))
 						return await eth.request({ method: 'personal_sign', params: [message, addr] }) as string
 					}
 				}
@@ -247,7 +248,7 @@
 		} catch (eMx) {
 			console.warn('[wallet] matrix start fail', eMx)
 		}
-		uni.showToast({ title: '登录成功', icon: 'success' })
+		uni.showToast({ title: t('login.ok'), icon: 'success' })
 		setTimeout(() => {
 			uni.reLaunch({ url: '/pages/home/home' })
 		}, 500)
@@ -263,23 +264,23 @@
 	/** 有地址：challenge + 一次 personalSign + verify */
 	async function loginWithCachedWallet(wallet: string): Promise<void> {
 		address.value = wallet
-		waitTip.value = '正在获取签名消息…'
-		uni.showLoading({ title: '准备签名…' })
+		waitTip.value = t('login.walletSigning')
+		uni.showLoading({ title: t('login.walletPreparing') })
 		const challenge = await walletChallenge(wallet)
 		console.log('[wallet] challenge msgLen=', challenge.message.length)
 		waiting.value = true
-		waitTip.value = '请在 TokenPocket 中确认签名'
-		uni.showLoading({ title: '打开签名…' })
+		waitTip.value = t('login.walletConfirmTp')
+		uni.showLoading({ title: t('login.walletOpenSign') })
 		const signed = await tpSdkPersonalSign(challenge.message)
 		console.log('[wallet] signed ok=', signed.ok, 'wallet=', signed.wallet, 'sigLen=', signed.signature.length)
 		if (!signed.ok || signed.signature.length == 0) {
-			throw new Error('签名失败或已取消')
+			throw new Error(t('login.signCancel'))
 		}
 		const useWallet = signed.wallet.length > 10 ? signed.wallet : wallet
 		address.value = useWallet
 		saveLastWallet(useWallet)
-		waitTip.value = '正在完成登录…'
-		uni.showLoading({ title: '登录中…' })
+		waitTip.value = t('login.walletFinishing')
+		uni.showLoading({ title: t('login.loggingIn') })
 		const invite = resolveInviteForSubmit()
 		console.log('[wallet] verify invite=', invite)
 		const session = await walletVerify(useWallet, signed.signature, invite)
@@ -292,8 +293,8 @@
 	 */
 	async function loginWithTpTicketOnce(): Promise<boolean> {
 		const invite = resolveInviteForSubmit()
-		waitTip.value = '正在获取登录协议…'
-		uni.showLoading({ title: '准备签名…' })
+		waitTip.value = t('login.walletProtocol')
+		uni.showLoading({ title: t('login.walletPreparing') })
 		const init = await tpLoginInit(invite, '')
 		if (init.message.length == 0 || init.ticket.length == 0) {
 			console.warn('[wallet] tp-login message empty')
@@ -302,22 +303,22 @@
 		saveTpLoginTicket(init.ticket, init.expire)
 		console.log('[wallet] tp-login once ticket=', init.ticket, 'msgLen=', init.message.length)
 		waiting.value = true
-		waitTip.value = '请在 TokenPocket 中确认签名'
-		uni.showLoading({ title: '打开签名…' })
+		waitTip.value = t('login.walletConfirmTp')
+		uni.showLoading({ title: t('login.walletOpenSign') })
 		const signed = await tpSdkSignTicket(init.message, init.ticket)
 		console.log('[wallet] tp-login signed ok=', signed.ok, 'wallet=', signed.wallet, 'sigLen=', signed.signature.length)
 		if (!signed.ok || signed.signature.length == 0) {
-			throw new Error('签名失败或已取消')
+			throw new Error(t('login.signCancel'))
 		}
 		const useWallet = signed.wallet
 		if (useWallet.length < 10) {
-			throw new Error('未获取到钱包地址')
+			throw new Error(t('login.noAddr'))
 		}
 		address.value = useWallet
 		saveLastWallet(useWallet)
 
-		waitTip.value = '正在完成登录…'
-		uni.showLoading({ title: '登录中…' })
+		waitTip.value = t('login.walletFinishing')
+		uni.showLoading({ title: t('login.loggingIn') })
 		try {
 			await tpLoginSubmitSignature(init.ticket, useWallet, signed.signature)
 		} catch (eSub) {
@@ -381,20 +382,20 @@
 	async function onOneTapH5(): Promise<void> {
 		const bridge = ensureWalletBridge()
 		if (bridge == null) {
-			uni.showToast({ title: '请在 TokenPocket / DeBox / MetaMask 等钱包浏览器内打开', icon: 'none' })
+			uni.showToast({ title: t('login.openInWallet'), icon: 'none' })
 			return
 		}
 		loading.value = true
-		uni.showLoading({ title: '签名登录中…' })
+		uni.showLoading({ title: t('login.signing') })
 		try {
 			const addr = await bridge.connect()
 			const useAddr = addr != null ? ('' + addr) : ''
-			if (useAddr.length == 0) throw new Error('未获取到钱包地址')
+			if (useAddr.length == 0) throw new Error(t('login.noAddr'))
 			address.value = useAddr
 			const challenge = await walletChallenge(useAddr)
 			const signature = await bridge.personalSign(challenge.message, useAddr)
 			if (signature == null || ('' + signature).length == 0) {
-				throw new Error('签名失败')
+				throw new Error(t('login.signFail'))
 			}
 			await finishLoginSiwe(useAddr, '' + signature)
 		} catch (e) {
@@ -422,7 +423,7 @@
 		// 从 TP 回到前台：补查一次 ticket（定时器可能被系统挂起）
 		console.log('[wallet] onShow check ticket', ticket)
 		waiting.value = true
-		waitTip.value = '正在确认登录…'
+		waitTip.value = t('login.confirming')
 		const run = async (): Promise<void> => {
 			try {
 				const session = await tpLoginCheckOnce(ticket)

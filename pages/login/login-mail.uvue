@@ -7,102 +7,102 @@
 			<view class="back-btn" @click="onBack">
 				<text class="back-icon">‹</text>
 			</view>
-			<text class="top-title">{{ isRegister ? '注册' : '邮箱登录' }}</text>
+			<text class="top-title">{{ isRegister ? i18n.register : i18n.mail }}</text>
 			<view class="top-spacer"></view>
 		</view>
 
 		<scroll-view class="form-scroll" scroll-y="true">
 			<image class="brand-logo" src="/static/login/logo.png" mode="aspectFit"></image>
-			<text class="card-title">{{ isRegister ? '创建账号' : '欢迎回来' }}</text>
+			<text class="card-title">{{ isRegister ? i18n.create : i18n.welcome }}</text>
 			<text class="card-subtitle">{{ cardSub }}</text>
 
 			<view v-if="!isRegister" class="mode-tabs">
 				<view class="mode-tab" :class="loginByPwd ? 'mode-tab-on' : ''" @click="setLoginByPwd(true)">
-					<text class="mode-tab-text" :class="loginByPwd ? 'mode-tab-text-on' : ''">密码登录</text>
+					<text class="mode-tab-text" :class="loginByPwd ? 'mode-tab-text-on' : ''">{{ i18n.pwdTab }}</text>
 				</view>
 				<view class="mode-tab" :class="!loginByPwd ? 'mode-tab-on' : ''" @click="setLoginByPwd(false)">
-					<text class="mode-tab-text" :class="!loginByPwd ? 'mode-tab-text-on' : ''">验证码登录</text>
+					<text class="mode-tab-text" :class="!loginByPwd ? 'mode-tab-text-on' : ''">{{ i18n.codeTab }}</text>
 				</view>
 			</view>
 
 			<view class="field">
-				<text class="field-label">邮箱</text>
+				<text class="field-label">{{ i18n.email }}</text>
 				<view class="input-box">
 					<input
 						class="input"
 						type="text"
 						v-model="email"
-						placeholder="请输入邮箱"
+						:placeholder="i18n.emailPh"
 						placeholder-class="placeholder"
 					/>
 				</view>
 			</view>
 
 			<view v-if="isRegister || !loginByPwd" class="field">
-				<text class="field-label">验证码</text>
+				<text class="field-label">{{ i18n.code }}</text>
 				<view class="input-box">
 					<input
 						class="input"
 						type="number"
 						v-model="code"
-						placeholder="请输入验证码"
+						:placeholder="i18n.codePh"
 						placeholder-class="placeholder"
 					/>
 					<text
 						class="code-btn"
 						:class="codeWait > 0 ? 'code-btn-off' : ''"
 						@click="onSendCode"
-					>{{ codeWait > 0 ? (codeWait + 's') : '获取验证码' }}</text>
+					>{{ codeWait > 0 ? (codeWait + 's') : i18n.getCode }}</text>
 				</view>
 			</view>
 
 			<view v-if="isRegister" class="field">
-				<text class="field-label">昵称</text>
+				<text class="field-label">{{ i18n.nickname }}</text>
 				<view class="input-box">
 					<input
 						class="input"
 						type="text"
 						v-model="nickname"
-						placeholder="请输入昵称（可选）"
+						:placeholder="i18n.nicknamePh"
 						placeholder-class="placeholder"
 					/>
 				</view>
 			</view>
 
 			<view v-if="isRegister || loginByPwd" class="field">
-				<text class="field-label">密码</text>
+				<text class="field-label">{{ i18n.password }}</text>
 				<view class="input-box">
 					<input
 						class="input"
 						:type="showPwd ? 'text' : 'password'"
 						v-model="password"
-						:placeholder="isRegister ? '不少于 6 位' : '请输入密码'"
+						:placeholder="isRegister ? i18n.passwordMin : i18n.passwordPh"
 						placeholder-class="placeholder"
 					/>
-					<text class="input-eye" @click="togglePwd">{{ showPwd ? '隐藏' : '显示' }}</text>
+					<text class="input-eye" @click="togglePwd">{{ showPwd ? i18n.hide : i18n.show }}</text>
 				</view>
 			</view>
 
 			<view v-if="isRegister" class="field">
-				<text class="field-label">好友码 / 邀请码（选填）</text>
+				<text class="field-label">{{ i18n.invite }}</text>
 				<view class="input-box">
 					<input
 						class="input"
 						type="text"
 						v-model="inviteCode"
-						placeholder="请输入好友邀请码"
+						:placeholder="i18n.invitePh"
 						placeholder-class="placeholder"
 					/>
 				</view>
 			</view>
 
 			<view class="btn-login" :class="loading ? 'btn-login-off' : ''" @click="onSubmit">
-				<text class="btn-login-text">{{ loading ? '请稍候…' : (isRegister ? '注册并登录' : '登录') }}</text>
+				<text class="btn-login-text">{{ loading ? i18n.wait : (isRegister ? i18n.registerLogin : i18n.signIn) }}</text>
 			</view>
 
 			<view class="signup-row">
-				<text class="signup-text">{{ isRegister ? '已有账号？' : '还没有账号？' }}</text>
-				<text class="signup-link" @click="toggleMode">{{ isRegister ? '去登录' : '注册账号' }}</text>
+				<text class="signup-text">{{ isRegister ? i18n.hasAccount : i18n.noAccount }}</text>
+				<text class="signup-link" @click="toggleMode">{{ isRegister ? i18n.goLogin : i18n.signUp }}</text>
 			</view>
 			<view class="form-scroll-pad"></view>
 		</scroll-view>
@@ -121,7 +121,70 @@
 		loadPendingInviteCode
 	} from '@/common/platform.uts'
 	import { startMatrixFromPlatform } from '@/common/app.uts'
+	import { t } from '@/common/i18n.uts'
 
+	
+	type MailI18n = {
+		register: string
+		mail: string
+		create: string
+		welcome: string
+		pwdTab: string
+		codeTab: string
+		email: string
+		emailPh: string
+		code: string
+		codePh: string
+		getCode: string
+		nickname: string
+		nicknamePh: string
+		password: string
+		passwordPh: string
+		passwordMin: string
+		show: string
+		hide: string
+		invite: string
+		invitePh: string
+		wait: string
+		registerLogin: string
+		signIn: string
+		hasAccount: string
+		noAccount: string
+		goLogin: string
+		signUp: string
+	}
+	function buildMailI18n(): MailI18n {
+		return {
+			register: t('login.register'),
+			mail: t('login.mail'),
+			create: t('login.create'),
+			welcome: t('login.welcome'),
+			pwdTab: t('login.pwdTab'),
+			codeTab: t('login.codeTab'),
+			email: t('login.email'),
+			emailPh: t('login.emailPh'),
+			code: t('login.code'),
+			codePh: t('login.codePh'),
+			getCode: t('login.getCode'),
+			nickname: t('login.nickname'),
+			nicknamePh: t('login.nicknamePh'),
+			password: t('login.password'),
+			passwordPh: t('login.passwordPh'),
+			passwordMin: t('login.passwordMin'),
+			show: t('login.show'),
+			hide: t('login.hide'),
+			invite: t('login.invite'),
+			invitePh: t('login.invitePh'),
+			wait: t('login.wait'),
+			registerLogin: t('login.registerLogin'),
+			signIn: t('login.signIn'),
+			hasAccount: t('login.hasAccount'),
+			noAccount: t('login.noAccount'),
+			goLogin: t('login.goLogin'),
+			signUp: t('login.signUp')
+		} as MailI18n
+	}
+	const i18n = ref<MailI18n>(buildMailI18n())
 	const isRegister = ref<boolean>(false)
 	/** 登录页：true=密码登录，false=验证码登录 */
 	const loginByPwd = ref<boolean>(true)
@@ -136,9 +199,9 @@
 	let codeTimer: number | null = null
 
 	const cardSub = computed((): string => {
-		if (isRegister.value) return '邮箱验证码 + 密码注册'
-		if (loginByPwd.value) return '使用邮箱密码登录'
-		return '使用邮箱验证码登录'
+		if (isRegister.value) return t('login.subRegister')
+		if (loginByPwd.value) return t('login.subPwd')
+		return t('login.subCode')
 	})
 
 	function resolveInviteForSubmit(): string {
@@ -171,6 +234,10 @@
 				inviteCode.value = inv
 			}
 		} catch (eInv) {}
+	})
+
+	onShow(() => {
+		i18n.value = buildMailI18n()
 	})
 
 	onUnmounted(() => {
@@ -229,22 +296,22 @@
 		if (codeWait.value > 0 || loading.value) return
 		const em = email.value.trim()
 		if (!validEmail(em)) {
-			uni.showToast({ title: '请输入正确邮箱', icon: 'none' })
+			uni.showToast({ title: t('login.needEmail'), icon: 'none' })
 			return
 		}
 		const event = isRegister.value ? 'register' : 'login'
-		uni.showLoading({ title: '发送中…' })
+		uni.showLoading({ title: t('login.sending') })
 		try {
 			await sendEmailCode(em, event)
 			uni.hideLoading()
-			uni.showToast({ title: '验证码已发送', icon: 'none' })
+			uni.showToast({ title: t('login.codeSent'), icon: 'none' })
 			startCodeCountdown()
 		} catch (e) {
 			uni.hideLoading()
-			let msg = '发送失败'
+			let msg = t('login.sendFail')
 			try { msg = '' + e } catch (e2) {}
 			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
-			uni.showToast({ title: msg.length > 0 ? msg : '发送失败', icon: 'none', duration: 3000 })
+			uni.showToast({ title: msg.length > 0 ? msg : t('login.sendFail'), icon: 'none', duration: 3000 })
 		}
 	}
 
@@ -254,32 +321,32 @@
 		const cd = code.value.trim()
 		const pwd = password.value
 		if (!validEmail(em)) {
-			uni.showToast({ title: '请输入正确邮箱', icon: 'none' })
+			uni.showToast({ title: t('login.needEmail'), icon: 'none' })
 			return
 		}
 		if (isRegister.value) {
 			if (cd.length == 0) {
-				uni.showToast({ title: '请输入验证码', icon: 'none' })
+				uni.showToast({ title: t('login.needCode'), icon: 'none' })
 				return
 			}
 			if (pwd.length < 6) {
-				uni.showToast({ title: '密码不少于 6 位', icon: 'none' })
+				uni.showToast({ title: t('login.passwordMin'), icon: 'none' })
 				return
 			}
 		} else if (loginByPwd.value) {
 			if (pwd.length == 0) {
-				uni.showToast({ title: '请输入密码', icon: 'none' })
+				uni.showToast({ title: t('login.needPwd'), icon: 'none' })
 				return
 			}
 		} else {
 			if (cd.length == 0) {
-				uni.showToast({ title: '请输入验证码', icon: 'none' })
+				uni.showToast({ title: t('login.needCode'), icon: 'none' })
 				return
 			}
 		}
 
 		loading.value = true
-		uni.showLoading({ title: isRegister.value ? '注册中…' : '登录中…' })
+		uni.showLoading({ title: isRegister.value ? t('login.wait') : t('login.loggingIn') })
 		try {
 			if (isRegister.value) {
 				const invite = resolveInviteForSubmit()
@@ -294,17 +361,17 @@
 			// 用登录返回的 matrix 凭证直接拉起聊天会话（无需再登 Matrix）
 			startMatrixFromPlatform()
 			uni.hideLoading()
-			uni.showToast({ title: '登录成功', icon: 'success' })
+			uni.showToast({ title: t('login.ok'), icon: 'success' })
 			setTimeout(() => {
 				uni.reLaunch({ url: '/pages/home/home' })
 			}, 500)
 		} catch (e) {
 			uni.hideLoading()
 			loading.value = false
-			let msg = '操作失败'
+			let msg = t('login.opFail')
 			try { msg = '' + e } catch (e2) {}
 			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
-			uni.showToast({ title: msg.length > 0 ? msg : '操作失败', icon: 'none', duration: 3000 })
+			uni.showToast({ title: msg.length > 0 ? msg : t('login.opFail'), icon: 'none', duration: 3000 })
 		}
 	}
 </script>

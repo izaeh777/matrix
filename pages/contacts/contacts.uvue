@@ -4,7 +4,7 @@
 		<view class="status-bar-holder"></view>
 		<!-- #endif -->
 		<view class="wx-nav">
-			<text class="wx-nav-title">通讯录</text>
+			<text class="wx-nav-title">{{ t('contact.title') }}</text>
 			<text class="wx-nav-btn" @click="onAddFriend">+</text>
 		</view>
 		<view class="search-bar">
@@ -13,7 +13,7 @@
 				<input
 					class="search-input"
 					v-model="searchText"
-					placeholder="搜索"
+					:placeholder="t('contact.searchPh2')"
 					placeholder-class="search-placeholder"
 					@confirm="onSearch"
 					@input="onSearchInput"
@@ -24,10 +24,10 @@
 		<!-- 搜索结果 -->
 		<scroll-view v-if="searchText.length > 0" class="result-list" scroll-y="true">
 			<view v-if="searching" class="loading-row">
-				<text class="loading-text">搜索中…</text>
+				<text class="loading-text">{{ t('contact.searching') }}</text>
 			</view>
 			<view v-else-if="results.length === 0" class="empty-row">
-				<text class="empty-text">未找到用户（也可手动输入完整ID发起聊天）</text>
+				<text class="empty-text">{{ t('contact.emptyHint') }}</text>
 			</view>
 			<view
 				v-for="user in results"
@@ -57,7 +57,7 @@
 					<text class="manual-avatar-text">➕</text>
 				</view>
 				<view class="user-info">
-					<text class="user-name">发起新对话</text>
+					<text class="user-name">{{ t('contact.newChat') }}</text>
 					<text class="user-id">{{ normalizedUserId(searchText) }}</text>
 				</view>
 				<text class="chat-icon">💬</text>
@@ -68,47 +68,47 @@
 		<!-- 默认空白页 -->
 		<view v-else class="empty-page">
 			<text class="empty-icon">👥</text>
-			<text class="empty-title">通讯录</text>
-			<text class="empty-desc">在上方搜索框输入用户名\n即可找到其他用户并发消息</text>
+			<text class="empty-title">{{ t('contact.title') }}</text>
+			<text class="empty-desc">{{ t('contact.emptyDesc') }}</text>
 			<view class="entry-buttons">
 				<view class="entry-btn" @click="onAddFriend">
 					<text class="entry-btn-icon">＋</text>
-					<text class="entry-btn-text">添加好友</text>
+					<text class="entry-btn-text">{{ t('contact.addTitle') }}</text>
 				</view>
 				<view class="entry-btn" @click="onCreateGroup">
 					<text class="entry-btn-icon">👥</text>
-					<text class="entry-btn-text">发起洽谈室</text>
+					<text class="entry-btn-text">{{ t('contact.startRoom') }}</text>
 				</view>
 				<view class="entry-btn" @click="onOpenDiscover">
 					<text class="entry-btn-icon">🌍</text>
-					<text class="entry-btn-text">公开房间</text>
+					<text class="entry-btn-text">{{ t('contact.publicRooms') }}</text>
 				</view>
 				<view class="entry-btn" @click="onOpenSearch">
 					<text class="entry-btn-icon">🔎</text>
-					<text class="entry-btn-text">搜索消息</text>
+					<text class="entry-btn-text">{{ t('contact.searchMsg') }}</text>
 				</view>
 				<view class="entry-btn" @click="onOpenSettings">
 					<text class="entry-btn-icon">⚙️</text>
-					<text class="entry-btn-text">设置</text>
+					<text class="entry-btn-text">{{ t('contact.settings') }}</text>
 				</view>
 			</view>
 		</view>
 		<view class="wx-tabbar">
 			<view class="wx-tab" @click="goRooms">
 				<text class="wx-tab-icon">💬</text>
-				<text class="wx-tab-label">微信</text>
+				<text class="wx-tab-label">{{ t('nav.wechat') }}</text>
 			</view>
 			<view class="wx-tab wx-tab-on">
 				<text class="wx-tab-icon">👤</text>
-				<text class="wx-tab-label">通讯录</text>
+				<text class="wx-tab-label">{{ t('nav.contacts') }}</text>
 			</view>
 			<view class="wx-tab" @click="onOpenDiscover">
 				<text class="wx-tab-icon">◈</text>
-				<text class="wx-tab-label">发现</text>
+				<text class="wx-tab-label">{{ t('nav.discover') }}</text>
 			</view>
 			<view class="wx-tab" @click="goProfile">
 				<text class="wx-tab-icon">◎</text>
-				<text class="wx-tab-label">我</text>
+				<text class="wx-tab-label">{{ t('nav.me') }}</text>
 			</view>
 		</view>
 	</view>
@@ -116,6 +116,7 @@
 
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted } from 'vue'
+	import { t } from '@/common/i18n.uts'
 	import { getMatrix, errText, DirectoryUser } from '@/common/matrix.uts'
 	import { openChat, openGroupPick } from '@/common/app.uts'
 
@@ -177,12 +178,12 @@
 		if (p == null) return ''
 		const msg = p.status_msg
 		if (p.presence == 'online') {
-			if (msg.length > 0) return '在线 · ' + msg
-			return '在线'
+			if (msg.length > 0) return t('contact.online') + ' · ' + msg
+			return t('contact.online')
 		}
-		if (p.presence == 'unavailable') return statusOrFallback(msg, '忙碌')
-		if (p.presence == 'offline') return '离线'
-		if (p.presence == 'busy') return statusOrFallback(msg, '忙碌')
+		if (p.presence == 'unavailable') return statusOrFallback(msg, t('contact.busy'))
+		if (p.presence == 'offline') return t('contact.offline')
+		if (p.presence == 'busy') return statusOrFallback(msg, t('contact.busy'))
 		return statusOrFallback(msg, p.presence)
 	}
 
@@ -292,17 +293,17 @@
 		const matrix = getMatrix()
 		if (matrix == null) return
 		if (userId === matrix.userId) {
-			uni.showToast({ title: '不能和自己聊天', icon: 'none' })
+			uni.showToast({ title: t('contact.selfChat'), icon: 'none' })
 			return
 		}
-		uni.showLoading({ title: '正在打开…' })
+		uni.showLoading({ title: t('contact.opening') })
 		try {
 			const roomId = await matrix.startDM(userId)
 			uni.hideLoading()
 			openChat(roomId)
 		} catch (e: any) {
 			uni.hideLoading()
-			uni.showToast({ title: '发起聊天失败: ' + errText(e, ''), icon: 'none' })
+			uni.showToast({ title: t('contact.startFail') + ': ' + errText(e, ''), icon: 'none' })
 		}
 	}
 
@@ -310,17 +311,17 @@
 		const matrix = getMatrix()
 		if (matrix == null) return
 		if (user.user_id == matrix.userId) {
-			uni.showToast({ title: '不能和自己聊天', icon: 'none' })
+			uni.showToast({ title: t('contact.selfChat'), icon: 'none' })
 			return
 		}
-		uni.showLoading({ title: '正在打开…' })
+		uni.showLoading({ title: t('contact.opening') })
 		try {
 			const roomId = await matrix.startDM(user.user_id)
 			uni.hideLoading()
 			openChat(roomId)
 		} catch (e: any) {
 			uni.hideLoading()
-			uni.showToast({ title: '发起聊天失败: ' + errText(e, ''), icon: 'none' })
+			uni.showToast({ title: t('contact.startFail') + ': ' + errText(e, ''), icon: 'none' })
 		}
 	}
 

@@ -7,9 +7,9 @@
 			<view class="back-btn" @click="goBack">
 				<text class="back-text">‹</text>
 			</view>
-			<text class="topbar-title">添加好友</text>
+			<text class="topbar-title">{{ t('contact.addTitle') }}</text>
 			<view class="topbar-right" @click="onScan">
-				<text class="scan-btn">扫一扫</text>
+				<text class="scan-btn">{{ t('contact.scan') }}</text>
 			</view>
 		</view>
 
@@ -19,7 +19,7 @@
 				<input
 					class="search-input"
 					v-model="searchText"
-					placeholder="输入用户名精准查找"
+					:placeholder="t('contact.searchPh')"
 					placeholder-class="search-placeholder"
 					focus
 					@confirm="onSearch"
@@ -31,11 +31,11 @@
 
 		<scroll-view class="body" direction="vertical" :show-scrollbar="false" :rebound="false">
 			<view v-if="searchText.length == 0" class="hint-wrap">
-				<text class="hint-text">输入用户名查找，或点右上角扫一扫加好友</text>
+				<text class="hint-text">{{ t('contact.hint') }}</text>
 			</view>
 			<view v-else class="result-list">
 				<view v-if="searching" class="loading-row">
-					<text class="loading-text">搜索中…</text>
+					<text class="loading-text">{{ t('contact.searching') }}</text>
 				</view>
 				<view
 					v-for="user in results"
@@ -48,10 +48,10 @@
 						<text class="user-name">{{ user.nickname.length > 0 ? user.nickname : user.username }}</text>
 						<text class="user-id">{{ user.username }}</text>
 					</view>
-					<text class="add-tag">添加</text>
+					<text class="add-tag">{{ t('contact.add') }}</text>
 				</view>
 				<view v-if="!searching && results.length == 0" class="empty-row">
-					<text class="empty-text">未找到该用户名</text>
+					<text class="empty-text">{{ t('contact.notFound') }}</text>
 				</view>
 			</view>
 		</scroll-view>
@@ -60,6 +60,7 @@
 
 <script setup lang="uts">
 	import { ref, onUnmounted } from 'vue'
+	import { t } from '@/common/i18n.uts'
 	import { getMatrix, errText } from '@/common/matrix.uts'
 	import { openChat } from '@/common/app.uts'
 	import { findFriendByUsername, FindFriendItem } from '@/common/platform.uts'
@@ -162,17 +163,17 @@
 		const matrix = getMatrix()
 		if (matrix == null) return
 		if (user.imUser == matrix.userId) {
-			uni.showToast({ title: '不能和自己聊天', icon: 'none' })
+			uni.showToast({ title: t('contact.selfChat'), icon: 'none' })
 			return
 		}
-		uni.showLoading({ title: '正在打开…' })
+		uni.showLoading({ title: t('contact.opening') })
 		try {
 			const roomId = await matrix.startDM(user.imUser)
 			uni.hideLoading()
 			openChat(roomId)
 		} catch (e) {
 			uni.hideLoading()
-			uni.showToast({ title: '发起聊天失败: ' + errText(e, ''), icon: 'none' })
+			uni.showToast({ title: t('contact.startFail') + ': ' + errText(e, ''), icon: 'none' })
 		}
 	}
 

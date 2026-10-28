@@ -1,3 +1,4 @@
+import { t } from './i18n.uts'
 /**
  * Matrix 客户端核心模块
  * 封装 Matrix Client-Server API v3
@@ -21,7 +22,7 @@ export function errText(e: any | null, fallback: string): string {
 	}
 	if (s.indexOf('Error: ') == 0) s = s.substring(7)
 	if (s.indexOf('Error:') == 0) s = s.substring(6).trim()
-	if (s.indexOf('M_LIMIT_EXCEEDED') >= 0) return '请求太频繁，请稍后再试'
+	if (s.indexOf('M_LIMIT_EXCEEDED') >= 0) return t('matrix.rateLimit')
 	if (s.length == 0) return fallback
 	return s
 }
@@ -249,19 +250,19 @@ function httpRawUpload(url: string, token: string, filePath: string): Promise<st
 							code = 0
 						}
 						if (code < 200 || code >= 300) {
-							reject(new Error('上传失败 ' + code))
+							reject(new Error(t('matrix.uploadFail') + ' ' + code))
 							return
 						}
 						try {
 							const resBody = toJsonObj(up.data)
 							const uri = jsonStr(resBody, 'content_uri')
 							if (uri.length == 0) {
-								reject(new Error('上传失败 无 content_uri'))
+								reject(new Error(t('matrix.uploadFail') + ' content_uri'))
 								return
 							}
 							resolve(uri)
 						} catch (e1) {
-							reject(new Error('上传失败 解析响应'))
+							reject(new Error(t('matrix.uploadFail')))
 						}
 					},
 					fail: (err: RequestFail) => {
@@ -270,7 +271,7 @@ function httpRawUpload(url: string, token: string, filePath: string): Promise<st
 				})
 			},
 			fail: (_err) => {
-				reject(new Error('读取文件失败'))
+				reject(new Error(t('matrix.readFail')))
 			}
 		})
 	})
@@ -374,7 +375,7 @@ function httpJson(url: string, method: string, header: UTSJSONObject, body: UTSJ
 				}
 				resolve(row)
 			} catch (e2) {
-				reject(new Error('解析响应失败'))
+				reject(new Error(t('matrix.parseFail')))
 			}
 		}
 		const onBad = (err: RequestFail) => {
@@ -786,7 +787,7 @@ export class MatrixClient {
 	async discoverHomeserver(matrixId: string): Promise<string> {
 		const parts = matrixId.split(':')
 		if (parts.length < 2) {
-			throw new Error('Matrix ID 格式错误，应为 @user:server')
+			throw new Error(t('matrix.idFormat'))
 		}
 		const serverName = parts[parts.length - 1]
 
@@ -808,7 +809,7 @@ export class MatrixClient {
 		const fallback = `https://${serverName}`
 		const ok = await this.validateHomeserver(fallback)
 		if (ok) return fallback
-		throw new Error('无法发现可用的 homeserver')
+		throw new Error(t('matrix.noHomeserver'))
 	}
 
 	async validateHomeserver(baseUrl: string): Promise<boolean> {
@@ -865,10 +866,10 @@ export class MatrixClient {
 				if (wait > 0) {
 					sec = Math.ceil(wait / 1000)
 				}
-				throw new Error('请求太频繁，请 ' + sec + ' 秒后再试')
+				throw new Error((() => { let s=t('matrix.rateLimitSec'); const i=s.indexOf('{sec}'); return i>=0?s.substring(0,i)+sec+s.substring(i+5):(t('matrix.rateLimit')+' '+sec) })())
 			}
 			const error = jsonStr(data, 'error')
-			throw new Error('[' + code + '] ' + (error.length > 0 ? error : '登录失败'))
+			throw new Error('[' + code + '] ' + (error.length > 0 ? error : t('matrix.loginFail')))
 		}
 		const session: SessionInfo = {
 			homeserver: homeserver.replace(/\/$/, ''),
@@ -879,7 +880,7 @@ export class MatrixClient {
 			avatar_url: ''
 		}
 		if (session.access_token.length == 0) {
-			throw new Error('登录失败：未返回 access_token')
+			throw new Error(t('matrix.noToken'))
 		}
 		this.homeserver = session.homeserver
 		this.accessToken = session.access_token
@@ -937,7 +938,7 @@ export class MatrixClient {
 		const errcode = jsonStr(parsed, 'errcode')
 		const code = errcode.length > 0 ? errcode : ('HTTP_' + res.statusCode)
 		const error = jsonStr(parsed, 'error')
-		throw new Error('[' + code + '] ' + (error.length > 0 ? error : '请求失败'))
+		throw new Error('[' + code + '] ' + (error.length > 0 ? error : t('matrix.reqFail')))
 	}
 
 	async requestList(
@@ -970,7 +971,7 @@ export class MatrixClient {
 		const errcode = jsonStr(parsed, 'errcode')
 		const code = errcode.length > 0 ? errcode : ('HTTP_' + res.statusCode)
 		const error = jsonStr(parsed, 'error')
-		throw new Error('[' + code + '] ' + (error.length > 0 ? error : '请求失败'))
+		throw new Error('[' + code + '] ' + (error.length > 0 ? error : t('matrix.reqFail')))
 	}
 
 	// ============================================================
@@ -1188,7 +1189,7 @@ export class MatrixClient {
 									const item = buf[i]
 									if (jsonStr(item, 'event_id') == redacts) {
 										item['redacted'] = true
-										item['body'] = '（消息已撤回）'
+										item['body'] = t('matrix.recalled')
 										buf[i] = item
 										break
 									}
@@ -1239,11 +1240,11 @@ export class MatrixClient {
 							const c = jsonObj(ev, 'content')
 							let body = jsonStr(c, 'body')
 							const mt = jsonStr(c, 'msgtype')
-							if (evType == 'm.room.encrypted') body = '[加密消息]'
-							else if (mt == 'm.audio') body = '[语音]'
-							else if (mt == 'm.image') body = '[图片]'
-							else if (mt == 'm.file') body = '[文件]'
-							else if (mt == 'm.call' && body.length == 0) body = '[通话]'
+							if (evType == 'm.room.encrypted') body = t('matrix.encrypted')
+							else if (mt == 'm.audio') body = t('matrix.audio')
+							else if (mt == 'm.image') body = t('matrix.image')
+							else if (mt == 'm.file') body = t('matrix.file')
+							else if (mt == 'm.call' && body.length == 0) body = t('matrix.call')
 							const ts = jsonNum(ev, 'origin_server_ts')
 							this.roomLastMessage.set(roomId, { body: body, ts: ts, sender: sender })
 						}
@@ -1997,7 +1998,7 @@ export class MatrixClient {
 					event_id: jsonStr(ev, 'event_id'),
 					sender: jsonStr(ev, 'sender'),
 					type: evType,
-					body: '加密消息，当前版本无法解密',
+					body: t('chat.encryptedBody'),
 					msgtype: 'm.encrypted',
 					mxc: '',
 					mimetype: '',

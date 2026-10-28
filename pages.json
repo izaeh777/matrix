@@ -9,35 +9,35 @@
 		{
 			"path": "pages/home/home",
 			"style": {
-				"navigationBarTitleText": "首页",
+				"navigationBarTitleText": "Home",
 				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/login/login",
 			"style": {
-				"navigationBarTitleText": "登录",
+				"navigationBarTitleText": "Login",
 				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/login/login-email",
 			"style": {
-				"navigationBarTitleText": "登录",
+				"navigationBarTitleText": "Login",
 				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/login/login-mail",
 			"style": {
-				"navigationBarTitleText": "邮箱登录",
+				"navigationBarTitleText": "Email",
 				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/login/login-wallet",
 			"style": {
-				"navigationBarTitleText": "钱包登录",
+				"navigationBarTitleText": "Wallet",
 				"navigationStyle": "custom",
 				"backgroundColor": "#FFFFFF"
 			}
@@ -45,7 +45,7 @@
 		{
 			"path": "pages/rooms/rooms",
 			"style": {
-				"navigationBarTitleText": "洽谈",
+				"navigationBarTitleText": "Talks",
 				"navigationStyle": "custom",
 				"navigationBarBackgroundColor": "#F3F8FE",
 				"backgroundColor": "#F3F8FE",
@@ -57,7 +57,7 @@
 		{
 			"path": "pages/chat/chat",
 			"style": {
-				"navigationBarTitleText": "洽谈",
+				"navigationBarTitleText": "Talks",
 				"navigationStyle": "custom",
 				"navigationBarBackgroundColor": "#FFFFFF",
 				"backgroundColor": "#F3F8FE",
@@ -69,7 +69,7 @@
 		{
 			"path": "pages/call/call",
 			"style": {
-				"navigationBarTitleText": "通话",
+				"navigationBarTitleText": "Call",
 				"navigationStyle": "custom",
 				"backgroundColor": "#111111",
 				"disableScroll": true
@@ -78,7 +78,7 @@
 		{
 			"path": "pages/group/group",
 			"style": {
-				"navigationBarTitleText": "聊天信息",
+				"navigationBarTitleText": "Chat info",
 				"navigationStyle": "custom",
 				"backgroundColor": "#EDEDED"
 			}
@@ -86,7 +86,7 @@
 		{
 			"path": "pages/group/pick",
 			"style": {
-				"navigationBarTitleText": "选择联系人",
+				"navigationBarTitleText": "Contacts",
 				"navigationStyle": "custom",
 				"backgroundColor": "#EDEDED"
 			}
@@ -94,21 +94,21 @@
 		{
 			"path": "pages/profile/profile",
 			"style": {
-				"navigationBarTitleText": "我的",
+				"navigationBarTitleText": "Me",
 				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/contacts/contacts",
 			"style": {
-				"navigationBarTitleText": "通讯录",
+				"navigationBarTitleText": "Contacts",
 				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/contacts/add",
 			"style": {
-				"navigationBarTitleText": "添加好友",
+				"navigationBarTitleText": "Add friend",
 				"navigationStyle": "custom",
 				"backgroundColor": "#F5F6F8",
 				"backgroundColorContent": "#F5F6F8"
@@ -117,21 +117,21 @@
 		{
 			"path": "pages/search/search",
 			"style": {
-				"navigationBarTitleText": "搜索消息",
+				"navigationBarTitleText": "Search",
 				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/discover/discover",
 			"style": {
-				"navigationBarTitleText": "发现",
+				"navigationBarTitleText": "Discover",
 				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/notify/notify",
 			"style": {
-				"navigationBarTitleText": "最新资讯",
+				"navigationBarTitleText": "News",
 				"navigationStyle": "custom",
 				"backgroundColor": "#F3F6FB"
 			}
@@ -139,7 +139,7 @@
 		{
 			"path": "pages/article/detail",
 			"style": {
-				"navigationBarTitleText": "资讯详情",
+				"navigationBarTitleText": "Article",
 				"navigationStyle": "custom",
 				"backgroundColor": "#FFFFFF",
 				"backgroundColorContent": "#FFFFFF"
@@ -148,14 +148,14 @@
 		{
 			"path": "pages/settings/settings",
 			"style": {
-				"navigationBarTitleText": "设置",
+				"navigationBarTitleText": "Settings",
 				"navigationStyle": "custom"
 			}
 		},
 		{
 			"path": "pages/settings/language",
 			"style": {
-				"navigationBarTitleText": "语言",
+				"navigationBarTitleText": "Language",
 				"navigationStyle": "custom",
 				"backgroundColor": "#FFFFFF"
 			}
@@ -163,7 +163,7 @@
 		{
 			"path": "pages/project/publish",
 			"style": {
-				"navigationBarTitleText": "发布项目",
+				"navigationBarTitleText": "Publish",
 				"navigationStyle": "custom",
 				"backgroundColor": "#F5F7FB"
 			}
@@ -171,7 +171,7 @@
 		{
 			"path": "pages/stats/stats",
 			"style": {
-				"navigationBarTitleText": "数据统计",
+				"navigationBarTitleText": "Stats",
 				"navigationStyle": "custom",
 				"backgroundColor": "#F5F6F8",
 				"backgroundColorContent": "#F5F6F8"

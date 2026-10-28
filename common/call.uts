@@ -3,6 +3,7 @@
  * 任意页面都可响铃；H5 使用 WebRTC，信令走 m.call.*
  */
 import { getMatrix, MatrixEvent, setVoipSink, jsonObj, jsonArr, jsonStr } from './matrix.uts'
+import { t } from './i18n.uts'
 import { tuneCallWebView, pullCallHtmlMsg, destroyCallEngine } from './call-webview.uts'
 import {
 	discoverLivekitServiceUrl,
@@ -45,7 +46,7 @@ type PageRef = {
 type CallListener = (s: CallSnapshot) => void
 
 function localPart(userId: string): string {
-	if (userId.length == 0) return '对方'
+	if (userId.length == 0) return t('call.peer')
 	return userId.split(':')[0].replace('@', '')
 }
 
@@ -110,16 +111,16 @@ function webrtcHint(): string {
 			const nav = g['navigator']
 			const ua = (nav != null) ? ('' + nav['userAgent']) : ''
 			if (ua.indexOf('MicroMessenger') >= 0) {
-				return '微信内置浏览器限制通话，请点右上角用系统浏览器打开'
+				return t('call.wechatLimit')
 			}
 			if (!h5SecureContext()) {
-				return '通话需要 https。请用 https 地址打开，首次进入点“高级-继续访问”'
+				return t('call.needHttpsFull')
 			}
 		}
 	} catch (e) {}
-	return '当前浏览器不支持 WebRTC 通话'
+	return t('call.noWebRtc')
 	// #endif
-	return '当前环境不支持通话'
+	return t('call.envNoCall')
 }
 
 function webrtcReady(): boolean {
@@ -144,11 +145,11 @@ export function unlockH5CallMedia(video: boolean): void {
 						if (hint.length == 0) {
 							const name = (e != null && e['name'] != null) ? ('' + e['name']) : ''
 							if (name == 'NotFoundError' || name == 'DevicesNotFoundError') {
-								hint = '未检测到麦克风，请检查设备或系统权限'
+								hint = t('call.micMissing')
 							} else if (name == 'NotAllowedError' || name == 'PermissionDeniedError') {
-								hint = '请允许浏览器使用麦克风'
+								hint = t('call.micDenied')
 							} else {
-								hint = '无法打开麦克风'
+								hint = t('call.micFail')
 							}
 						}
 						console.warn('[call] mic unlock', e)
@@ -657,7 +658,7 @@ export class CallManager {
 	noteConnected(): void {
 		if (this.connectedAt == 0) this.connectedAt = Date.now()
 		this.phase = 'connected'
-		this.sub = this.isVideo ? '视频通话中' : '语音通话中'
+		this.sub = this.isVideo ? t('call.inVideo') : t('call.inVoice')
 	}
 
 	emit(): void {
@@ -915,7 +916,7 @@ export class CallManager {
 						this.navigating = false
 						this.pageOpen = false
 						console.warn('[call] redirectTo fail')
-						uni.showToast({ title: '无法打开通话页', icon: 'none' })
+						uni.showToast({ title: t('call.openFail'), icon: 'none' })
 					}
 				})
 			}
@@ -1186,7 +1187,7 @@ export class CallManager {
 						this.noteConnected()
 						this.emit()
 					} else if (s == 'failed') {
-						this.sub = '连接失败'
+						this.sub = t('call.connectFail')
 						this.emit()
 						this.hangup(true)
 					}
@@ -1199,7 +1200,7 @@ export class CallManager {
 						this.noteConnected()
 						this.emit()
 					} else if (s == 'failed') {
-						this.sub = '连接失败'
+						this.sub = t('call.connectFail')
 						this.emit()
 						this.hangup(true)
 					}
@@ -1243,7 +1244,7 @@ export class CallManager {
 			if (this.isVideo && stream != null) this.attachStream('.call-local', stream, true)
 			return true
 		} catch (e) {
-			uni.showToast({ title: '无法打开麦克风/摄像头', icon: 'none' })
+			uni.showToast({ title: t('call.mediaFail'), icon: 'none' })
 			return false
 		}
 		// #endif
@@ -1291,11 +1292,11 @@ export class CallManager {
 	async startOutgoing(roomId: string, isVideo: boolean): Promise<boolean> {
 		this.bindMatrix()
 		if (Date.now() - this.lastHangAt < 1500) {
-			uni.showToast({ title: '请稍后再拨', icon: 'none' })
+			uni.showToast({ title: t('call.retryLater'), icon: 'none' })
 			return false
 		}
 		if (this.phase != 'idle') {
-			uni.showToast({ title: '已在通话中', icon: 'none' })
+			uni.showToast({ title: t('call.alreadyIn'), icon: 'none' })
 			return false
 		}
 		if (!webrtcReady()) {
@@ -1323,11 +1324,11 @@ export class CallManager {
 		this.incomingPrompted = false
 		this.lastInvite = null
 		this.streamId = 'usermedia'
-		this.sub = isVideo ? '正在呼叫（视频）…' : '正在呼叫（语音）…'
+		this.sub = isVideo ? t('call.callingVideo') : t('call.callingVoice')
 		this.muted = false
 		this.cameraOff = false
 		this.camRear = false
-		this.peerName = '对方'
+		this.peerName = t('call.peer')
 		this.emit()
 		preloadH5EngineJs()
 		preloadLivekitJs()
@@ -1393,8 +1394,8 @@ export class CallManager {
 				}
 				this.inviteeId = ''
 				this.peerUserId = ''
-				this.peerName = (this.isVideo ? '群视频' : '群语音') + '(' + this.groupPeerIds.length + '人)'
-				this.sub = '正在呼叫群成员…'
+				this.peerName = (() => { let s=t('call.groupPeerName'); const typ=this.isVideo?t('call.groupVideo'):t('call.groupVoice'); const n=''+this.groupPeerIds.length; let i=s.indexOf('{type}'); if(i>=0)s=s.substring(0,i)+typ+s.substring(i+6); i=s.indexOf('{n}'); if(i>=0)s=s.substring(0,i)+n+s.substring(i+3); return s })()
+				this.sub = t('call.callingGroup')
 				console.log('[call] group call peers', this.isVideo ? 'video' : 'voice', this.groupPeerIds.length, this.groupPeerIds.join(','))
 			} else if (others.length > 0) {
 				this.inviteeId = others[0]
@@ -1407,13 +1408,13 @@ export class CallManager {
 				console.log('[call] room members', members.length, 'peers', others.length, others.join(','))
 			} else {
 				console.log('[call] room members', members.length, 'peers 0')
-				uni.showToast({ title: '对方不在房间内，无法呼叫', icon: 'none' })
+				uni.showToast({ title: t('call.peerNotInRoom'), icon: 'none' })
 				this.hangup(false)
 				return false
 			}
 		} catch (e) {
 			console.warn('[call] resolve peers fail', e)
-			uni.showToast({ title: '无法获取对方信息', icon: 'none' })
+			uni.showToast({ title: t('call.peerInfoFail'), icon: 'none' })
 			this.hangup(false)
 			return false
 		}
@@ -1448,7 +1449,7 @@ export class CallManager {
 		this.openPage()
 		this.placeOutgoing().catch((ePlace: any | null) => {
 			console.error('[call] placeOutgoing crash', ePlace)
-			uni.showToast({ title: '发起通话异常', icon: 'none' })
+			uni.showToast({ title: t('call.startFail'), icon: 'none' })
 		})
 		return true
 	}
@@ -1472,20 +1473,20 @@ export class CallManager {
 		this.livekitBusy = true
 		preloadH5EngineJs()
 		preloadLivekitJs()
-		this.sub = '正在呼叫（LiveKit）…'
+		this.sub = t('call.callingLk')
 		this.emit()
 		try {
 			await this.joinLivekitSession(true)
 			this.invitePosted = true
 			this.offerSent = true
 			this.armTimeout()
-			this.sub = this.isGroupCall ? '等待群成员接听…' : '等待对方接听…'
+			this.sub = this.isGroupCall ? t('call.waitGroup') : t('call.waitPeer')
 			this.emit()
-			uni.showToast({ title: '已发起通话（LiveKit）', icon: 'none' })
+			uni.showToast({ title: t('call.startedLk'), icon: 'none' })
 		} catch (e) {
 			const why = rtcErrShort(e)
 			console.error('[call] livekit outgoing fail', why, e)
-			uni.showToast({ title: 'LiveKit失败: ' + why, icon: 'none', duration: 3500 })
+			uni.showToast({ title: t('call.lkFail') + why, icon: 'none', duration: 3500 })
 			this.useLivekit = false
 			this.livekitBusy = false
 			this.kickTurn()
@@ -1517,11 +1518,11 @@ export class CallManager {
 
 	async joinLivekitSession(sendNotify: boolean): Promise<void> {
 		const matrix = getMatrix()
-		if (matrix == null) throw new Error('未登录')
+		if (matrix == null) throw new Error(t('call.notLogin'))
 		await this.ensureDeviceId()
 		let service = this.livekitServiceUrl
 		if (service.length == 0) service = await discoverLivekitServiceUrl()
-		if (service.length == 0) throw new Error('无 LiveKit foci')
+		if (service.length == 0) throw new Error(t('call.noFoci'))
 		this.livekitServiceUrl = service
 		if (this.rtcMembershipId.length == 0) {
 			this.rtcMembershipId = 'm' + Date.now().toString() + Math.floor(Math.random() * 1000).toString()
@@ -1690,15 +1691,15 @@ export class CallManager {
 	/** 通话中邀请：指定用户；空数组则邀请全部未入会 */
 	async inviteMoreToCall(extraIds: Array<string> | null): Promise<number> {
 		if (this.phase == 'idle' || this.phase == 'ended') {
-			uni.showToast({ title: '当前不在通话中', icon: 'none' })
+			uni.showToast({ title: t('call.notInCall'), icon: 'none' })
 			return 0
 		}
 		if (!this.useLivekit) {
-			uni.showToast({ title: '当前通话不支持加人', icon: 'none' })
+			uni.showToast({ title: t('call.noAdd'), icon: 'none' })
 			return 0
 		}
 		if (this.roomId.length == 0) {
-			uni.showToast({ title: '房间无效', icon: 'none' })
+			uni.showToast({ title: t('call.badRoom'), icon: 'none' })
 			return 0
 		}
 		this.isGroupCall = true
@@ -1716,7 +1717,7 @@ export class CallManager {
 			candidates = await this.listInviteCandidates()
 		}
 		if (candidates.length == 0) {
-			uni.showToast({ title: '没有可邀请的成员', icon: 'none' })
+			uni.showToast({ title: t('call.noInvitees'), icon: 'none' })
 			return 0
 		}
 		await this.ringPeersLivekit(candidates)
@@ -2263,7 +2264,7 @@ export class CallManager {
 			msg['video'] = '0'
 			this.sendToHtml(msg)
 			this.armTimeout()
-			this.sub = '正在呼叫群成员…'
+			this.sub = t('call.callingGroup')
 			this.emit()
 			this.pushUi()
 			this.htmlPollN = 0
@@ -2682,7 +2683,7 @@ export class CallManager {
 			return
 		}
 		if (kind == 'invited') {
-			this.sub = this.isGroupCall ? '等待群成员接听…' : '等待对方接听…'
+			this.sub = this.isGroupCall ? t('call.waitGroup') : t('call.waitPeer')
 			this.emit()
 			if (!this.isGroupCall) uni.showToast({ title: '已向对方发起通话', icon: 'none' })
 			else uni.showToast({ title: '已发起群语音', icon: 'none' })
@@ -2781,7 +2782,7 @@ export class CallManager {
 				this.sub = (this.isVideo ? '群视频中' : '群语音中') + ' · ' + n + '人'
 				this.maybeMeshPeers()
 			} else {
-				this.sub = this.isVideo ? '视频通话中' : '语音通话中'
+				this.sub = this.isVideo ? t('call.inVideo') : t('call.inVoice')
 			}
 			this.emit()
 			this.pushUi()
@@ -3695,7 +3696,7 @@ export class CallManager {
 				this.sub = (cached.length > 0 ? cached : localPart(sender)) + ' 邀请你加入群语音'
 			} else {
 				this.peerName = cached.length > 0 ? cached : localPart(sender)
-				if (this.peerName.length == 0) this.peerName = '对方'
+				if (this.peerName.length == 0) this.peerName = t('call.peer')
 				this.sub = this.isVideo ? '邀请你视频通话' : '邀请你语音通话'
 			}
 			this.muted = false

@@ -11,7 +11,7 @@
 				<input
 					class="search-input"
 					v-model="searchTerm"
-					placeholder="搜索消息内容"
+					:placeholder="t('search.ph')"
 					placeholder-class="search-placeholder"
 					:adjust-position="true"
 					:focus="true"
@@ -19,32 +19,32 @@
 				/>
 				<text v-if="searchTerm.length > 0" class="clear-btn" @click="clearSearch">✕</text>
 			</view>
-			<text class="search-btn" @click="onSearch">搜索</text>
+			<text class="search-btn" @click="onSearch">{{ t('search.btn') }}</text>
 		</view>
 
 		<!-- 快捷范围筛选 -->
 		<view class="filter-bar">
 			<view class="filter-chip" :class="{ active: filterScope === 'all' }" @click="setScope('all')">
-				<text class="filter-chip-text">全部</text>
+				<text class="filter-chip-text">{{ t('search.all') }}</text>
 			</view>
 			<view class="filter-chip" :class="{ active: filterScope === 'room' }" @click="setScope('room')">
-				<text class="filter-chip-text">当前房间</text>
+				<text class="filter-chip-text">{{ t('search.thisRoom') }}</text>
 			</view>
 		</view>
 
 		<!-- 加载/结果 -->
 		<scroll-view class="results-scroll" scroll-y>
 			<view v-if="loading && results.length === 0" class="state-row">
-				<text class="state-text">搜索中…</text>
+				<text class="state-text">{{ t('search.searching') }}</text>
 			</view>
 
 			<view v-else-if="hasSearched && results.length === 0" class="state-row">
-				<text class="state-text">未找到匹配的消息</text>
+				<text class="state-text">{{ t('search.empty') }}</text>
 			</view>
 
 			<view v-else-if="!hasSearched" class="state-row">
 				<text class="state-text-large">🔎</text>
-				<text class="state-text">输入关键词搜索聊天记录</text>
+				<text class="state-text">{{ t('search.hint') }}</text>
 			</view>
 
 			<view v-for="item in results" :key="item.event_id" class="result-item" @click="onTapResult(item)">
@@ -63,11 +63,11 @@
 			</view>
 
 			<view v-if="canLoadMore" class="load-more" @click="loadMore">
-				<text class="load-more-text">加载更多…</text>
+				<text class="load-more-text">{{ t('search.more') }}</text>
 			</view>
 
 			<view v-if="results.length > 0" class="result-count">
-				<text class="result-count-text">共 {{ totalCount }} 条结果</text>
+				<text class="result-count-text">{{ searchCountText }}</text>
 			</view>
 		</scroll-view>
 	</view>
@@ -75,6 +75,7 @@
 
 <script setup lang="uts">
 	import { ref, computed } from 'vue'
+	import { t } from '@/common/i18n.uts'
 	import { getMatrix, errText, SearchHit } from '@/common/matrix.uts'
 	import { openChat } from '@/common/app.uts'
 
@@ -93,6 +94,13 @@
 	const results = ref<Array<ResultItem>>([])
 	const nextBatch = ref<string>('')
 	const totalCount = ref<number>(0)
+	const searchCountText = computed((): string => {
+		let s = t('search.count')
+		const token = '{n}'
+		const i = s.indexOf(token)
+		if (i < 0) return s
+		return s.substring(0, i) + totalCount.value + s.substring(i + token.length)
+	})
 	const filterScope = ref<string>('all')
 	const currentRoomId = ref<string>('')
 
@@ -170,9 +178,21 @@
 		const d = new Date(ts)
 		const now = new Date()
 		const diff = now.getTime() - d.getTime()
-		if (diff < 60000) return '刚刚'
-		if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前'
-		if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前'
+		if (diff < 60000) return t('time.justNow')
+		if (diff < 3600000) {
+			let s = t('time.minAgo')
+			const n = '' + Math.floor(diff / 60000)
+			const i = s.indexOf('{n}')
+			if (i >= 0) s = s.substring(0, i) + n + s.substring(i + 3)
+			return s
+		}
+		if (diff < 86400000) {
+			let s = t('time.hourAgo')
+			const n = '' + Math.floor(diff / 3600000)
+			const i = s.indexOf('{n}')
+			if (i >= 0) s = s.substring(0, i) + n + s.substring(i + 3)
+			return s
+		}
 		const targetDay = new Date(d.getFullYear(), d.getMonth(), d.getDate())
 		const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
 		if (targetDay.getTime() == today.getTime()) {
@@ -183,7 +203,7 @@
 			return hs + ':' + ms
 		}
 		const yesterday = new Date(today.getTime() - 86400000)
-		if (targetDay.getTime() == yesterday.getTime()) return '昨天'
+		if (targetDay.getTime() == yesterday.getTime()) return t('time.yesterday')
 		return (d.getMonth() + 1) + '/' + d.getDate()
 	}
 
@@ -232,7 +252,7 @@
 	async function onSearch() {
 		const term = searchTerm.value.trim()
 		if (term.length == 0) {
-			uni.showToast({ title: '请输入关键词', icon: 'none' })
+			uni.showToast({ title: t('search.needKw'), icon: 'none' })
 			return
 		}
 		const matrix = getMatrix()
@@ -253,7 +273,7 @@
 			totalCount.value = res.count
 		} catch (e) {
 			console.warn('搜索失败', e)
-			uni.showToast({ title: '搜索失败: ' + errText(e, ''), icon: 'none' })
+			uni.showToast({ title: t('search.fail') + ': ' + errText(e, ''), icon: 'none' })
 		}
 		loading.value = false
 	}
@@ -278,7 +298,7 @@
 			results.value = results.value.concat(collectHits(res.results))
 			nextBatch.value = res.next_batch
 		} catch (e) {
-			uni.showToast({ title: '加载失败', icon: 'none' })
+			uni.showToast({ title: t('search.loadFail'), icon: 'none' })
 		}
 		loading.value = false
 	}

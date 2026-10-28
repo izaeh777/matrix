@@ -23,7 +23,7 @@
 		<view class="call-bar">
 			<!-- 群呼：微信式人数/名单；1:1 仍显示对方头像 -->
 			<view v-if="ui.isGroupCall" class="group-head">
-				<text class="call-name">{{ ui.isVideo ? '群视频' : '群语音' }}</text>
+				<text class="call-name">{{ ui.isVideo ? t('call.groupVideo') : t('call.groupVoice') }}</text>
 				<text class="group-count">{{ groupJoinedLabel() }}</text>
 				<text v-if="ui.groupJoinedCount > 1 && ui.groupJoinedNames.length > 0" class="group-names">{{ ui.groupJoinedNames }}</text>
 			</view>
@@ -35,33 +35,33 @@
 			<text v-else class="call-sub">{{ ui.sub }}</text>
 			<view class="call-actions">
 				<view v-if="ui.phase == 'ringing' && ui.isIncoming" class="call-btn call-btn-accept" @click="onAccept">
-					<text class="call-btn-text">接听</text>
+					<text class="call-btn-text">{{ t('call.answer') }}</text>
 				</view>
 				<view v-if="ui.phase == 'ringing' && ui.isIncoming" class="call-btn call-btn-hang" @click="onReject">
-					<text class="call-btn-text">拒绝</text>
+					<text class="call-btn-text">{{ t('call.decline') }}</text>
 				</view>
 				<view v-if="showInviteBtn()" class="call-btn call-btn-cam" @click.stop="onInvite">
-					<text class="call-btn-text">邀请</text>
+					<text class="call-btn-text">{{ t('call.invite') }}</text>
 				</view>
 				<view v-if="showHangBtn()" class="call-btn call-btn-mute" @click="onMute">
-					<text class="call-btn-text">{{ ui.muted ? '取消静音' : '静音' }}</text>
+					<text class="call-btn-text">{{ ui.muted ? t('call.unmute') : t('call.mute') }}</text>
 				</view>
 				<view v-if="showCamBtn()" class="call-btn call-btn-cam" @click="onCam">
-					<text class="call-btn-text">{{ ui.cameraOff ? '开摄像头' : '关摄像头' }}</text>
+					<text class="call-btn-text">{{ ui.cameraOff ? t('call.camOn') : t('call.camOff') }}</text>
 				</view>
 				<view v-if="showFlipBtn()" class="call-btn call-btn-cam" @click="onFlip">
-					<text class="call-btn-text">翻转</text>
+					<text class="call-btn-text">{{ t('call.flip') }}</text>
 				</view>
 				<view v-if="showHangBtn()" class="call-btn call-btn-hang" @click="onHang">
-					<text class="call-btn-text">挂断</text>
+					<text class="call-btn-text">{{ t('call.hangup') }}</text>
 				</view>
 			</view>
 		</view>
 		<!-- 邀请面板：避免 H5 ActionSheet 被通话层挡住 -->
 		<view v-if="inviteOpen" class="invite-mask" @click="closeInvite">
 			<view class="invite-sheet" @click.stop="noopInvite">
-				<text class="invite-title">邀请成员加入通话</text>
-				<text class="invite-tip">未接听的人可再次催促</text>
+				<text class="invite-title">{{ t('call.inviteTitle') }}</text>
+				<text class="invite-tip">{{ t('call.inviteTip') }}</text>
 				<scroll-view class="invite-scroll" scroll-y="true">
 					<view
 						v-for="(name, idx) in inviteNames"
@@ -70,14 +70,14 @@
 						@click="inviteOne(idx)"
 					>
 						<text class="invite-row-name">{{ name }}</text>
-						<text class="invite-row-act">邀请</text>
+						<text class="invite-row-act">{{ t('call.invite') }}</text>
 					</view>
 				</scroll-view>
 				<view v-if="inviteIds.length > 1" class="invite-all" @click="inviteAll">
-					<text class="invite-all-text">全部邀请（{{ inviteIds.length }}人）</text>
+					<text class="invite-all-text">{{ t('call.inviteAll') }} ({{ inviteIds.length }})</text>
 				</view>
 				<view class="invite-cancel" @click="closeInvite">
-					<text class="invite-cancel-text">取消</text>
+					<text class="invite-cancel-text">{{ t('common.cancel') }}</text>
 				</view>
 			</view>
 		</view>
@@ -86,6 +86,7 @@
 
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted, nextTick, getCurrentInstance } from 'vue'
+	import { t } from '@/common/i18n.uts'
 	import { getCallManager, CallManager, CallSnapshot, h5TapRunAnswer, formatCallDur } from '@/common/call.uts'
 	import { tuneCallWebView, makeNativeEval, pingCallEngine, destroyCallEngine, reloadEngineAsHttps, loadEngineHtmlInto } from '@/common/call-webview.uts'
 	// #ifdef APP-ANDROID
@@ -389,11 +390,11 @@
 	function groupJoinedLabel(): string {
 		const n = ui.value.groupJoinedCount
 		// 仅 SFU 里 ≥2 人（含自己）才算「通话中」；独自入会仍显示邀请/等待，避免「1人通话中」不准
-		if (n > 1) return n + '人通话中'
+		if (n > 1) { let s=t('call.inCallN'); const i=s.indexOf('{n}'); return i>=0?s.substring(0,i)+n+s.substring(i+3):(''+n) }
 		const invite = ui.value.groupPeerCount
-		if (invite > 0) return '邀请 ' + invite + ' 人'
-		if (n == 1) return '等待成员加入'
-		return '等待成员加入'
+		if (invite > 0) { let s=t('call.inviteN'); const i=s.indexOf('{n}'); return i>=0?s.substring(0,i)+invite+s.substring(i+3):(''+invite) }
+		if (n == 1) return t('call.waitJoin')
+		return t('call.waitJoin')
 	}
 
 	function tickDur(): void {
@@ -753,7 +754,7 @@
 		console.warn('[call] web-view error', msg)
 		if (httpsTried) return
 		if (msg.indexOf('page error') >= 0) return
-		uni.showToast({ title: '通话页加载失败', icon: 'none' })
+		uni.showToast({ title: t('call.pageFail'), icon: 'none' })
 	}
 
 	function takeWebStr(o: UTSJSONObject, key: string): string {
@@ -927,12 +928,12 @@
 	async function onInvite() {
 		if (inviteBusy.value) return
 		inviteBusy.value = true
-		uni.showToast({ title: '加载成员…', icon: 'none', duration: 800 })
+		uni.showToast({ title: t('call.loadMembers'), icon: 'none', duration: 800 })
 		try {
 			const mgr = getCallManager()
 			console.log('[call] invite tap', mgr.phase, mgr.useLivekit, mgr.isGroupCall, mgr.roomId)
 			if (mgr.useLivekit == false) {
-				uni.showToast({ title: '当前通话不支持加人', icon: 'none' })
+				uni.showToast({ title: t('call.noAdd'), icon: 'none' })
 				inviteBusy.value = false
 				return
 			}
@@ -944,13 +945,13 @@
 			inviteIds.value = ids
 			inviteNames.value = names
 			if (ids.length == 0) {
-				uni.showToast({ title: '没有可邀请的成员', icon: 'none' })
+				uni.showToast({ title: t('call.noInvitees'), icon: 'none' })
 			} else {
 				inviteOpen.value = true
 			}
 		} catch (e) {
 			console.warn('[call] invite open fail', e)
-			uni.showToast({ title: '打开邀请失败', icon: 'none' })
+			uni.showToast({ title: t('call.inviteOpenFail'), icon: 'none' })
 		}
 		inviteBusy.value = false
 	}

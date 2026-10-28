@@ -94,7 +94,7 @@
 							<text class="project-desc-short">{{ shortDesc(item) }}</text>
 							<view class="tag-row">
 								<view class="tag"><text class="tag-text">Web</text></view>
-								<view class="tag"><text class="tag-text">热门</text></view>
+								<view class="tag"><text class="tag-text">{{ t('home.hotTag') }}</text></view>
 							</view>
 						</view>
 					</view>
@@ -272,14 +272,14 @@
 
 	function shortDesc(item: CmsArchiveItem): string {
 		const d = item.description
-		if (d.length == 0) return '精选内容'
+		if (d.length == 0) return t('home.featured')
 		if (d.length <= 16) return d
 		return d.substring(0, 16) + '…'
 	}
 
 	function archiveSub(item: CmsArchiveItem): string {
-		if (item.views > 0) return '浏览 ' + item.views
-		return '已上线'
+		if (item.views > 0) return t('home.views') + item.views
+		return t('home.online')
 	}
 
 	function friendImage(link: CmsFriendLink): string {
@@ -287,9 +287,9 @@
 	}
 
 	function friendInitial(link: CmsFriendLink): string {
-		const t = link.title
-		if (t.length == 0) return '链'
-		return t.substring(0, 1)
+		const title = link.title
+		if (title.length == 0) return t('home.chain')
+		return title.substring(0, 1)
 	}
 
 	function onFriendLink(link: CmsFriendLink): void {
@@ -301,7 +301,7 @@
 	}
 
 	function onSoon(): void {
-		uni.showToast({ title: '即将开放', icon: 'none' })
+		uni.showToast({ title: t('common.soon'), icon: 'none' })
 	}
 
 	function goRooms(): void {

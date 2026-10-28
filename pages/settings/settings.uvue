@@ -35,20 +35,20 @@
 
 			<!-- 推送 / 设备 / 账号安全 / 关于：暂隐 -->
 			<view v-if="false" class="section">
-				<view class="section-title">推送通知</view>
+				<view class="section-title">{{ t('settings.push') }}</view>
 				<view class="setting-row">
-					<text class="setting-label">接收推送</text>
+					<text class="setting-label">{{ t('settings.recvPush') }}</text>
 					<switch class="setting-switch" :checked="pushEnabled" @change="onTogglePush" color="#1f6feb" />
 				</view>
 				<view class="setting-row">
-					<text class="setting-label">推送状态</text>
+					<text class="setting-label">{{ t('settings.pushStatus') }}</text>
 					<text class="setting-value" :class="pushStatusClass">{{ pushStatusText }}</text>
 				</view>
 			</view>
 			<view v-if="false" class="section">
-				<view class="section-title">登录设备</view>
+				<view class="section-title">{{ t('settings.devices') }}</view>
 				<view v-if="loadingDevices" class="loading-row">
-					<text class="loading-text">加载中…</text>
+					<text class="loading-text">{{ t('common.loading') }}</text>
 				</view>
 				<view v-else>
 					<view
@@ -63,37 +63,37 @@
 						<view class="device-info">
 							<text class="device-name">{{ deviceName(device) }}</text>
 							<text class="device-id">{{ device.device_id }}</text>
-							<text v-if="deviceHasLastSeen(device)" class="device-time">最近活跃: {{ deviceLastSeenText(device) }}</text>
+							<text v-if="deviceHasLastSeen(device)" class="device-time">{{ t('settings.lastActive') }}{{ deviceLastSeenText(device) }}</text>
 						</view>
 						<view v-if="device.device_id === currentDeviceId" class="current-badge">
-							<text class="current-text">当前</text>
+							<text class="current-text">{{ t('settings.current') }}</text>
 						</view>
 						<text v-else class="device-arrow">›</text>
 					</view>
 				</view>
 				<view class="setting-row danger-row" @click="onKickAllOther">
-					<text class="setting-label danger-text">登出其他所有设备</text>
+					<text class="setting-label danger-text">{{ t('settings.logoutOthers') }}</text>
 				</view>
 			</view>
 			<view v-if="false" class="section">
-				<view class="section-title">账号安全</view>
+				<view class="section-title">{{ t('settings.accountSafe') }}</view>
 				<view class="setting-row" @click="onChangePassword">
-					<text class="setting-label">修改密码</text>
+					<text class="setting-label">{{ t('settings.changePwd') }}</text>
 					<text class="setting-arrow">›</text>
 				</view>
 				<view class="setting-row" @click="onDeactivate">
-					<text class="setting-label danger-text">注销账号</text>
+					<text class="setting-label danger-text">{{ t('settings.deactivate') }}</text>
 					<text class="setting-arrow">›</text>
 				</view>
 			</view>
 			<view v-if="false" class="section">
-				<view class="section-title">关于</view>
+				<view class="section-title">{{ t('settings.about') }}</view>
 				<view class="setting-row">
-					<text class="setting-label">Matrix 版本</text>
+					<text class="setting-label">{{ t('settings.matrixVer') }}</text>
 					<text class="setting-value">Client-Server API v3</text>
 				</view>
 				<view class="setting-row">
-					<text class="setting-label">App 版本</text>
+					<text class="setting-label">{{ t('settings.appVer') }}</text>
 					<text class="setting-value">1.0.0</text>
 				</view>
 			</view>
@@ -173,34 +173,34 @@
 		<!-- 改密码弹窗 -->
 		<view v-if="showPasswordModal" class="modal-overlay" @click="closePasswordModal">
 			<view class="modal-card" @click.stop="noopModal">
-				<text class="modal-title">修改密码</text>
+				<text class="modal-title">{{ t('settings.pwdTitle') }}</text>
 				<input
 					class="modal-input"
 					v-model="passwordForm.oldPassword"
 					type="password"
-					placeholder="当前密码"
+					:placeholder="t('settings.oldPwd')"
 					placeholder-class="modal-placeholder"
 				/>
 				<input
 					class="modal-input"
 					v-model="passwordForm.newPassword"
 					type="password"
-					placeholder="新密码（至少8位）"
+					:placeholder="t('settings.newPwd')"
 					placeholder-class="modal-placeholder"
 				/>
 				<input
 					class="modal-input"
 					v-model="passwordForm.confirmPassword"
 					type="password"
-					placeholder="确认新密码"
+					:placeholder="t('settings.confirmPwd')"
 					placeholder-class="modal-placeholder"
 				/>
 				<view class="modal-actions">
 					<button class="modal-btn-cancel" @click.stop="closePasswordModal">
-						<text class="modal-btn-cancel-text">取消</text>
+						<text class="modal-btn-cancel-text">{{ t('common.cancel') }}</text>
 					</button>
 					<button class="modal-btn-confirm" @click.stop="onSubmitPassword">
-						<text class="modal-btn-confirm-text">确认</text>
+						<text class="modal-btn-confirm-text">{{ t('common.confirm') }}</text>
 					</button>
 				</view>
 			</view>
@@ -211,23 +211,23 @@
 			<view class="modal-card" @click.stop="noopModal">
 				<text class="modal-title">{{ deviceName(selectedDevice) }}</text>
 				<view class="device-detail-row">
-					<text class="device-detail-key">设备ID</text>
+					<text class="device-detail-key">{{ t('settings.deviceId') }}</text>
 					<text class="device-detail-val">{{ selectedId() }}</text>
 				</view>
 				<view v-if="selectedHasIp()" class="device-detail-row">
-					<text class="device-detail-key">最后IP</text>
+					<text class="device-detail-key">{{ t('settings.lastIp') }}</text>
 					<text class="device-detail-val">{{ selectedIp() }}</text>
 				</view>
 				<view v-if="selectedHasLastSeen()" class="device-detail-row">
-					<text class="device-detail-key">最后活跃</text>
+					<text class="device-detail-key">{{ t('settings.lastSeen') }}</text>
 					<text class="device-detail-val">{{ selectedLastSeenText() }}</text>
 				</view>
 				<view class="modal-actions" style="margin-top: 32rpx;">
 					<button class="modal-btn-cancel" @click="closeDeviceModal">
-						<text class="modal-btn-cancel-text">关闭</text>
+						<text class="modal-btn-cancel-text">{{ t('settings.close') }}</text>
 					</button>
 					<button v-if="selectedIsOther()" class="modal-btn-danger" @click="onKickDevice(selectedId())">
-						<text class="modal-btn-danger-text">踢下线</text>
+						<text class="modal-btn-danger-text">{{ t('settings.kick') }}</text>
 					</button>
 				</view>
 			</view>
@@ -236,21 +236,21 @@
 		<!-- 注销二次确认弹窗 -->
 		<view v-if="showDeactivateModal" class="modal-overlay" @click="closeDeactivateModal">
 			<view class="modal-card" @click.stop="noopModal">
-				<text class="modal-title danger-text">注销账号</text>
-				<text class="modal-desc">注销后你的所有数据将被永久删除，包括聊天记录和联系人。此操作不可恢复！</text>
+				<text class="modal-title danger-text">{{ t('settings.deactivateTitle') }}</text>
+				<text class="modal-desc">{{ t('settings.deactivateDesc') }}</text>
 				<input
 					class="modal-input"
 					v-model="deactivateForm.password"
 					type="password"
-					placeholder="请输入当前密码确认"
+					:placeholder="t('settings.deactivatePwd')"
 					placeholder-class="modal-placeholder"
 				/>
 				<view class="modal-actions">
 					<button class="modal-btn-cancel" @click.stop="closeDeactivateModal">
-						<text class="modal-btn-cancel-text">取消</text>
+						<text class="modal-btn-cancel-text">{{ t('common.cancel') }}</text>
 					</button>
 					<button class="modal-btn-danger" @click.stop="onSubmitDeactivate">
-						<text class="modal-btn-danger-text">确认注销</text>
+						<text class="modal-btn-danger-text">{{ t('settings.deactivateConfirm') }}</text>
 					</button>
 				</view>
 			</view>
@@ -365,7 +365,7 @@
 
 	// 推送状态
 	const pushEnabled = ref<boolean>(true)
-	const pushStatusText = ref<string>('未注册')
+	const pushStatusText = ref<string>(t('settings.pushOff'))
 	const pushStatusClass = ref<string>('')
 	const loadingDevices = ref<boolean>(false)
 	const devices = ref<Array<SettingsDevice>>([])
@@ -582,12 +582,12 @@
 	async function onSubmitNickname(): Promise<void> {
 		const name = nicknameDraft.value.trim()
 		if (name.length == 0) {
-			uni.showToast({ title: '请输入昵称', icon: 'none' })
+			uni.showToast({ title: t('settings.needNick'), icon: 'none' })
 			return
 		}
 		if (savingProfile.value) return
 		savingProfile.value = true
-		uni.showLoading({ title: '保存中…' })
+		uni.showLoading({ title: t('settings.saving') })
 		let platformOk = false
 		let matrixOk = false
 		let errMsg = ''
@@ -605,7 +605,7 @@
 				matrixOk = true
 			} catch (eMx) {
 				console.warn('sync matrix displayname fail', eMx)
-				errMsg = errText(eMx, '聊天昵称更新失败')
+				errMsg = errText(eMx, t('settings.nickMxFail'))
 			}
 		}
 		try {
@@ -614,7 +614,7 @@
 			platformOk = true
 		} catch (e) {
 			console.warn('platform nickname fail', e)
-			errMsg = errText(e, '平台资料更新失败')
+			errMsg = errText(e, t('settings.nickPlatFail'))
 			if (matrixOk) profileNickname.value = name
 		}
 		uni.hideLoading()
@@ -622,24 +622,24 @@
 		if (platformOk || matrixOk) {
 			showNicknameModal.value = false
 			if (platformOk) {
-				uni.showToast({ title: '昵称已更新', icon: 'success' })
+				uni.showToast({ title: t('settings.nickOk'), icon: 'success' })
 			} else {
-				uni.showToast({ title: '聊天昵称已改；平台：' + errMsg, icon: 'none', duration: 2500 })
+				uni.showToast({ title: t('settings.nickPartial') + errMsg, icon: 'none', duration: 2500 })
 			}
 		} else {
-			uni.showToast({ title: errMsg.length > 0 ? errMsg : '更新失败', icon: 'none', duration: 2500 })
+			uni.showToast({ title: errMsg.length > 0 ? errMsg : t('settings.updateFail'), icon: 'none', duration: 2500 })
 		}
 	}
 
 	async function uploadAvatarNow(localPath: string): Promise<void> {
 		if (savingProfile.value) return
 		savingProfile.value = true
-		uni.showLoading({ title: '上传中…' })
+		uni.showLoading({ title: t('settings.uploading') })
 		try {
 			const matrix = getMatrix()
 			if (matrix == null) {
 				uni.hideLoading()
-				uni.showToast({ title: '请先登录聊天账号', icon: 'none' })
+				uni.showToast({ title: t('settings.needChatLogin'), icon: 'none' })
 				savingProfile.value = false
 				return
 			}
@@ -675,10 +675,10 @@
 			if (httpUrl.length > 0) profileAvatar.value = httpUrl
 			else profileAvatar.value = localPath
 			uni.hideLoading()
-			uni.showToast({ title: '头像已更新', icon: 'success' })
+			uni.showToast({ title: t('settings.avatarOk'), icon: 'success' })
 		} catch (e) {
 			uni.hideLoading()
-			uni.showToast({ title: errText(e, '上传失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('settings.uploadFail')), icon: 'none' })
 		}
 		savingProfile.value = false
 	}
@@ -703,9 +703,9 @@
 	}
 
 	function deviceName(device: SettingsDevice | null): string {
-		if (device == null) return '未知设备'
+		if (device == null) return t('settings.unknownDevice')
 		if (device.display_name.length > 0) return device.display_name
-		return '未知设备'
+		return t('settings.unknownDevice')
 	}
 
 	function deviceIcon(device: SettingsDevice): string {
@@ -725,13 +725,13 @@
 	}
 
 	function formatTime(ts: number): string {
-		if (ts == 0) return '未知'
+		if (ts == 0) return t('settings.unknown')
 		const d = new Date(ts)
 		const now = new Date()
 		const diff = now.getTime() - d.getTime()
-		if (diff < 60000) return '刚刚'
-		if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前'
-		if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前'
+		if (diff < 60000) return t('time.justNow')
+		if (diff < 3600000) return (() => { let x=t('time.minAgo'); const n=''+Math.floor(diff / 60000); const i=x.indexOf('{n}'); return i>=0?x.substring(0,i)+n+x.substring(i+3):n })()
+		if (diff < 86400000) return (() => { let x=t('time.hourAgo'); const n=''+Math.floor(diff / 3600000); const i=x.indexOf('{n}'); return i>=0?x.substring(0,i)+n+x.substring(i+3):n })()
 		const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
 		const targetDay = new Date(d.getFullYear(), d.getMonth(), d.getDate())
 		if (targetDay.getTime() == today.getTime()) {
@@ -742,7 +742,7 @@
 			return hs + ':' + ms
 		}
 		const yesterday = new Date(today.getTime() - 86400000)
-		if (targetDay.getTime() == yesterday.getTime()) return '昨天'
+		if (targetDay.getTime() == yesterday.getTime()) return t('time.yesterday')
 		return (d.getMonth() + 1) + '/' + d.getDate()
 	}
 
