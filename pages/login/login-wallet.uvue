@@ -46,7 +46,8 @@
 
 <script setup lang="uts">
 	import { ref, computed } from 'vue'
-	import { t } from '@/common/i18n.uts'
+	import { t as __i18nT } from '@/common/i18n.uts'
+
 	import {
 		walletChallenge,
 		walletVerify,
@@ -63,12 +64,17 @@
 	} from '@/common/platform.uts'
 	import { startMatrixFromPlatform } from '@/common/app.uts'
 	import {
+
 		clearTpPending,
 		tpSdkPersonalSign,
 		tpSdkSignTicket,
 		loadTpWalletAddress,
 		saveTpWalletAddress
 	} from '@/common/tp-wallet.uts'
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
 
 	const LAST_WALLET_KEY = 'tp_last_wallet_v1'
 

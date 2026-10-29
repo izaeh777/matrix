@@ -86,7 +86,7 @@
 
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted, nextTick, getCurrentInstance } from 'vue'
-	import { t } from '@/common/i18n.uts'
+	import { t as __i18nT } from '@/common/i18n.uts'
 	import { getCallManager, CallManager, CallSnapshot, h5TapRunAnswer, formatCallDur } from '@/common/call.uts'
 	import { tuneCallWebView, makeNativeEval, pingCallEngine, destroyCallEngine, reloadEngineAsHttps, loadEngineHtmlInto } from '@/common/call-webview.uts'
 	// #ifdef APP-ANDROID
@@ -94,6 +94,10 @@
 	import FrameLayout from 'android.widget.FrameLayout'
 	import ViewGroup from 'android.view.ViewGroup'
 	// #endif
+
+	function t(key: string): string {
+		return __i18nT(key)
+	}
 
 	const ui = ref<CallSnapshot>({
 		phase: 'idle', roomId: '', callId: '', peerName: '', peerAvatar: '', isVideo: false,

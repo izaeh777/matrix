@@ -116,9 +116,15 @@
 
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted } from 'vue'
-	import { t } from '@/common/i18n.uts'
+	import { t as __i18nT } from '@/common/i18n.uts'
+
 	import { getMatrix, errText, DirectoryUser } from '@/common/matrix.uts'
 	import { openChat, openGroupPick } from '@/common/app.uts'
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+
 
 	type PresenceCache = {
 		presence: string

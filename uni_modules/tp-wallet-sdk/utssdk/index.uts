@@ -1,32 +1,33 @@
 /**
  * 非 Android 平台占位：TP Mobile-SDK 仅 App-Android 可用
+ * 不 export type（H5 会擦除导致 value import 白屏）；用本地 type 作返回值即可
  */
-import {
-	TpAuthorize,
-	TpPersonalSign,
-	TpTransfer,
-	TpIsInstalled,
-	TpDeliverSchema,
-	TpSdkResult
-} from './interface.uts'
+type TpStubResult = {
+	code: number
+	raw: string
+	wallet: string
+	signature: string
+	action: string
+	actionId: string
+}
 
-function unsupported(): Promise<TpSdkResult> {
-	return new Promise<TpSdkResult>((_resolve, reject) => {
+function unsupported(): Promise<TpStubResult> {
+	return new Promise<TpStubResult>((_resolve, reject) => {
 		reject('TokenPocket Mobile-SDK 仅支持 Android App')
 	})
 }
 
-export const tpAuthorize: TpAuthorize = function (
+export function tpAuthorize(
 	_actionId: string,
 	_chainId: string,
 	_dappName: string,
 	_dappIcon: string,
 	_memo: string
-): Promise<TpSdkResult> {
+): Promise<TpStubResult> {
 	return unsupported()
 }
 
-export const tpPersonalSign: TpPersonalSign = function (
+export function tpPersonalSign(
 	_message: string,
 	_actionId: string,
 	_chainId: string,
@@ -34,11 +35,11 @@ export const tpPersonalSign: TpPersonalSign = function (
 	_dappIcon: string,
 	_memo: string,
 	_signType: string
-): Promise<TpSdkResult> {
+): Promise<TpStubResult> {
 	return unsupported()
 }
 
-export const tpTransfer: TpTransfer = function (
+export function tpTransfer(
 	_from: string,
 	_to: string,
 	_contract: string,
@@ -50,14 +51,14 @@ export const tpTransfer: TpTransfer = function (
 	_chainId: string,
 	_dappName: string,
 	_dappIcon: string
-): Promise<TpSdkResult> {
+): Promise<TpStubResult> {
 	return unsupported()
 }
 
-export const tpIsInstalled: TpIsInstalled = function (): boolean {
+export function tpIsInstalled(): boolean {
 	return false
 }
 
-export const tpDeliverSchema: TpDeliverSchema = function (_urlOrQuery: string): boolean {
+export function tpDeliverSchema(_urlOrQuery: string): boolean {
 	return false
 }

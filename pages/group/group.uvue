@@ -92,9 +92,15 @@
 
 <script setup lang="uts">
 	import { ref, computed } from 'vue'
-	import { t } from '@/common/i18n.uts'
+	import { t as __i18nT } from '@/common/i18n.uts'
+
 	import { getMatrix, errText, RoomMember, roomIsGroup, memberDisplayName, MatrixRoom } from '@/common/matrix.uts'
 	import { openGroupPick } from '@/common/app.uts'
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+
 
 	const roomId = ref<string>('')
 	const roomName = ref<string>('')

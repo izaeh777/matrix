@@ -55,10 +55,16 @@
 
 <script setup lang="uts">
 	import { ref } from 'vue'
-	import { t } from '@/common/i18n.uts'
+	import { t as __i18nT } from '@/common/i18n.uts'
+
 	import { MatrixClient, errText } from '@/common/matrix.uts'
 	import { startMatrixSession } from '@/common/app.uts'
 	import { saveSession } from '@/common/storage.uts'
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+
 
 	const username = ref<string>('')
 	const password = ref<string>('')

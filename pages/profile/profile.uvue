@@ -252,7 +252,13 @@
 	import { inviteRegisterQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
 	import { openChat } from '@/common/app.uts'
 	import { scanAddFriendOrInvite } from '@/common/deeplink.uts'
-	import { getLocaleLabel, openLanguagePage, t, tx } from '@/common/i18n.uts'
+	import { getLocaleLabel, openLanguagePage, t as __i18nT, tx } from '@/common/i18n.uts'
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+
+
 
 	type ProfileI18n = {
 		balance: string

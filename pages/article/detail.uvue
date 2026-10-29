@@ -73,7 +73,7 @@
 
 <script setup lang="uts">
 	import { ref, computed } from 'vue'
-	import { t } from '@/common/i18n.uts'
+	import { t as __i18nT } from '@/common/i18n.uts'
 	import {
 		fetchArchiveDetail,
 		cmsAssetUrl,
@@ -81,6 +81,10 @@
 		openCmsLink,
 		CmsArchiveDetail
 	} from '@/common/cms.uts'
+
+	function t(key: string): string {
+		return __i18nT(key)
+	}
 
 	const loading = ref<boolean>(true)
 	const errorText = ref<string>('')

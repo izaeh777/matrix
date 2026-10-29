@@ -389,7 +389,13 @@
 	import { bootstrapMatrix, openGroupInfo, ensureMatrixClient, hasPlatformLogin } from '@/common/app.uts'
 	import { getCallManager, CallSnapshot, h5TapRunAnswer } from '@/common/call.uts'
 	import { loadRoomChat, saveRoomChat } from '@/common/storage.uts'
-	import { t } from '@/common/i18n.uts'
+	import { t as __i18nT } from '@/common/i18n.uts'
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+
+
 
 	type ChatMsg = {
 		event_id: string

@@ -240,7 +240,13 @@
 		canPublishProject,
 		loadCachedVipLabel
 	} from '@/common/platform.uts'
-	import { t, tx } from '@/common/i18n.uts'
+	import { t as __i18nT, tx } from '@/common/i18n.uts'
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+
+
 
 	const tabs: Array<string> = ['全部', '金融', '直播', 'Web3', 'Defi', '项目']
 	const activeTab = ref<string>('全部')

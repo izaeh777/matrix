@@ -60,11 +60,17 @@
 
 <script setup lang="uts">
 	import { ref, onUnmounted } from 'vue'
-	import { t } from '@/common/i18n.uts'
+	import { t as __i18nT } from '@/common/i18n.uts'
+
 	import { getMatrix, errText } from '@/common/matrix.uts'
 	import { openChat } from '@/common/app.uts'
 	import { findFriendByUsername, FindFriendItem } from '@/common/platform.uts'
 	import { scanAddFriendOrInvite } from '@/common/deeplink.uts'
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+
 
 	type FriendRow = {
 		nickname: string

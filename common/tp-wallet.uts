@@ -10,8 +10,7 @@ import {
 	tpPersonalSign as sdkPersonalSign,
 	tpTransfer as sdkTransfer,
 	tpIsInstalled as sdkIsInstalled,
-	tpDeliverSchema as sdkDeliverSchema,
-	TpSdkResult
+	tpDeliverSchema as sdkDeliverSchema
 } from '@/uni_modules/tp-wallet-sdk'
 
 // #ifdef APP-ANDROID
@@ -59,14 +58,14 @@ function pickStr(obj: UTSJSONObject, key: string): string {
 	return ''
 }
 
-function sdkToCallback(r: TpSdkResult): TpCallbackResult {
+function sdkToCallback(code: number, wallet: string, signature: string, action: string, actionId: string, raw: string): TpCallbackResult {
 	const out: TpCallbackResult = {
-		ok: r.code == 0 && (r.wallet.length > 0 || r.signature.length > 0 || r.raw.length > 0),
-		action: r.action,
-		actionId: r.actionId,
-		wallet: r.wallet,
-		signature: r.signature,
-		raw: r.raw
+		ok: code == 0 && (wallet.length > 0 || signature.length > 0 || raw.length > 0),
+		action: action,
+		actionId: actionId,
+		wallet: wallet,
+		signature: signature,
+		raw: raw
 	}
 	return out
 }
@@ -167,7 +166,7 @@ export function loadTpWalletAddress(): string {
 export async function tpSdkAuthorize(): Promise<TpCallbackResult> {
 	const actionId = newActionId()
 	const r = await sdkAuthorize(actionId, '56', DAPP_NAME, DAPP_ICON, 'itiklink-auth-login')
-	const out = sdkToCallback(r)
+	const out = sdkToCallback(r.code, r.wallet, r.signature, r.action, r.actionId, r.raw)
 	if (out.ok && out.wallet.length > 0) saveTpWalletAddress(out.wallet)
 	return out
 }
@@ -458,7 +457,7 @@ function extractTxHash(sig: string, raw: string): string {
 export async function tpSdkPersonalSign(message: string): Promise<TpCallbackResult> {
 	const actionId = newActionId()
 	const r = await sdkPersonalSign(message, actionId, '56', DAPP_NAME, DAPP_ICON, 'itiklink-siwe', 'ethPersonalSign')
-	return sdkToCallback(r)
+	return sdkToCallback(r.code, r.wallet, r.signature, r.action, r.actionId, r.raw)
 }
 
 /** tp-login：用 ticket 作 actionId，挂 pendingCb 等 Assist 回传签名 */
@@ -468,7 +467,7 @@ export async function tpSdkSignTicket(message: string, ticket: string): Promise<
 		return empty
 	}
 	const r = await sdkPersonalSign(message, ticket, '56', DAPP_NAME, DAPP_ICON, 'itiklink-tp-login', 'ethPersonalSign')
-	return sdkToCallback(r)
+	return sdkToCallback(r.code, r.wallet, r.signature, r.action, r.actionId, r.raw)
 }
 
 /** 解析服务端 deeplink 的 param JSON（兼容 + 表示空格） */
