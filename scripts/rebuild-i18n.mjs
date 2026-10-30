@@ -761,11 +761,11 @@ const pt = fromEn({
 const header = `/**
  * 轻量多语言（适配 uni-app x Android VDOM）
  * 与后台 think-lang 一致：
- * zh-cn / en / zh-tw / ja / ko / fr / de / es / ru / ar / pt
+ * en / zh-cn / zh-tw / ja / ko / ru / vi
  */
-const KEY_LOCALE = 'app_locale_v1'
-const KEY_LOCALE_VER = 'app_locale_ver_v1'
-const DEFAULT_LOCALE = 'zh-cn'
+const KEY_LOCALE = 'app_locale_v2'
+const KEY_LOCALE_VER = 'app_locale_ver_v2'
+const DEFAULT_LOCALE = 'en'
 
 export type LocaleOption = {
 	code: string
@@ -773,17 +773,13 @@ export type LocaleOption = {
 }
 
 export const LOCALE_OPTIONS: Array<LocaleOption> = [
-	{ code: 'zh-cn', label: '简体中文' } as LocaleOption,
 	{ code: 'en', label: 'English' } as LocaleOption,
+	{ code: 'zh-cn', label: '简体中文' } as LocaleOption,
 	{ code: 'zh-tw', label: '繁體中文' } as LocaleOption,
 	{ code: 'ja', label: '日本語' } as LocaleOption,
 	{ code: 'ko', label: '한국어' } as LocaleOption,
-	{ code: 'fr', label: 'Français' } as LocaleOption,
-	{ code: 'de', label: 'Deutsch' } as LocaleOption,
-	{ code: 'es', label: 'Español' } as LocaleOption,
 	{ code: 'ru', label: 'Русский' } as LocaleOption,
-	{ code: 'ar', label: 'العربية' } as LocaleOption,
-	{ code: 'pt', label: 'Português' } as LocaleOption
+	{ code: 'vi', label: 'Tiếng Việt' } as LocaleOption
 ]
 
 function fillPack(m: Map<string, string>, pairs: Array<string>): void {
@@ -797,27 +793,19 @@ const MSG_ZH_TW = new Map<string, string>()
 const MSG_EN = new Map<string, string>()
 const MSG_JA = new Map<string, string>()
 const MSG_KO = new Map<string, string>()
-const MSG_FR = new Map<string, string>()
-const MSG_DE = new Map<string, string>()
-const MSG_ES = new Map<string, string>()
 const MSG_RU = new Map<string, string>()
-const MSG_AR = new Map<string, string>()
-const MSG_PT = new Map<string, string>()
+const MSG_VI = new Map<string, string>()
 
 `
 
 const footer = `
 function packOf(locale: string): Map<string, string> {
-	if (locale == 'zh-tw') return MSG_ZH_TW
 	if (locale == 'en') return MSG_EN
+	if (locale == 'zh-tw') return MSG_ZH_TW
 	if (locale == 'ja') return MSG_JA
 	if (locale == 'ko') return MSG_KO
-	if (locale == 'fr') return MSG_FR
-	if (locale == 'de') return MSG_DE
-	if (locale == 'es') return MSG_ES
 	if (locale == 'ru') return MSG_RU
-	if (locale == 'ar') return MSG_AR
-	if (locale == 'pt') return MSG_PT
+	if (locale == 'vi') return MSG_VI
 	return MSG_ZH_CN
 }
 
@@ -838,13 +826,9 @@ function normalizeLocale(code: string): string {
 	if (lower.indexOf('en') == 0) return 'en'
 	if (lower.indexOf('ja') == 0) return 'ja'
 	if (lower.indexOf('ko') == 0) return 'ko'
-	if (lower.indexOf('fr') == 0) return 'fr'
-	if (lower.indexOf('de') == 0) return 'de'
-	if (lower.indexOf('es') == 0) return 'es'
 	if (lower.indexOf('ru') == 0) return 'ru'
-	if (lower.indexOf('ar') == 0) return 'ar'
-	if (lower.indexOf('pt') == 0) return 'pt'
-	if (lower.indexOf('vi') == 0) return 'en'
+	if (lower.indexOf('vi') == 0) return 'vi'
+	if (lower.indexOf('fr') == 0 || lower.indexOf('de') == 0 || lower.indexOf('es') == 0 || lower.indexOf('ar') == 0 || lower.indexOf('pt') == 0) return 'en'
 	return DEFAULT_LOCALE
 }
 
@@ -856,11 +840,7 @@ export function getLocale(): string {
 			if (s.length > 0) return normalizeLocale(s)
 		}
 	} catch (e) {}
-	try {
-		const info = uni.getSystemInfoSync()
-		const sys = '' + info.language
-		if (sys.length > 0) return normalizeLocale(sys)
-	} catch (e2) {}
+	// 未手动选过语言：固定英文，不跟系统语言
 	return DEFAULT_LOCALE
 }
 

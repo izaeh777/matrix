@@ -1,5 +1,5 @@
 ﻿<template>
-	<view class="chat-page" :style="chatPageStyle">
+	<view class="chat-page" :style="chatPageDynStyle">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
 		<!-- #endif -->
@@ -24,10 +24,10 @@
 			<view
 				v-if="stripSlots.length > 0"
 				class="member-strip-wrap"
-				@touchstart="onStripTouchStart"
-				@touchmove="onStripTouchMove"
-				@touchend="onStripTouchEnd"
-				@touchcancel="onStripTouchEnd"
+				@touchstart.stop="onStripTouchStart"
+				@touchmove.stop="onStripTouchMove"
+				@touchend.stop="onStripTouchEnd"
+				@touchcancel.stop="onStripTouchEnd"
 				@mousedown="onStripMouseDown"
 				@mousemove="onStripMouseMove"
 				@mouseup="onStripMouseUp"
@@ -187,6 +187,8 @@
 			<view id="chat-bottom" class="chat-bottom-anchor"></view>
 		</scroll-view>
 
+		<!-- 底部输入区：按键盘高度上移，顶栏不动 -->
+		<view class="composer" :style="composerStyle">
 		<!-- 输入栏 -->
 		<view class="input-bar">
 			<view class="input-tool" @click="toggleVoiceMode">
@@ -213,10 +215,12 @@
 					:placeholder="chatInputPh"
 					placeholder-class="input-placeholder"
 					confirm-type="send"
+					:adjust-position="false"
 					@input="onInputChange"
 					@focus="onInputFocus"
 					@blur="onInputBlur"
 					@confirm="onSend"
+					@keyboardheightchange="onInputKeyboardHeight"
 				/>
 			</view>
 			<view class="input-tool" @click="toggleEmojiPanel">
@@ -228,6 +232,7 @@
 			<view v-else class="btn-send" @click="onSend">
 				<text class="btn-send-text">{{ chatSendText }}</text>
 			</view>
+		</view>
 		</view>
 
 		<!-- 底部更多功能面板 -->
@@ -483,8 +488,17 @@
 	const groupMembers = ref<Array<RoomMember>>([])
 	const showAtPicker = ref<boolean>(false)
 	// 效果图：顶栏白；聊天区浅蓝
-	const chatPageStyle = 'background-color:#F3F8FE;'
 	const chatHeaderStyle = 'background-color:#F3F8FE;'
+	/** 键盘高度(px)：关掉整页上推后，只抬底部 composer */
+	const keyboardHeight = ref<number>(0)
+	let kbListenId: number = -1
+	const chatPageDynStyle = 'background-color:#F3F8FE;'
+	const composerStyle = computed((): string => {
+		const kb = keyboardHeight.value
+		// 与 hello-uni-app-x keyboard-adjust 一致：用 margin-bottom 把输入区顶到键盘上方
+		if (kb > 0) return 'margin-bottom:' + kb + 'px;'
+		return ''
+	})
 	const roomTitleBar = computed((): string => {
 		let title = roomName.value
 		if (title.length == 0) title = t('chat.title')
@@ -534,7 +548,6 @@
 	const stripRoomList = ref<Array<MatrixRoom>>([])
 	const roomAlertMap = ref<Map<string, boolean>>(new Map())
 	const alertTick = ref<number>(0)
-	let switchingRoom: boolean = false
 
 	function safeDecode(raw: string): string {
 		try {
@@ -779,6 +792,16 @@
 	let stripMoved: boolean = false
 	let stripActive: boolean = false
 
+	function stripSwipeSteps(adx: number): number {
+		const I = stripChipPx()
+		if (I <= 0) return 1
+		// 滑过约 12% 宽就切 1 格；更远按整格累加，最多 5
+		let steps = Math.floor((adx + I * 0.88) / I)
+		if (steps < 1) steps = 1
+		if (steps > 5) steps = 5
+		return steps
+	}
+
 	function onStripTouchStart(e: UniTouchEvent): void {
 		if (e.touches.length == 0) return
 		stripTouchX = e.touches[0].clientX
@@ -796,8 +819,9 @@
 		const dy = e.touches[0].clientY - stripTouchY
 		const adx = dx > 0 ? dx : -dx
 		const ady = dy > 0 ? dy : -dy
-		if (adx < 6 && ady < 6) return
-		if (ady > adx * 1.2 && !stripMoved) {
+		if (adx < 3 && ady < 3) return
+		// 已判定为横向后不再因轻微纵向取消，避免“很难滑”
+		if (!stripMoved && ady > adx * 1.8) {
 			stripActive = false
 			stripDragging.value = false
 			stripDragX.value = 0
@@ -806,6 +830,7 @@
 		stripMoved = true
 		stripDragging.value = true
 		stripDragX.value = dx
+		try { e.preventDefault() } catch (ePrev) {}
 	}
 
 	function onStripTouchEnd(e: UniTouchEvent): void {
@@ -822,12 +847,13 @@
 		}
 		const dx = endX - stripTouchX
 		const dragSnap = stripDragX.value
-		const th = stripChipPx() * 0.2
+		const th = stripChipPx() * 0.12
 		const adx = dx > 0 ? dx : -dx
 		stripDragX.value = 0
 		if (stripMoved && adx >= th) {
-			if (dx < 0) shiftStrip(1)
-			else shiftStrip(-1)
+			const steps = stripSwipeSteps(adx)
+			if (dx < 0) shiftStrip(steps)
+			else shiftStrip(-steps)
 		} else {
 			// 点击：命中哪个头像就切到哪个会话
 			const idx = stripIndexAtX(endX, dragSnap)
@@ -887,12 +913,13 @@
 			const x: number = xv != null ? parseFloat('' + xv) : stripTouchX
 			const dx = x - stripTouchX
 			const dragSnap = stripDragX.value
-			const th = stripChipPx() * 0.2
+			const th = stripChipPx() * 0.12
 			const adx = dx > 0 ? dx : -dx
 			stripDragX.value = 0
 			if (stripMoved && adx >= th) {
-				if (dx < 0) shiftStrip(1)
-				else shiftStrip(-1)
+				const steps = stripSwipeSteps(adx)
+				if (dx < 0) shiftStrip(steps)
+				else shiftStrip(-steps)
 			} else {
 				const idx = stripIndexAtX(x, dragSnap)
 				if (idx >= 0 && idx < stripRoomList.value.length) {
@@ -2256,8 +2283,11 @@
 	})
 
 	async function loadRoomMeta(matrix: MatrixClient): Promise<void> {
+		const rid = roomId.value
+		const gen = chatLoadGen
 		try {
-			const summary = await matrix.getRoomSummary(roomId.value)
+			const summary = await matrix.getRoomSummary(rid)
+			if (gen != chatLoadGen || !sameRoomId(roomId.value, rid)) return
 			roomEncrypted.value = summary.encrypted == true
 			isGroup.value = roomIsGroup(summary)
 			const n = summary.name
@@ -2267,10 +2297,14 @@
 			const mc = summary.member_count
 			if (mc != null) memberCount.value = mc
 		} catch (e) {
-			roomEncrypted.value = false
+			if (gen == chatLoadGen && sameRoomId(roomId.value, rid)) {
+				roomEncrypted.value = false
+			}
 		}
+		if (gen != chatLoadGen || !sameRoomId(roomId.value, rid)) return
 		try {
-			const list = await matrix.getRoomMembers(roomId.value)
+			const list = await matrix.getRoomMembers(rid)
+			if (gen != chatLoadGen || !sameRoomId(roomId.value, rid)) return
 			groupMembers.value = list
 			for (let ai = 0; ai < list.length; ai++) {
 				const mem = list[ai]
@@ -2286,15 +2320,19 @@
 				if (n > memberCount.value) memberCount.value = n
 			}
 		} catch (e2) {}
+		if (gen != chatLoadGen || !sameRoomId(roomId.value, rid)) return
 		if (isGroup.value) {
 			try {
-				const ids = await matrix.getJoinedMembers(roomId.value)
+				const ids = await matrix.getJoinedMembers(rid)
+				if (gen != chatLoadGen || !sameRoomId(roomId.value, rid)) return
 				if (ids.length > memberCount.value) memberCount.value = ids.length
 			} catch (e3) {}
 		}
 	}
 
 	async function checkRoomEncrypted(matrix: MatrixClient): Promise<void> {
+		// 仅在尚未有摘要时补拉；避免 strip 切换时重复 members/state
+		if (roomName.value.length > 0 || memberCount.value > 0) return
 		await loadRoomMeta(matrix)
 	}
 
@@ -2635,10 +2673,78 @@
 			console.warn('onInputChange 异常', e)
 		}
 	}
-	function onInputFocus() {
+	function safeBottomInset(): number {
+		try {
+			const sys = uni.getSystemInfoSync()
+			const inset = sys.safeAreaInsets
+			if (inset != null && inset.bottom > 0) return Math.floor(inset.bottom)
+		} catch (e) {}
+		return 0
+	}
+	function normalizeKeyboardHeight(h: number): number {
+		if (h != h || h <= 0) return 0
+		let next = Math.floor(h)
+		// #ifdef APP-IOS || APP-HARMONY
+		// iOS/Harmony 回报高度已含安全区，需减掉，避免输入栏悬空一块
+		const safe = safeBottomInset()
+		if (safe > 0 && next > safe) next = next - safe
+		// #endif
+		return next
+	}
+	function applyKeyboardHeight(h: number): void {
+		const next = normalizeKeyboardHeight(h)
+		if (keyboardHeight.value == next) {
+			if (next > 0) {
+				nextTick(() => { scrollToBottom() })
+			}
+			return
+		}
+		keyboardHeight.value = next
+		if (next > 0) {
+			nextTick(() => {
+				scrollToBottom()
+			})
+		}
+	}
+	function readEventHeight(e: UniEvent): number {
+		// UniEvent 无 detail 字段，只能走 UTSJSONObject 下标读取
+		try {
+			const eo = e as UTSJSONObject
+			const detail = eo['detail']
+			if (detail == null) return -1
+			const d2 = detail as UTSJSONObject
+			const h = d2['height']
+			if (h == null) return -1
+			const n = parseInt('' + h)
+			if (n != n) return -1
+			return n
+		} catch (err) {
+			return -1
+		}
+	}
+	function onInputKeyboardHeight(e: UniInputKeyboardHeightChangeEvent): void {
+		let h = 0
+		try {
+			h = e.detail.height
+		} catch (err) {
+			const n = readEventHeight(e as UniEvent)
+			if (n >= 0) h = n
+		}
+		applyKeyboardHeight(h)
+	}
+	function onInputFocus(e: UniInputFocusEvent): void {
 		inputFocused.value = true
 		voiceMode.value = false
 		showMorePanel.value = false
+		showEmojiPanel.value = false
+		let h = 0
+		try {
+			h = e.detail.height
+		} catch (err) {
+			const n = readEventHeight(e as UniEvent)
+			if (n > 0) h = n
+		}
+		if (h > 0) applyKeyboardHeight(h)
 	}
 	function toggleVoiceMode() {
 		voiceMode.value = !voiceMode.value
@@ -2647,6 +2753,7 @@
 	}
 	function onInputBlur() {
 		inputFocused.value = false
+		// 收起高度以 keyboardheightchange / onKeyboardHeightChange 的 0 为准
 	}
 	function onVoiceBtn() {
 		// 保留兼容：老的弹出式录音面板入口已废弃。
@@ -3127,18 +3234,17 @@
 	switchToStripRoomImpl = async (nextId: string): Promise<void> => {
 		if (nextId.length == 0) return
 		if (sameRoomId(nextId, roomId.value)) return
-		if (switchingRoom) return
-		switchingRoom = true
-		console.log('[strip] switch ->', nextId)
+		// 立刻抬 gen：打断上一次切换的网络回调，允许连续快滑
+		chatLoadGen = chatLoadGen + 1
+		const gen = chatLoadGen
+		console.log('[strip] switch ->', nextId, 'gen=', gen)
 		try {
-			persistRoomChatNow()
+			try { persistRoomChatNow() } catch (ePersist) {}
 			const pt = persistTimer
 			persistTimer = null
 			if (pt != null) {
 				clearTimeout(pt as number)
 			}
-			chatLoadGen = chatLoadGen + 1
-			const gen = chatLoadGen
 			roomId.value = nextId
 			uni.setStorageSync('last_chat_room', nextId)
 			messages.value = []
@@ -3149,6 +3255,7 @@
 			inputText.value = ''
 			typingUsers.value = []
 			highlightEventId.value = ''
+			loadingHistory.value = true
 			clearRoomAlert(nextId)
 			stripDragX.value = 0
 
@@ -3171,7 +3278,6 @@
 			loadingHistory.value = messages.value.length == 0
 			await loadRoomMeta(matrix)
 			if (gen != chatLoadGen) return
-			checkRoomEncrypted(matrix)
 			await loadHistory()
 			if (gen != chatLoadGen) return
 			mergeRoomBuffer()
@@ -3184,9 +3290,7 @@
 			}
 			getCallManager().replayRoom(nextId)
 		} catch (e) {
-			console.warn('[strip] switch fail', e)
-		} finally {
-			switchingRoom = false
+			if (gen == chatLoadGen) console.warn('[strip] switch fail', e)
 		}
 	}
 
@@ -3512,6 +3616,23 @@
 
 	onMounted(() => {
 		setupChat()
+		// #ifndef H5
+		try {
+			kbListenId = uni.onKeyboardHeightChange((res) => {
+				let h = 0
+				try {
+					h = res.height
+				} catch (eH) {
+					try {
+						const o = res as UTSJSONObject
+						const v = o['height']
+						if (v != null) h = parseInt('' + v)
+					} catch (eH2) {}
+				}
+				if (h == h) applyKeyboardHeight(h)
+			})
+		} catch (eKb) {}
+		// #endif
 	})
 
 	onShow(() => {
@@ -3526,6 +3647,15 @@
 
 
 	onUnmounted(() => {
+		// #ifndef H5
+		try {
+			if (kbListenId >= 0) {
+				uni.offKeyboardHeightChange(kbListenId)
+				kbListenId = -1
+			}
+		} catch (eKbOff) {}
+		// #endif
+		keyboardHeight.value = 0
 		stopOff(unloadHandler)
 		unloadHandler = null
 		clearRecordTimer()
@@ -3569,12 +3699,17 @@
 	.chat-page {
 		flex: 1;
 		width: 100%;
+		/* App 对 background-image 渐变支持不稳，用纯色保证有底色；H5 再叠渐变 */
 		background-color: #F3F8FE;
-		background-image: linear-gradient(180deg, #F3F8FE 0%, #FFFFFF 100%);
 		display: flex;
 		flex-direction: column;
 		position: relative;
 	}
+	/* #ifdef H5 */
+	.chat-page {
+		background-image: linear-gradient(180deg, #F3F8FE 0%, #FFFFFF 100%);
+	}
+	/* #endif */
 	.chat-header {
 		width: 100%;
 		/* 与聊天区同色，避免弧线下透出白边 */
@@ -3715,7 +3850,7 @@
 		background-color: #ffffff;
 		padding-top: 8rpx;
 		padding-bottom: 0;
-		height: 128rpx;
+		height: 140rpx;
 		/* 必须可见：焦点头像要落入下方弧线 */
 		overflow: visible;
 		z-index: 4;
@@ -3756,7 +3891,7 @@
 		width: 72rpx;
 		height: 72rpx;
 		border-radius: 36rpx;
-		background-color: #e8eef8;
+		background-color: transparent;
 		border-width: 3rpx;
 		border-color: #ffffff;
 		border-style: solid;
@@ -3767,7 +3902,6 @@
 		border-radius: 50rpx;
 		border-width: 5rpx;
 		border-color: #ffffff;
-		box-shadow: 0 10rpx 22rpx rgba(47, 111, 242, 0.2);
 	}
 	.member-dot {
 		position: absolute;
@@ -3873,7 +4007,7 @@
 		flex: 1;
 		height: 0;
 		padding: 28rpx 20rpx 20rpx;
-		background-color: transparent;
+		background-color: #F3F8FE;
 	}
 	.chat-bottom-anchor {
 		width: 100%;
@@ -4057,6 +4191,13 @@
 	}
 
 	/* ---- 输入栏 ---- */
+	.composer {
+		width: 100%;
+		flex-direction: column;
+		flex-shrink: 0;
+		background-color: #ffffff;
+		z-index: 20;
+	}
 	.input-bar {
 		flex-direction: row;
 		align-items: center;

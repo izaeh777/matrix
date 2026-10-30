@@ -59,11 +59,11 @@
 			"style": {
 				"navigationBarTitleText": "Talks",
 				"navigationStyle": "custom",
-				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationBarBackgroundColor": "#F3F8FE",
 				"backgroundColor": "#F3F8FE",
 				"backgroundColorContent": "#F3F8FE",
-				"backgroundColorTop": "#FFFFFF",
-				"backgroundColorBottom": "#FFFFFF"
+				"backgroundColorTop": "#F3F8FE",
+				"backgroundColorBottom": "#F3F8FE"
 			}
 		},
 		{
