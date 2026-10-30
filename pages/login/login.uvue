@@ -1,5 +1,10 @@
 ﻿<template>
+	<!-- #ifdef H5 -->
+	<scroll-view class="page page-h5" scroll-y="true">
+	<!-- #endif -->
+	<!-- #ifndef H5 -->
 	<view class="page">
+	<!-- #endif -->
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
 		<!-- #endif -->
@@ -43,7 +48,12 @@
 				<image class="method-icon" src="/static/login/ball-big.png" mode="aspectFit" />
 			</view>
 		</view>
+	<!-- #ifdef H5 -->
+	</scroll-view>
+	<!-- #endif -->
+	<!-- #ifndef H5 -->
 	</view>
+	<!-- #endif -->
 </template>
 
 <script setup lang="uts">
@@ -112,10 +122,17 @@
 <style>
 	.page {
 		flex: 1;
+		width: 100%;
 		background-color: #ffffff;
 		padding: 0 0 48rpx;
 		align-items: center;
 	}
+	/* #ifdef H5 */
+	.page-h5 {
+		height: 100%;
+		box-sizing: border-box;
+	}
+	/* #endif */
 
 	.hero {
 		width: 100%;
