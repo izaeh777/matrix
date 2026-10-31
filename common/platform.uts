@@ -1486,7 +1486,7 @@ export async function renewBillingSubscription(planCode: string = ''): Promise<B
 }
 
 /** 提现验证码邮件 event（后台约定拼写） */
-export const WITHDRAW_CODE_EVENT = 'withfraw'
+export const WITHDRAW_CODE_EVENT = 'withdraw'
 
 /** 发送提现邮箱验证码 */
 export async function sendWithdrawEmailCode(email: string): Promise<void> {
@@ -1504,7 +1504,7 @@ export type BillingWithdrawResult = {
 /**
  * 申请提现
  * POST /api/v1/billing/withdraw
- * 需登录；须带邮箱验证码（event=withfraw）
+ * 需登录；须带邮箱验证码（event=withdraw）
  */
 export async function billingWithdraw(amount: string, address: string, code: string): Promise<BillingWithdrawResult> {
 	if (platformToken().length == 0) throw new Error('请先登录平台账号')
