@@ -4,14 +4,6 @@
 		<view class="status-bar-holder"></view>
 		<!-- #endif -->
 		<view class="header">
-			<view class="header-top">
-				<view class="spacer"></view>
-				<view class="lang-pill" @click="onLang">
-					<image class="lang-globe" src="/static/login/china.png" mode="aspectFit"></image>
-					<text class="lang-text">{{ langLabel }}</text>
-					<text class="lang-caret">▾</text>
-				</view>
-			</view>
 			<view class="title-block">
 				<view class="title-line1">
 					<text class="title-char">{{ i18n.t1a }}</text>
@@ -97,7 +89,7 @@
 		openArchiveDetail,
 		CmsArchiveItem
 	} from '@/common/cms.uts'
-	import { getLocaleLabel, openLanguagePage, t, tx } from '@/common/i18n.uts'
+	import { t, tx } from '@/common/i18n.uts'
 
 	type NotifyI18n = {
 		t1a: string
@@ -111,7 +103,6 @@
 
 	const loading = ref<boolean>(false)
 	const items = ref<Array<CmsArchiveItem>>([])
-	const langLabel = ref<string>(getLocaleLabel())
 	const i18n = ref<NotifyI18n>({
 		t1a: t('notify.title1a'),
 		t1b: t('notify.title1b'),
@@ -157,12 +148,7 @@
 		openArchiveDetail(item.id)
 	}
 
-	function onLang(): void {
-		openLanguagePage()
-	}
-
 	onShow(() => {
-		langLabel.value = getLocaleLabel()
 		i18n.value = {
 			t1a: t('notify.title1a'),
 			t1b: t('notify.title1b'),
@@ -228,25 +214,6 @@
 		background-color: #f3f7fc;
 		flex-shrink: 0;
 	}
-	.header-top {
-		flex-direction: row;
-		justify-content: flex-end;
-		margin-bottom: 8rpx;
-	}
-	.spacer { flex: 1; }
-	.lang-pill {
-		flex-direction: row;
-		align-items: center;
-		background-color: #ffffff;
-		border-radius: 40rpx;
-		padding: 10rpx 22rpx;
-		border-width: 2rpx;
-		border-color: #7eb6f5;
-		border-style: solid;
-	}
-	.lang-globe { width: 28rpx; height: 28rpx; margin-right: 8rpx; }
-	.lang-text { font-size: 26rpx; color: #333333; }
-	.lang-caret { font-size: 20rpx; color: #1a1a1a; margin-left: 6rpx; }
 	.title-block {
 		flex-direction: column;
 		align-items: stretch;

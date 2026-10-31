@@ -1,10 +1,11 @@
 /**
  * CMS 接口（itiklink）
- * OpenAPI: https://m.itiklink.com/openapi.yaml
+ * OpenAPI: 见 common/config.uts → OPENAPI_YAML
  * 友链: GET /api/cms/friendlink  operationId=index_friendlink
  * 多语言头: think-lang
  */
 import { getThinkLang, t } from '@/common/i18n.uts'
+import { CMS_HOST, toMatrixUserId } from '@/common/config.uts'
 
 export type CmsFriendLink = {
 	id: number
@@ -51,8 +52,6 @@ export type CmsHomeData = {
 	latest: Array<CmsArchiveItem>
 	hot: Array<CmsArchiveItem>
 }
-
-const CMS_HOST = 'https://m.itiklink.com'
 
 function isH5DevHost(host: string): boolean {
 	if (host == 'localhost' || host == '127.0.0.1' || host == '[::1]' || host == '::1') return true
@@ -645,11 +644,7 @@ export function friendAddQrUrl(matrixUserId: string): string {
 }
 
 export function matrixIdFromFriendCode(code: string): string {
-	let raw = code.trim()
-	if (raw.indexOf('@') == 0) return raw
-	raw = raw.toLowerCase()
-	if (raw.length == 0) return ''
-	return '@' + raw + ':matrix.itiklink.com'
+	return toMatrixUserId(code)
 }
 
 export function openCmsLink(url: string): void {

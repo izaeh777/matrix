@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<view class="chat-page" :style="chatPageDynStyle">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -395,6 +395,7 @@
 	import { getCallManager, CallSnapshot, h5TapRunAnswer } from '@/common/call.uts'
 	import { loadRoomChat, saveRoomChat } from '@/common/storage.uts'
 	import { t as __i18nT } from '@/common/i18n.uts'
+	import { MATRIX_SERVER_NAME, toMatrixUserId } from '@/common/config.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
@@ -3073,14 +3074,13 @@
 		uni.showModal({
 			title: '邀请成员',
 			editable: true,
-			placeholderText: '输入对方用户ID，如 @zhang:matrix.itiklink.com',
+			placeholderText: '输入对方用户ID，如 @zhang:' + MATRIX_SERVER_NAME,
 			success: (res) => {
 				if (!res.confirm) return
 				const raw = res.content
 				const input = (raw != null) ? raw.trim() : ''
 				if (input.length == 0) return
-				const userId = input.startsWith('@') ? input : '@' + input
-				sendChatInvite(userId)
+				sendChatInvite(toMatrixUserId(input))
 			}
 		})
 	}

@@ -1,7 +1,7 @@
 /**
  * App Deep Link / 扫码：邀请注册、加好友
  * itiklink://invite?code=XXX
- * itiklink://friend?u=@xxx:matrix.itiklink.com
+ * itiklink://friend?u=@xxx:<MATRIX_SERVER_NAME>
  */
 import { getMatrix } from './matrix.uts'
 import { openChat, hasPlatformLogin, startMatrixFromPlatform } from './app.uts'
@@ -12,6 +12,7 @@ import {
 	loadPlatformSession
 } from './platform.uts'
 import { t } from './i18n.uts'
+import { toMatrixUserId } from './config.uts'
 
 function queryParam(uri: string, key: string): string {
 	const q = uri.indexOf('?')
@@ -145,7 +146,7 @@ export function handleItiklinkUri(uri: string): boolean {
 		if (u.length == 0) u = queryParam(raw, 'id')
 		if (!isMatrixId(u) && u.length > 0) {
 			// 允许传 localpart
-			if (u.indexOf('@') != 0) u = '@' + u + ':matrix.itiklink.com'
+			u = toMatrixUserId(u)
 		}
 		if (!isMatrixId(u)) {
 			uni.showToast({ title: t('deeplink.qrInvalid'), icon: 'none' })

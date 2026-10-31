@@ -9,11 +9,6 @@
 				<view class="header-actions">
 					<text class="header-ico header-search" @click="onSearch">⌕</text>
 					<text class="header-ico" @click="onJoin">＋</text>
-					<view class="lang-pill" @click="onLang">
-						<image class="lang-globe" src="/static/login/china.png" mode="aspectFit"></image>
-						<text class="lang-text">{{ langLabel }}</text>
-						<text class="lang-caret">▾</text>
-					</view>
 				</view>
 			</view>
 			<view class="filter-row">
@@ -216,7 +211,7 @@
 	import { loadSession, SessionInfo, loadRoomList, saveRoomList, loadRoomChat } from '@/common/storage.uts'
 	import { openChat, bootstrapMatrix, openGroupPick, hasPlatformLogin, openMatrixLogin } from '@/common/app.uts'
 	import { getCallManager, CallSnapshot, h5TapRunAnswer, unlockH5CallMedia } from '@/common/call.uts'
-	import { getLocaleLabel, openLanguagePage, t } from '@/common/i18n.uts'
+	import { t } from '@/common/i18n.uts'
 
 	type RoomsI18n = {
 		title: string
@@ -247,7 +242,6 @@
 
 	const rooms = ref<Array<MatrixRoom>>([])
 	const invites = ref<Array<InvitedRoomInfo>>([])
-	const langLabel = ref<string>(getLocaleLabel())
 	const i18n = ref<RoomsI18n>({
 		title: t('chat.title'),
 		filterAll: t('chat.filterAll'),
@@ -365,10 +359,6 @@
 	const inviteBannerText = computed((): string => {
 		return i18n.value.inviteBannerTpl.replace('{n}', '' + invites.value.length)
 	})
-
-	function onLang(): void {
-		openLanguagePage()
-	}
 
 	function inviteTitle(inv: InvitedRoomInfo): string {
 		if (inv.name.length > 0) return inv.name
@@ -924,7 +914,6 @@
 	})
 
 	onShow(() => {
-		langLabel.value = getLocaleLabel()
 		i18n.value = {
 			title: t('chat.title'),
 			filterAll: t('chat.filterAll'),
@@ -1292,19 +1281,6 @@
 		font-size: 38rpx;
 		transform: scaleX(-1);
 	}
-	.lang-pill {
-		flex-direction: row;
-		align-items: center;
-		background-color: #f3f8ff;
-		border-radius: 40rpx;
-		padding: 8rpx 18rpx;
-		border-width: 2rpx;
-		border-color: #7eb6f5;
-		border-style: solid;
-	}
-	.lang-globe { width: 24rpx; height: 24rpx; margin-right: 6rpx; }
-	.lang-text { font-size: 22rpx; color: #1a1a1a; }
-	.lang-caret { font-size: 18rpx; color: #1a1a1a; margin-left: 4rpx; }
 	.filter-row {
 		flex-direction: row;
 		align-items: center;
