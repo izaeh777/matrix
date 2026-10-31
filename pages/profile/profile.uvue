@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<view class="profile-page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
