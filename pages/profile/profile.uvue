@@ -35,8 +35,11 @@
 
 			<view class="balance-row">
 				<view class="balance-left">
-					<text class="balance-label">{{ i18n.balance }}</text>
-					<text class="balance-value">{{ usdtBalance }}</text>
+					<view class="balance-label-row">
+						<text class="balance-label">{{ i18n.balance }}</text>
+						<text class="balance-eye" @click="toggleBalanceVisible">{{ balanceVisible ? '👁' : '🔒' }}</text>
+					</view>
+					<text class="balance-value">{{ displayBalance }}</text>
 				</view>
 				<view class="withdraw-btn" @click="openWithdraw">
 					<text class="withdraw-btn-text">{{ i18n.withdraw }}</text>
@@ -216,8 +219,36 @@
 						<text class="plan-meta">{{ formatPlanMeta(item) }}</text>
 					</view>
 				</scroll-view>
+				<view v-if="planList.length > 0" class="plan-split">
+					<view class="plan-split-row" @click="toggleUseBalance">
+						<text class="plan-split-label">{{ t('profile.planUseBalance') }}</text>
+						<text class="plan-split-switch">{{ useBalancePay ? t('profile.planBalanceOn') : t('profile.planBalanceOff') }}</text>
+					</view>
+					<text class="plan-split-tip">{{ planSplitTip }}</text>
+				</view>
 				<view class="invite-btn" :class="{ 'invite-btn-disabled': paying || selectedPlanCode.length == 0 }" @click="onPayPlan">
 					<text class="invite-btn-text">{{ paying ? i18n.planPaying : payBtnLabel }}</text>
+				</view>
+			</view>
+		</view>
+
+		<!-- H5：需再次点击打开钱包（浏览器要求用户手势）；付完靠 TP 回调自动确认 -->
+		<view v-if="showH5PaySync" class="invite-mask" @click="closeH5PaySync">
+			<view class="plan-sheet" @click.stop>
+				<text class="invite-title">{{ t('profile.planH5TxTitle') }}</text>
+				<text class="invite-desc">{{ h5InWalletDapp ? t('profile.planH5DappBody') : t('profile.planH5TxBody') }}</text>
+				<text v-if="h5InAppBrowser" class="plan-split-tip">{{ t('profile.planH5WeChatTip') }}</text>
+				<text class="plan-split-tip">{{ t('profile.planPayUsdt') }}{{ h5PayUsd }} · {{ h5PayOrderNo }}</text>
+				<text v-if="h5PayPolling" class="plan-split-tip">{{ t('profile.planH5Waiting') }}</text>
+				<view class="invite-btn" :class="{ 'invite-btn-disabled': h5PaySyncing }" @click.stop="onReopenTpTransfer">
+					<text class="invite-btn-text">{{ h5InWalletDapp ? t('profile.planH5DappPay') : t('profile.planH5Reopen') }}</text>
+				</view>
+				<view class="wd-field">
+					<text class="wd-label">{{ t('profile.planH5TxPh') }}</text>
+					<input class="wd-input" type="text" v-model="h5PayTxHash" :placeholder="t('profile.planH5TxPh')" />
+				</view>
+				<view class="invite-btn plan-h5-reopen" :class="{ 'invite-btn-disabled': h5PaySyncing }" @click="onSubmitH5TxHash">
+					<text class="invite-btn-text">{{ h5PaySyncing ? i18n.planPaying : t('profile.planContinueSync') }}</text>
 				</view>
 			</view>
 		</view>
@@ -236,7 +267,11 @@
 		fetchRolePlans,
 		createBillingOrder,
 		renewBillingSubscription,
+		calcPaySplit,
 		billingPayNotify,
+		billingTpInit,
+		takeLastTpPay,
+		waitOrderPaid,
 		fetchOrderDetail,
 		fetchBillingWallet,
 		planPayPrice,
@@ -248,7 +283,7 @@
 		RolePlan
 	} from '@/common/platform.uts'
 	import { loadTpWalletAddress } from '@/common/tp-wallet.uts'
-	import { tpTransferUsdt, waitBscTxConfirmed, isTpAppInstalled } from '@/common/tp-wallet.uts'
+	import { tpTransferUsdt, openTpUsdtTransfer, openTpDeeplinkNow, buildTpUsdtTransferUrl, waitBscTxConfirmed, isTpAppInstalled, isH5DesktopBrowser, isH5InAppBrowser, isH5InWalletDapp, h5DappTransferUsdt } from '@/common/tp-wallet.uts'
 	import { inviteRegisterQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
 	import { openChat } from '@/common/app.uts'
 	import { scanAddFriendOrInvite } from '@/common/deeplink.uts'
@@ -338,6 +373,24 @@
 	const session = ref<SessionInfo | null>(loadSession())
 	const platform = ref<PlatformSession | null>(loadPlatformSession())
 	const usdtBalance = ref<string>('--')
+	const BALANCE_VISIBLE_KEY = 'profile_balance_visible_v1'
+	const balanceVisible = ref<boolean>(true)
+	try {
+		const bv = uni.getStorageSync(BALANCE_VISIBLE_KEY)
+		if (bv != null && ('' + bv) == '0') balanceVisible.value = false
+	} catch (eBv) {}
+	const displayBalance = computed((): string => {
+		if (balanceVisible.value) return usdtBalance.value
+		const raw = usdtBalance.value
+		if (raw.length == 0 || raw == '--') return '****'
+		return '****'
+	})
+	function toggleBalanceVisible(): void {
+		balanceVisible.value = !balanceVisible.value
+		try {
+			uni.setStorageSync(BALANCE_VISIBLE_KEY, balanceVisible.value ? '1' : '0')
+		} catch (eSet) {}
+	}
 	const vipLabel = ref<string>(t('api.normalUser'))
 	const vipPeriod = ref<string>(t('api.subNone'))
 	const teamName = ref<string>('')
@@ -407,8 +460,20 @@
 	const showPlans = ref<boolean>(false)
 	const plansLoading = ref<boolean>(false)
 	const paying = ref<boolean>(false)
+	const useBalancePay = ref<boolean>(false)
 	const planList = ref<Array<RolePlan>>([])
 	const selectedPlanCode = ref<string>('')
+	const showH5PaySync = ref<boolean>(false)
+	const h5InAppBrowser = ref<boolean>(false)
+	const h5InWalletDapp = ref<boolean>(false)
+	const h5PayOrderNo = ref<string>('')
+	const h5PayUsd = ref<string>('')
+	const h5PayTo = ref<string>('')
+	const h5PayPlanCode = ref<string>('')
+	const h5PayTxHash = ref<string>('')
+	const h5PayDeeplink = ref<string>('')
+	const h5PaySyncing = ref<boolean>(false)
+	const h5PayPolling = ref<boolean>(false)
 	const myInviteCode = ref<string>('')
 	const inviteCodeDisplay = computed((): string => {
 		if (myInviteCode.value.length > 0) return myInviteCode.value
@@ -548,28 +613,44 @@
 		return t('profile.planDiscountPrefix') + ('' + item.dis) + ' USDT'
 	}
 
-	function formatPayConfirm(item: RolePlan): string {
-		const pay = planPayPriceText(item)
-		if (isPlanDiscountActive(item)) {
-			let s = t('profile.planConfirmBodyDis')
-			s = fillTpl(s, '{pay}', pay)
-			s = fillTpl(s, '{price}', '' + item.price)
-			s = fillTpl(s, '{dis}', '' + item.dis)
-			return s
-		}
-		return fillTpl(t('profile.planConfirmBody'), '{pay}', pay)
+	function currentPaySplit() {
+		const picked = selectedPlan()
+		const total = picked != null ? planPayPriceText(picked!) : '0'
+		return calcPaySplit(total, usdtBalance.value, useBalancePay.value)
 	}
+
+	function formatPayConfirm(item: RolePlan): string {
+		const split = calcPaySplit(planPayPriceText(item), usdtBalance.value, useBalancePay.value)
+		let s = t('profile.planConfirmBodyCombo')
+		s = fillTpl(s, '{pay}', planPayPriceText(item))
+		s = fillTpl(s, '{blc}', split.blc)
+		s = fillTpl(s, '{usd}', split.usd)
+		return s
+	}
+
+	function toggleUseBalance(): void {
+		useBalancePay.value = !useBalancePay.value
+	}
+
+	const planSplitTip = computed((): string => {
+		const split = currentPaySplit()
+		let s = t('profile.planSplitTip')
+		s = fillTpl(s, '{blc}', split.blc)
+		s = fillTpl(s, '{usd}', split.usd)
+		return s
+	})
 
 	const payBtnLabel = computed((): string => {
 		const code = selectedPlanCode.value
 		if (code.length == 0) return t('profile.planPayConfirm')
-		const list = planList.value
-		for (let i = 0; i < list.length; i++) {
-			if (list[i].plan_code == code) {
-				return t('profile.planPayUsdt') + planPayPriceText(list[i])
-			}
+		const split = currentPaySplit()
+		if (split.usdNum <= 0 && split.blcNum > 0) {
+			return t('profile.planPayBalance') + split.blc
 		}
-		return t('profile.planPayConfirm')
+		if (split.blcNum > 0) {
+			return t('profile.planPayCombo') + ' USDT ' + split.usd
+		}
+		return t('profile.planPayUsdt') + split.usd
 	})
 
 	function planNameText(name: string): string {
@@ -593,6 +674,212 @@
 	function closePlans(): void {
 		if (paying.value) return
 		showPlans.value = false
+		useBalancePay.value = false
+	}
+
+	function closeH5PaySync(): void {
+		if (h5PaySyncing.value) return
+		showH5PaySync.value = false
+	}
+
+	async function finishChainPay(orderNo: string, txHash: string): Promise<void> {
+		uni.showLoading({ title: t('profile.planConfirming'), mask: true })
+		const conf = await waitBscTxConfirmed(txHash, 40000)
+		console.log('[profile] confirm', conf.status, conf.message)
+		uni.hideLoading()
+		if (conf.status == 'failed') {
+			const failBase = conf.message.length > 0 ? conf.message : t('profile.planTxFail')
+			throw new Error(failBase + t('profile.planTxFailTip'))
+		}
+		if (conf.status == 'confirmed') {
+			uni.showLoading({ title: t('profile.planSyncing'), mask: true })
+			await billingPayNotify(orderNo, txHash, 'USDT')
+			uni.hideLoading()
+			uni.showToast({ title: t('profile.planPayOk'), icon: 'success' })
+			return
+		}
+		const tip = conf.message.length > 0 ? conf.message : t('profile.planConfirmFail')
+		let manualBody = t('profile.planManualBody')
+		manualBody = fillTpl(manualBody, '{tip}', tip)
+		manualBody = fillTpl(manualBody, '{hash}', txHash)
+		const manualOk = await new Promise((resolve: (v: boolean) => void) => {
+			uni.showModal({
+				title: t('profile.planChainBlocked'),
+				content: manualBody,
+				confirmText: t('profile.planContinueSync'),
+				cancelText: t('common.cancel'),
+				success: (res) => { resolve(res.confirm == true) },
+				fail: () => { resolve(false) }
+			})
+		})
+		if (manualOk != true) {
+			throw new Error(t('profile.planUnconfirmed') + txHash.substring(0, 18) + '…')
+		}
+		uni.showLoading({ title: t('profile.planSyncing'), mask: true })
+		await billingPayNotify(orderNo, txHash, 'USDT')
+		uni.hideLoading()
+		uni.showToast({ title: t('profile.planSynced'), icon: 'success' })
+	}
+
+	function h5PageHidden(): boolean {
+		// #ifdef H5
+		try {
+			const w = window as any
+			if (w == null) return false
+			const doc = w.document
+			if (doc == null) return false
+			const hid = doc['hidden']
+			return hid == true
+		} catch (e) {
+			return false
+		}
+		// #endif
+		return false
+	}
+
+	async function onReopenTpTransfer(): Promise<void> {
+		// #ifndef H5
+		return
+		// #endif
+		// #ifdef H5
+		console.log('[profile] open wallet click deeplinkLen=', h5PayDeeplink.value.length, 'to=', h5PayTo.value)
+		h5InWalletDapp.value = isH5InWalletDapp()
+		h5InAppBrowser.value = isH5InAppBrowser()
+		// 已在 TP / 钱包 DApp 内：走注入 ethereum，禁止 tpoutside://
+		if (h5InWalletDapp.value) {
+			if (h5PaySyncing.value) return
+			if (h5PayTo.value.length == 0 || h5PayUsd.value.length == 0) {
+				uni.showToast({ title: t('profile.planNoAddr'), icon: 'none' })
+				return
+			}
+			h5PaySyncing.value = true
+			uni.showLoading({ title: t('profile.planOpenWallet'), mask: true })
+			try {
+				const r = await h5DappTransferUsdt(h5PayTo.value, h5PayUsd.value)
+				uni.hideLoading()
+				if (r.txHash.length > 0 && h5PayOrderNo.value.length > 0) {
+					await finishChainPay(h5PayOrderNo.value, r.txHash)
+					showH5PaySync.value = false
+					showPlans.value = false
+					useBalancePay.value = false
+					await loadUsdtBalance()
+				} else {
+					uni.showToast({ title: t('tp.noHash'), icon: 'none' })
+				}
+			} catch (eDapp) {
+				uni.hideLoading()
+				console.warn('[profile] dapp pay fail', eDapp)
+				uni.showToast({ title: '' + eDapp, icon: 'none' })
+			}
+			h5PaySyncing.value = false
+			return
+		}
+		let link = h5PayDeeplink.value
+		if (link.length == 0 && h5PayTo.value.length > 0 && h5PayUsd.value.length > 0) {
+			link = buildTpUsdtTransferUrl(h5PayTo.value, h5PayUsd.value, 'plan:' + h5PayPlanCode.value)
+			h5PayDeeplink.value = link
+		}
+		if (link.length == 0) {
+			uni.showToast({ title: t('profile.planH5OpenFail'), icon: 'none' })
+			return
+		}
+		if (isH5DesktopBrowser()) {
+			const addr = h5PayTo.value
+			const amt = h5PayUsd.value
+			let body = t('profile.planH5DesktopBody')
+			body = fillTpl(body, '{addr}', addr)
+			body = fillTpl(body, '{amt}', amt)
+			uni.showModal({
+				title: t('profile.planH5DesktopTitle'),
+				content: body,
+				confirmText: t('profile.planH5CopyAddr'),
+				cancelText: t('common.cancel'),
+				success: (res) => {
+					if (res.confirm == true && addr.length > 0) {
+						uni.setClipboardData({
+							data: addr,
+							success: () => {
+								uni.showToast({ title: t('profile.planH5AddrCopied'), icon: 'none' })
+							}
+						})
+					}
+				}
+			})
+			return
+		}
+		if (h5InAppBrowser.value) {
+			uni.showModal({
+				title: t('profile.planH5TxTitle'),
+				content: t('profile.planH5WeChatTip'),
+				showCancel: false
+			})
+			return
+		}
+		// 系统浏览器：同步拉起 deeplink（勿先 toast）
+		const ok = openTpDeeplinkNow(link)
+		if (!ok) {
+			const ok2 = openTpUsdtTransfer(h5PayTo.value, h5PayUsd.value, 'plan:' + h5PayPlanCode.value)
+			if (!ok2) {
+				uni.showToast({ title: t('profile.planH5OpenFail'), icon: 'none' })
+				return
+			}
+		}
+		setTimeout(() => {
+			if (h5PageHidden()) return
+			uni.showToast({ title: t('profile.planH5Opening'), icon: 'none' })
+		}, 200)
+		setTimeout(() => {
+			if (h5PageHidden()) return
+			uni.showModal({
+				title: t('profile.planH5OpenFail'),
+				content: t('profile.planH5NoLaunch'),
+				showCancel: false
+			})
+		}, 1800)
+		// #endif
+	}
+
+	async function pollH5OrderPaid(orderNo: string): Promise<void> {
+		h5PayPolling.value = true
+		try {
+			const o = await waitOrderPaid(orderNo, 180000)
+			const st = o.status.toLowerCase()
+			if (st == 'paid' || st == 'broadcast' || st == 'success' || st == 'completed' || st == 'done') {
+				showH5PaySync.value = false
+				showPlans.value = false
+				useBalancePay.value = false
+				uni.showToast({ title: t('profile.planPayOk'), icon: 'success' })
+				await loadUsdtBalance()
+			}
+		} catch (ePoll) {
+			console.warn('[profile] poll order', ePoll)
+		}
+		h5PayPolling.value = false
+	}
+
+	async function onSubmitH5TxHash(): Promise<void> {
+		if (h5PaySyncing.value) return
+		let hash = h5PayTxHash.value.trim()
+		if (hash.length == 0) {
+			uni.showToast({ title: t('profile.planH5NeedTx'), icon: 'none' })
+			return
+		}
+		if (hash.indexOf('0x') != 0 && hash.length >= 64) hash = '0x' + hash
+		const orderNo = h5PayOrderNo.value
+		if (orderNo.length == 0) return
+		h5PaySyncing.value = true
+		try {
+			await finishChainPay(orderNo, hash)
+			showH5PaySync.value = false
+			showPlans.value = false
+			useBalancePay.value = false
+			h5PayTxHash.value = ''
+			await loadUsdtBalance()
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: '' + e, icon: 'none' })
+		}
+		h5PaySyncing.value = false
 	}
 
 	function openWithdraw(): void {
@@ -698,10 +985,12 @@
 			uni.showToast({ title: t('profile.loginFirst'), icon: 'none' })
 			return
 		}
+		if (plansLoading.value) return
 		showPlans.value = true
 		plansLoading.value = true
 		planList.value = []
 		selectedPlanCode.value = ''
+		useBalancePay.value = false
 		try {
 			const list = await fetchRolePlans()
 			planList.value = list
@@ -725,6 +1014,7 @@
 		}
 		const picked = selectedPlan()
 		const amtTip = picked != null ? planPayPriceText(picked!) : ''
+		const split0 = currentPaySplit()
 		const confirmText = picked != null ? formatPayConfirm(picked!) : (t('profile.planConfirmFallback') + code)
 		const ok = await new Promise((resolve: (v: boolean) => void) => {
 			uni.showModal({
@@ -741,15 +1031,25 @@
 			})
 		})
 		if (ok != true) return
-		if (!isTpAppInstalled()) {
-			uni.showToast({ title: t('profile.planNeedTp'), icon: 'none' })
-			return
+		const needChain = split0.usdNum > 0
+		if (needChain) {
+			// #ifdef APP-ANDROID
+			if (!isTpAppInstalled()) {
+				uni.showToast({ title: t('profile.planNeedTp'), icon: 'none' })
+				return
+			}
+			// #endif
 		}
 		paying.value = true
 		uni.showLoading({ title: t('profile.planOrdering'), mask: true })
 		try {
+			// 先按套餐价拆分，下单/续费时带上 usd、blc（无独立 /billing/pay）
+			let amount = amtTip
+			let split = calcPaySplit(amount.length > 0 ? amount : '0', usdtBalance.value, useBalancePay.value)
 			const isRenew = renewBtnText.value == t('api.renew')
-			const order = isRenew ? await renewBillingSubscription(code) : await createBillingOrder(code)
+			const order = isRenew
+				? await renewBillingSubscription(code, split.usd, split.blc)
+				: await createBillingOrder(code, '', split.usd, split.blc)
 			let orderNo = order.order_no
 			let payTo = ''
 			try {
@@ -757,76 +1057,133 @@
 			} catch (eWal) {
 				console.warn('[profile] billing/wallet fail', eWal)
 			}
-			let amount = amtTip
-			if (amount.length == 0) amount = order.amount
+			if (amount.length == 0 && order.amount.length > 0) amount = order.amount
 			if (orderNo.length > 0) {
 				try {
 					const detail = await fetchOrderDetail(orderNo)
 					if (detail.order_no.length > 0) orderNo = detail.order_no
 					if (amount.length == 0 && detail.amount.length > 0) amount = detail.amount
 					if (payTo.length == 0 && detail.pay_address.length > 0) payTo = detail.pay_address
+					// 仅当服务端回写了有效拆分（>0）才覆盖本地；当前接口常固定返回 0.00
+					const dUsd = parseFloat(detail.usd)
+					const dBlc = parseFloat(detail.blc)
+					if (dUsd == dUsd && dUsd > 0) order.usd = detail.usd
+					if (dBlc == dBlc && dBlc > 0) order.blc = detail.blc
 				} catch (eDet) {
 					console.warn('[profile] order detail skip', eDet)
 				}
 			}
 			if (payTo.length == 0 && order.pay_address.length > 0) payTo = order.pay_address
-			if (payTo.length == 0) {
-				throw new Error(t('profile.planNoAddr'))
-			}
-			if (amount.length == 0) throw new Error(t('profile.planNoAmount'))
 			if (orderNo.length == 0) throw new Error(t('profile.planNoOrder'))
 
-			uni.showLoading({ title: t('profile.planOpenWallet'), mask: true })
-			console.log('[profile] pay order=', orderNo, 'to=', payTo, 'amt=', amount, 'orderAmt=', order.amount, 'planPay=', amtTip)
-			const tx = await tpTransferUsdt(payTo, amount, 'plan:' + code)
-			console.log('[profile] txHash=', tx.txHash)
-
-			uni.showLoading({ title: t('profile.planConfirming'), mask: true })
-			const conf = await waitBscTxConfirmed(tx.txHash, 40000)
-			console.log('[profile] confirm', conf.status, conf.message)
-			uni.hideLoading()
-
-			if (conf.status == 'failed') {
-				const failBase = conf.message.length > 0 ? conf.message : t('profile.planTxFail')
-				throw new Error(failBase + t('profile.planTxFailTip'))
+			// 本地提交的拆分为准；服务端若回写了 >0 的 usd/blc 再覆盖
+			const oUsd = parseFloat(order.usd)
+			const oBlc = parseFloat(order.blc)
+			if (oUsd == oUsd && oUsd > 0) {
+				split.usd = order.usd
+				split.usdNum = oUsd
 			}
-			if (conf.status == 'confirmed') {
-				uni.showLoading({ title: t('profile.planSyncing'), mask: true })
-				await billingPayNotify(orderNo, tx.txHash, 'USDT')
+			if (oBlc == oBlc && oBlc > 0) {
+				split.blc = order.blc
+				split.blcNum = oBlc
+			}
+			console.log('[profile] order combo usd=', split.usd, 'blc=', split.blc, 'order=', orderNo, 'status=', order.status)
+
+			const st = order.status.toLowerCase()
+			const paidAlready = st == 'paid' || st == 'success' || st == 'completed' || st == 'done'
+			// 仅「主动用余额付清」或订单已支付 才跳过链上；usd/blc 都是 0 不能当成功
+			const fullBalancePay = split.usdNum <= 0 && split.blcNum > 0
+			if (paidAlready || fullBalancePay) {
 				uni.hideLoading()
 				uni.showToast({ title: t('profile.planPayOk'), icon: 'success' })
 				showPlans.value = false
+				useBalancePay.value = false
 				await loadUsdtBalance()
 				paying.value = false
 				return
 			}
-			const tip = conf.message.length > 0 ? conf.message : t('profile.planConfirmFail')
-			let manualBody = t('profile.planManualBody')
-			manualBody = fillTpl(manualBody, '{tip}', tip)
-			manualBody = fillTpl(manualBody, '{hash}', tx.txHash)
-			const manualOk = await new Promise((resolve: (v: boolean) => void) => {
-				uni.showModal({
-					title: t('profile.planChainBlocked'),
-					content: manualBody,
-					confirmText: t('profile.planContinueSync'),
-					cancelText: t('common.cancel'),
-					success: (res) => {
-						resolve(res.confirm == true)
-					},
-					fail: () => {
-						resolve(false)
-					}
-				})
-			})
-			if (manualOk != true) {
-				throw new Error(t('profile.planUnconfirmed') + tx.txHash.substring(0, 18) + '…')
+			if (split.usdNum <= 0) {
+				throw new Error(t('profile.planNoAmount'))
 			}
-			uni.showLoading({ title: t('profile.planSyncing'), mask: true })
-			await billingPayNotify(orderNo, tx.txHash, 'USDT')
+
+			if (payTo.length == 0) {
+				throw new Error(t('profile.planNoAddr'))
+			}
+
+			uni.showLoading({ title: t('profile.planOpenWallet'), mask: true })
+			console.log('[profile] pay order=', orderNo, 'to=', payTo, 'usd=', split.usd, 'blc=', split.blc)
+			// #ifdef H5
+			h5PayOrderNo.value = orderNo
+			h5PayUsd.value = split.usd
+			h5PayTo.value = payTo
+			h5PayPlanCode.value = code
+			h5PayTxHash.value = ''
+			h5PayDeeplink.value = ''
+			h5InWalletDapp.value = isH5InWalletDapp()
+			h5InAppBrowser.value = isH5InAppBrowser()
+			// DApp 内：下单后直接弹钱包签名，不经过「确认链上支付」中间层
+			if (h5InWalletDapp.value) {
+				showPlans.value = false
+				try {
+					const r = await h5DappTransferUsdt(payTo, split.usd)
+					uni.hideLoading()
+					if (r.txHash.length == 0) throw new Error(t('tp.noHash'))
+					await finishChainPay(orderNo, r.txHash)
+					useBalancePay.value = false
+					await loadUsdtBalance()
+				} catch (eDappPay) {
+					uni.hideLoading()
+					console.warn('[profile] dapp auto pay', eDappPay)
+					// 用户取消或失败：留下重试面板
+					showH5PaySync.value = true
+					uni.showToast({ title: '' + eDappPay, icon: 'none' })
+					pollH5OrderPaid(orderNo)
+				}
+				paying.value = false
+				return
+			}
 			uni.hideLoading()
-			uni.showToast({ title: t('profile.planSynced'), icon: 'success' })
+			// 系统浏览器：需二次点击保留手势；先准备 deeplink
+			let tpCached = takeLastTpPay()
+			if (tpCached == null || tpCached.deeplink.length == 0) {
+				try {
+					tpCached = await billingTpInit(orderNo)
+				} catch (eTp) {
+					console.warn('[profile] tp-init fail', eTp)
+				}
+			}
+			if (tpCached != null) {
+				if (tpCached.auto_paid) {
+					uni.showToast({ title: t('profile.planPayOk'), icon: 'success' })
+					showPlans.value = false
+					useBalancePay.value = false
+					await loadUsdtBalance()
+					paying.value = false
+					return
+				}
+				if (tpCached.to.length > 0) h5PayTo.value = tpCached.to
+				if (tpCached.deeplink.length > 0) h5PayDeeplink.value = tpCached.deeplink
+			}
+			if (h5PayDeeplink.value.length == 0 && payTo.length > 0) {
+				h5PayDeeplink.value = buildTpUsdtTransferUrl(payTo, split.usd, 'plan:' + code)
+			}
 			showPlans.value = false
+			showH5PaySync.value = true
+			paying.value = false
+			uni.showToast({ title: t('profile.planH5TapOpen'), icon: 'none', duration: 2500 })
+			pollH5OrderPaid(orderNo)
+			return
+			// #endif
+			// #ifndef H5
+			const tx = await tpTransferUsdt(payTo, split.usd, 'plan:' + code)
+			const txHash = tx.txHash
+			console.log('[profile] txHash=', txHash)
+			if (txHash.length == 0) throw new Error(t('tp.noHash'))
+			await finishChainPay(orderNo, txHash)
+			showPlans.value = false
+			useBalancePay.value = false
 			await loadUsdtBalance()
+			// #endif
 		} catch (e) {
 			uni.hideLoading()
 			console.warn('[profile] pay fail', e)
@@ -996,11 +1353,21 @@
 		flex: 1;
 		flex-direction: column;
 	}
+	.balance-label-row {
+		flex-direction: row;
+		align-items: center;
+		margin-bottom: 8rpx;
+	}
 	.balance-label {
 		font-size: 28rpx;
 		color: #6b7280;
 		font-weight: 600;
-		margin-bottom: 8rpx;
+	}
+	.balance-eye {
+		margin-left: 12rpx;
+		font-size: 30rpx;
+		color: #6b7280;
+		padding: 4rpx 8rpx;
 	}
 	.balance-value {
 		font-size: 34rpx;
@@ -1371,8 +1738,40 @@
 		align-items: stretch;
 	}
 	.plan-scroll {
-		height: 520rpx;
-		margin-bottom: 28rpx;
+		height: 480rpx;
+		margin-bottom: 16rpx;
+	}
+	.plan-split {
+		margin-bottom: 20rpx;
+		padding: 16rpx 8rpx 8rpx;
+	}
+	.plan-split-row {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 8rpx;
+	}
+	.plan-split-label {
+		font-size: 28rpx;
+		color: #1a1a1a;
+		font-weight: 600;
+	}
+	.plan-split-switch {
+		font-size: 26rpx;
+		color: #1861c8;
+		font-weight: 600;
+	}
+	.plan-split-tip {
+		font-size: 24rpx;
+		color: #6b7280;
+		margin-bottom: 16rpx;
+	}
+	.plan-h5-reopen {
+		margin-top: 16rpx;
+		background-color: #f3f4f6;
+	}
+	.plan-h5-reopen .invite-btn-text {
+		color: #1861c8;
 	}
 	.plan-state {
 		padding: 48rpx 0;

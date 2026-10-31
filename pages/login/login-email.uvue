@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<view class="page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -60,6 +60,7 @@
 	import { MatrixClient, errText } from '@/common/matrix.uts'
 	import { startMatrixSession } from '@/common/app.uts'
 	import { saveSession } from '@/common/storage.uts'
+	import { MATRIX_HOMESERVER } from '@/common/config.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
@@ -68,7 +69,7 @@
 
 	const username = ref<string>('')
 	const password = ref<string>('')
-	const homeserver = ref<string>('https://matrix.itiklink.com')
+	const homeserver = ref<string>(MATRIX_HOMESERVER)
 	const showPwd = ref<boolean>(false)
 	const loading = ref<boolean>(false)
 

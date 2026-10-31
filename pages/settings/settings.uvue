@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<view class="settings-page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -75,7 +75,7 @@
 					<text class="setting-label danger-text">{{ t('settings.logoutOthers') }}</text>
 				</view>
 			</view>
-			<view v-if="false" class="section">
+			<view class="section">
 				<view class="section-title">{{ t('settings.accountSafe') }}</view>
 				<view class="setting-row" @click="onChangePassword">
 					<text class="setting-label">{{ t('settings.changePwd') }}</text>
@@ -170,17 +170,27 @@
 			</view>
 		</view>
 
-		<!-- 改密码弹窗 -->
+		<!-- 改密码弹窗：邮箱验证码 + 新密码 -->
 		<view v-if="showPasswordModal" class="modal-overlay" @click="closePasswordModal">
 			<view class="modal-card" @click.stop="noopModal">
 				<text class="modal-title">{{ t('settings.pwdTitle') }}</text>
-				<input
-					class="modal-input"
-					v-model="passwordForm.oldPassword"
-					type="password"
-					:placeholder="t('settings.oldPwd')"
-					placeholder-class="modal-placeholder"
-				/>
+				<text class="modal-desc">{{ t('settings.pwdDesc') }}</text>
+				<text v-if="pwdEmailHint.length > 0" class="modal-desc">{{ pwdEmailHint }}</text>
+				<view class="bind-code-row">
+					<input
+						class="modal-input bind-code-input"
+						type="number"
+						v-model="passwordForm.code"
+						:placeholder="i18n.codePh"
+						placeholder-class="modal-placeholder"
+						maxlength="8"
+					/>
+					<text
+						class="bind-code-btn"
+						:class="pwdCodeWait > 0 ? 'bind-code-btn-off' : ''"
+						@click.stop="onSendPwdCode"
+					>{{ pwdCodeWait > 0 ? (pwdCodeWait + 's') : i18n.getCode }}</text>
+				</view>
 				<input
 					class="modal-input"
 					v-model="passwordForm.newPassword"
@@ -196,12 +206,12 @@
 					placeholder-class="modal-placeholder"
 				/>
 				<view class="modal-actions">
-					<button class="modal-btn-cancel" @click.stop="closePasswordModal">
+					<view class="modal-btn-cancel" @click.stop="closePasswordModal">
 						<text class="modal-btn-cancel-text">{{ t('common.cancel') }}</text>
-					</button>
-					<button class="modal-btn-confirm" @click.stop="onSubmitPassword">
-						<text class="modal-btn-confirm-text">{{ t('common.confirm') }}</text>
-					</button>
+					</view>
+					<view class="modal-btn-confirm" @click.stop="onSubmitPassword">
+						<text class="modal-btn-confirm-text">{{ pwdSubmitting ? t('common.loading') : t('common.confirm') }}</text>
+					</view>
 				</view>
 			</view>
 		</view>
@@ -270,7 +280,9 @@
 		fetchUserBindings,
 		sendBindEmailCode,
 		bindPlatformEmail,
-		updatePlatformProfile
+		updatePlatformProfile,
+		sendModifyPwdEmailCode,
+		modifyPlatformPassword
 	} from '@/common/platform.uts'
 	import { t as __i18nT } from '@/common/i18n.uts'
 	function t(key: string): string {
@@ -287,7 +299,7 @@
 		last_seen_ts: number
 	}
 	type PasswordForm = {
-		oldPassword: string
+		code: string
 		newPassword: string
 		confirmPassword: string
 	}
@@ -385,7 +397,11 @@
 
 	// 改密码
 	const showPasswordModal = ref<boolean>(false)
-	const passwordForm = ref<PasswordForm>({ oldPassword: '', newPassword: '', confirmPassword: '' })
+	const passwordForm = ref<PasswordForm>({ code: '', newPassword: '', confirmPassword: '' })
+	const pwdEmailHint = ref<string>('')
+	const pwdSubmitting = ref<boolean>(false)
+	const pwdCodeWait = ref<number>(0)
+	let pwdCodeTimer: number | null = null
 
 	// 设备详情
 	const showDeviceModal = ref<boolean>(false)
@@ -404,7 +420,37 @@
 		nicknameInputFocus.value = false
 		showNicknameModal.value = false
 	}
+	function clearPwdCodeTimer(): void {
+		const t = pwdCodeTimer
+		pwdCodeTimer = null
+		if (t != null) clearInterval(t as number)
+	}
+
+	function startPwdCodeCountdown(): void {
+		pwdCodeWait.value = 60
+		clearPwdCodeTimer()
+		pwdCodeTimer = setInterval(() => {
+			if (pwdCodeWait.value <= 1) {
+				pwdCodeWait.value = 0
+				clearPwdCodeTimer()
+				return
+			}
+			pwdCodeWait.value = pwdCodeWait.value - 1
+		}, 1000)
+	}
+
+	function resolveBoundEmail(): string {
+		if (emailBound.value) {
+			const shown = emailBindText.value.trim()
+			if (shown.indexOf('@') > 0) return shown
+		}
+		const local = loadPlatformSession()
+		if (local != null && local.email.indexOf('@') > 0) return local.email.trim()
+		return ''
+	}
+
 	function closePasswordModal(): void {
+		if (pwdSubmitting.value) return
 		showPasswordModal.value = false
 	}
 
@@ -869,6 +915,7 @@
 
 	onUnmounted(() => {
 		clearBindCodeTimer()
+		clearPwdCodeTimer()
 	})
 
 	async function onTogglePush(e: PushSwitchEvent) {
@@ -1038,49 +1085,75 @@
 	}
 
 	function onChangePassword() {
-		passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+		const local = loadPlatformSession()
+		if (local == null || local.token.length == 0) {
+			uni.showToast({ title: t('profile.loginFirst'), icon: 'none' })
+			return
+		}
+		const em = resolveBoundEmail()
+		if (em.length == 0) {
+			uni.showToast({ title: t('settings.pwdNeedEmail'), icon: 'none' })
+			return
+		}
+		pwdEmailHint.value = em
+		passwordForm.value = { code: '', newPassword: '', confirmPassword: '' }
+		pwdCodeWait.value = 0
+		clearPwdCodeTimer()
 		showPasswordModal.value = true
 	}
 
-	async function onSubmitPassword() {
-		const form = passwordForm.value
-		const oldPassword = form.oldPassword
-		const newPassword = form.newPassword
-		const confirmPassword = form.confirmPassword
-		if (oldPassword.length == 0 || newPassword.length == 0 || confirmPassword.length == 0) {
-			uni.showToast({ title: '请填写所有字段', icon: 'none' })
+	async function onSendPwdCode(): Promise<void> {
+		if (pwdCodeWait.value > 0 || pwdSubmitting.value) return
+		const em = resolveBoundEmail()
+		if (em.length == 0) {
+			uni.showToast({ title: t('settings.pwdNeedEmail'), icon: 'none' })
 			return
 		}
-		if (newPassword.length < 8) {
-			uni.showToast({ title: '新密码至少8位', icon: 'none' })
+		uni.showLoading({ title: t('profile.withdrawSending') })
+		try {
+			await sendModifyPwdEmailCode(em)
+			uni.hideLoading()
+			uni.showToast({ title: t('profile.withdrawCodeSent'), icon: 'none' })
+			startPwdCodeCountdown()
+		} catch (e) {
+			uni.hideLoading()
+			let msg = t('profile.withdrawSendFail')
+			try { msg = '' + e } catch (e2) {}
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? msg : t('profile.withdrawSendFail'), icon: 'none' })
+		}
+	}
+
+	async function onSubmitPassword() {
+		if (pwdSubmitting.value) return
+		const form = passwordForm.value
+		const code = form.code.trim()
+		const newPassword = form.newPassword
+		const confirmPassword = form.confirmPassword
+		if (code.length == 0 || newPassword.length == 0 || confirmPassword.length == 0) {
+			uni.showToast({ title: t('settings.pwdFill'), icon: 'none' })
+			return
+		}
+		if (newPassword.length < 6) {
+			uni.showToast({ title: t('settings.pwdShort'), icon: 'none' })
 			return
 		}
 		if (newPassword != confirmPassword) {
-			uni.showToast({ title: '两次密码不一致', icon: 'none' })
+			uni.showToast({ title: t('settings.pwdMismatch'), icon: 'none' })
 			return
 		}
-		uni.showLoading({ title: '请稍候…' })
+		pwdSubmitting.value = true
+		uni.showLoading({ title: t('common.loading'), mask: true })
 		try {
-			const matrix = getMatrix()
-			if (matrix == null) {
-				uni.hideLoading()
-				return
-			}
-			const auth: UTSJSONObject = {
-				password: oldPassword,
-				type: 'm.login.password'
-			}
-			await matrix.changePassword(newPassword, auth)
+			await modifyPlatformPassword(code, newPassword)
 			uni.hideLoading()
+			pwdSubmitting.value = false
 			showPasswordModal.value = false
-			uni.showToast({ title: '密码修改成功，请重新登录', icon: 'success' })
-			setTimeout(() => {
-				endMatrixSession()
-				uni.reLaunch({ url: '/pages/login/login' })
-			}, 1500)
+			uni.showToast({ title: t('settings.pwdOk'), icon: 'success' })
 		} catch (err) {
 			uni.hideLoading()
-			uni.showToast({ title: '修改失败: ' + errText(err, ''), icon: 'none' })
+			pwdSubmitting.value = false
+			uni.showToast({ title: t('settings.pwdFail') + ': ' + errText(err, ''), icon: 'none' })
 		}
 	}
 
@@ -1429,43 +1502,50 @@
 
 	.modal-actions {
 		flex-direction: row;
+		align-items: center;
 		justify-content: space-between;
+		margin-top: 8rpx;
 	}
 
 	.modal-btn-cancel, .modal-btn-confirm, .modal-btn-danger {
 		flex: 1;
-		border-radius: 12rpx;
-		padding: 20rpx;
+		height: 88rpx;
+		border-radius: 20rpx;
 		align-items: center;
+		justify-content: center;
+		border-width: 0;
 	}
 
 	.modal-btn-cancel {
-		background-color: #f0f0f5;
-		margin-right: 16rpx;
+		background-color: #f3f4f6;
+		margin-right: 20rpx;
 	}
 
 	.modal-btn-cancel-text {
-		font-size: 28rpx;
-		color: #666;
+		font-size: 30rpx;
+		color: #4b5563;
+		font-weight: 600;
 	}
 
 	.modal-btn-confirm {
-		background-color: #1f6feb;
+		background-color: #1861c8;
 	}
 
 	.modal-btn-confirm-text {
-		font-size: 28rpx;
-		color: #fff;
+		font-size: 30rpx;
+		color: #ffffff;
+		font-weight: 600;
 	}
 
 	.modal-btn-danger {
 		background-color: #ff3b30;
-		margin-left: 16rpx;
+		margin-left: 20rpx;
 	}
 
 	.modal-btn-danger-text {
-		font-size: 28rpx;
-		color: #fff;
+		font-size: 30rpx;
+		color: #ffffff;
+		font-weight: 600;
 	}
 
 	.device-detail-row {

@@ -4,8 +4,8 @@
  * 多语言头: think-lang: zh-cn | en | zh-tw | ja | ko | fr | de | es | ru | ar | pt
  */
 import { getThinkLang, t } from '@/common/i18n.uts'
+import { API_HOST, TP_LOGIN_CALLBACK } from '@/common/config.uts'
 
-const API_HOST = 'https://m.itiklink.com'
 const KEY_PLATFORM = 'platform_session_v1'
 const KEY_PENDING_INVITE = 'pending_invite_code_v1'
 const KEY_PENDING_FRIEND = 'pending_friend_mxid_v1'
@@ -470,7 +470,7 @@ function parseSession(data: UTSJSONObject, emailFallback: string): PlatformSessi
 	return out
 }
 
-/** 发送邮箱验证码 event=register|login|resetpwd */
+/** 发送邮箱验证码 event=register|login|resetpwd|modify_pwd|withdraw… */
 export async function sendEmailCode(email: string, event: string): Promise<void> {
 	const fields: UTSJSONObject = {
 		email: email,
@@ -478,6 +478,35 @@ export async function sendEmailCode(email: string, event: string): Promise<void>
 	}
 	const root = await httpPostForm('/api/v1/auth/email/send-code', fields, false)
 	assertOk(root, t('platform.codeFail'))
+}
+
+/** 修改密码邮件 event */
+export const MODIFY_PWD_EVENT = 'modify_pwd'
+
+/** 发送修改密码邮箱验证码 */
+export async function sendModifyPwdEmailCode(email: string): Promise<void> {
+	const em = email.trim()
+	if (em.length == 0 || em.indexOf('@') < 1) throw new Error('请输入正确邮箱')
+	await sendEmailCode(em, MODIFY_PWD_EVENT)
+}
+
+/**
+ * 修改登录密码
+ * POST /api/v1/users/me/modify/pwd
+ * code 验证码（邮件 event=modify_pwd）；password 新密码
+ */
+export async function modifyPlatformPassword(code: string, password: string): Promise<void> {
+	if (platformToken().length == 0) throw new Error('请先登录平台账号')
+	const cd = code.trim()
+	const pwd = password.trim()
+	if (cd.length == 0) throw new Error('请输入验证码')
+	if (pwd.length < 6) throw new Error('新密码至少6位')
+	const fields: UTSJSONObject = {
+		code: cd,
+		password: pwd
+	}
+	const root = await httpPostForm('/api/v1/users/me/modify/pwd', fields, true)
+	assertOk(root, '修改密码失败')
 }
 
 /** 邮箱验证码登录 POST /api/v1/auth/email/login */
@@ -1316,11 +1345,34 @@ export function planPayPriceText(plan: RolePlan): string {
 	return s
 }
 
+function parseMoneyNum(raw: string): number {
+	const s = raw.trim()
+	if (s.length == 0) return 0
+	const n = parseFloat(s)
+	if (n != n || n < 0) return 0
+	return n
+}
+
+function formatMoneyNum(n: number): string {
+	if (n <= 0) return '0'
+	const r = Math.round(n * 1000000) / 1000000
+	let s = '' + r
+	if (s.indexOf('.') >= 0) {
+		while (s.length > 1 && s.endsWith('0')) s = s.substring(0, s.length - 1)
+		if (s.endsWith('.')) s = s.substring(0, s.length - 1)
+	}
+	return s
+}
+
 export type BillingOrder = {
 	order_no: string
 	status: string
 	plan_code: string
 	amount: string
+	/** 链上应付（组合支付 usd） */
+	usd: string
+	/** 余额抵扣（组合支付 blc） */
+	blc: string
 	/** 链上收款地址（下单接口若返回则用） */
 	pay_address: string
 	msg: string
@@ -1378,6 +1430,8 @@ function parseBillingOrder(data: UTSJSONObject, root: UTSJSONObject, planFallbac
 		status: pickStrAny(src, ['status', 'state', 'pay_status']),
 		plan_code: pickStrAny(src, ['plan_code', 'planCode']),
 		amount: pickStrAny(src, ['amount', 'price', 'pay_amount', 'money']),
+		usd: pickStrAny(src, ['usd', 'usd_amount', 'chain_amount']),
+		blc: pickStrAny(src, ['blc', 'balance', 'balance_amount', 'money_pay']),
 		pay_address: pickPayAddress(src),
 		msg: pickStr(root, 'msg')
 	}
@@ -1393,6 +1447,20 @@ function parseBillingOrder(data: UTSJSONObject, root: UTSJSONObject, planFallbac
 	if (order.amount.length == 0) {
 		const n = pickNumAny(src, ['amount', 'price', 'pay_amount', 'money'])
 		if (n > 0) order.amount = '' + n
+	}
+	// 实付优先：有折扣时 amount-discount；有 usd/blc 时用其和
+	const discount = pickNumAny(src, ['discount', 'dis', 'coupon_discount'])
+	const amtNum = parseMoneyNum(order.amount)
+	if (discount > 0 && amtNum > discount) {
+		order.amount = formatMoneyNum(amtNum - discount)
+	}
+	if (order.usd.length == 0) {
+		const nUsd = pickNumAny(src, ['usd'])
+		if (nUsd >= 0 && (src['usd'] != null)) order.usd = formatMoneyNum(nUsd)
+	}
+	if (order.blc.length == 0) {
+		const nBlc = pickNumAny(src, ['blc'])
+		if (nBlc >= 0 && (src['blc'] != null)) order.blc = formatMoneyNum(nBlc)
 	}
 	return order
 }
@@ -1455,34 +1523,86 @@ export async function fetchRolePlans(): Promise<Array<RolePlan>> {
 	return list
 }
 
+export type PaySplit = {
+	usd: string
+	blc: string
+	total: number
+	usdNum: number
+	blcNum: number
+}
+
+/** 按余额拆分：usd=链上应付，blc=余额抵扣（默认 blc=0） */
+export function calcPaySplit(totalRaw: string, balanceRaw: string, useBalance: boolean): PaySplit {
+	const total = parseMoneyNum(totalRaw)
+	if (!useBalance) {
+		const usd = formatMoneyNum(total)
+		return { usd: usd, blc: '0', total: total, usdNum: total, blcNum: 0 } as PaySplit
+	}
+	let blc = parseMoneyNum(balanceRaw)
+	if (blc > total) blc = total
+	const usd = total - blc
+	return {
+		usd: formatMoneyNum(usd),
+		blc: formatMoneyNum(blc),
+		total: total,
+		usdNum: usd,
+		blcNum: blc
+	} as PaySplit
+}
+
 /**
- * 创建订单
- * POST /api/v1/billing/orders  plan_code
+ * 创建订单（组合支付：usd=链上，blc=余额，默认 blc=0）
+ * POST /api/v1/billing/orders
  */
-export async function createBillingOrder(planCode: string, couponCode: string = ''): Promise<BillingOrder> {
+export async function createBillingOrder(
+	planCode: string,
+	couponCode: string = '',
+	usd: string = '',
+	blc: string = ''
+): Promise<BillingOrder> {
 	if (planCode.length == 0) throw new Error('请选择套餐')
 	if (platformToken().length == 0) throw new Error('请先登录平台账号')
 	const fields: UTSJSONObject = {
 		plan_code: planCode
 	}
 	if (couponCode.length > 0) fields['coupon_code'] = couponCode
+	fields['usd'] = usd.trim().length > 0 ? usd.trim() : '0'
+	fields['blc'] = blc.trim().length > 0 ? blc.trim() : '0'
+	console.log('[platform] billing/orders create usd=', fields['usd'], 'blc=', fields['blc'])
 	const root = await httpPostForm('/api/v1/billing/orders', fields, true)
 	logJson('[platform] billing/orders create', root)
 	const data = assertOk(root, '下单失败')
 	const order = parseBillingOrder(data, root, planCode)
-	console.log('[platform] order', order.order_no, 'amt=', order.amount, 'payTo=', order.pay_address)
+	if (order.usd.length == 0) order.usd = '' + fields['usd']
+	if (order.blc.length == 0) order.blc = '' + fields['blc']
+	stashLastTpPay(pickTpPayFromResponse(root))
+	console.log('[platform] order', order.order_no, 'amt=', order.amount, 'usd=', order.usd, 'blc=', order.blc)
 	return order
 }
 
-/** 续费（有效期顺延）POST /api/v1/billing/subscription/renew */
-export async function renewBillingSubscription(planCode: string = ''): Promise<BillingOrder> {
+/**
+ * 续费（有效期顺延；同样传 usd/blc）
+ * POST /api/v1/billing/subscription/renew
+ */
+export async function renewBillingSubscription(
+	planCode: string = '',
+	usd: string = '',
+	blc: string = ''
+): Promise<BillingOrder> {
 	if (platformToken().length == 0) throw new Error('请先登录平台账号')
 	const fields: UTSJSONObject = {}
 	if (planCode.length > 0) fields['plan_code'] = planCode
+	fields['usd'] = usd.trim().length > 0 ? usd.trim() : '0'
+	fields['blc'] = blc.trim().length > 0 ? blc.trim() : '0'
+	console.log('[platform] billing/renew usd=', fields['usd'], 'blc=', fields['blc'])
 	const root = await httpPostForm('/api/v1/billing/subscription/renew', fields, true)
 	logJson('[platform] billing/renew', root)
 	const data = assertOk(root, '续费失败')
-	return parseBillingOrder(data, root, planCode)
+	const order = parseBillingOrder(data, root, planCode)
+	if (order.usd.length == 0) order.usd = '' + fields['usd']
+	if (order.blc.length == 0) order.blc = '' + fields['blc']
+	stashLastTpPay(pickTpPayFromResponse(root))
+	return order
 }
 
 /** 提现验证码邮件 event（后台约定拼写） */
@@ -1548,6 +1668,106 @@ export async function billingPayNotify(orderNo: string, tradeNo: string, payType
 	const root = await httpPostForm('/api/v1/billing/pay/notify', fields, true)
 	logJson('[platform] billing/pay/notify', root)
 	assertOk(root, '支付回调失败')
+}
+
+/** TokenPocket 链上支付会话（服务端拼 deeplink + 回调验链） */
+export type TpPaySession = {
+	action_id: string
+	order_no: string
+	to: string
+	amount: string
+	deeplink: string
+	expire: number
+	auto_paid: boolean
+}
+
+function parseTpPaySession(data: UTSJSONObject): TpPaySession {
+	let src = data
+	const nest = pickObj(data, 'tp_pay')
+	if (nest != null) src = nest!
+	const autoFlag = pickStrAny(src, ['auto_paid', 'autoPaid'])
+	const out: TpPaySession = {
+		action_id: pickStrAny(src, ['action_id', 'actionId']),
+		order_no: pickStrAny(src, ['order_no', 'orderNo']),
+		to: pickStrAny(src, ['to', 'pay_address', 'address']),
+		amount: pickStrAny(src, ['amount', 'usd']),
+		deeplink: pickStrAny(src, ['deeplink', 'deep_link', 'url']),
+		expire: pickNumAny(src, ['expire', 'ttl']),
+		auto_paid: autoFlag == '1' || autoFlag.toLowerCase() == 'true'
+	}
+	if (!out.auto_paid) {
+		try {
+			const v = src['auto_paid']
+			if (v == true) out.auto_paid = true
+		} catch (eA) {}
+	}
+	if (out.amount.length == 0) {
+		const n = pickNumAny(src, ['amount', 'usd'])
+		if (n > 0) out.amount = '' + n
+	}
+	return out
+}
+
+/**
+ * 从下单/续费响应里取出 tp_pay（若服务端已内嵌）
+ */
+export function pickTpPayFromResponse(root: UTSJSONObject): TpPaySession | null {
+	const data = pickObj(root, 'data')
+	if (data == null) return null
+	const nest = pickObj(data!, 'tp_pay')
+	if (nest == null) return null
+	const s = parseTpPaySession(data!)
+	if (s.deeplink.length == 0 && !s.auto_paid) return null
+	return s
+}
+
+/** 最近一次下单/续费带出的 tp_pay（H5 用来少打一次 tp-init） */
+let _lastTpPay: TpPaySession | null = null
+
+function stashLastTpPay(s: TpPaySession | null): void {
+	_lastTpPay = s
+}
+
+export function takeLastTpPay(): TpPaySession | null {
+	const s = _lastTpPay
+	_lastTpPay = null
+	return s
+}
+
+/**
+ * 发起 TP USDT 支付会话
+ * POST /api/v1/billing/pay/tp-init
+ */
+export async function billingTpInit(orderNo: string): Promise<TpPaySession> {
+	if (orderNo.length == 0) throw new Error('订单号为空')
+	if (platformToken().length == 0) throw new Error('请先登录平台账号')
+	const fields: UTSJSONObject = { order_no: orderNo }
+	const root = await httpPostForm('/api/v1/billing/pay/tp-init', fields, true)
+	logJson('[platform] billing/pay/tp-init', root)
+	const data = assertOk(root, '发起支付失败')
+	const s = parseTpPaySession(data)
+	if (s.order_no.length == 0) s.order_no = orderNo
+	if (s.deeplink.length == 0 && !s.auto_paid) throw new Error('未返回支付链接')
+	return s
+}
+
+/**
+ * 轮询订单直到 paid/broadcast 或超时（H5 等 TP 回调入账）
+ */
+export async function waitOrderPaid(orderNo: string, timeoutMs: number = 180000): Promise<BillingOrder> {
+	const start = Date.now()
+	let last: BillingOrder | null = null
+	while (Date.now() - start < timeoutMs) {
+		const o = await fetchOrderDetail(orderNo)
+		last = o
+		const st = o.status.toLowerCase()
+		if (st == 'paid' || st == 'broadcast' || st == 'success' || st == 'completed' || st == 'done') {
+			return o
+		}
+		await sleepMs(2500)
+	}
+	if (last != null) return last!
+	throw new Error('等待支付超时')
 }
 
 /**
@@ -1730,7 +1950,7 @@ export async function walletVerify(address: string, signature: string, inviteCod
 	return session
 }
 
-/** 与 https://m.itiklink.com/tp-login-demo.html 一致的 TP DeepLink 登录 */
+/** 与 API_HOST/tp-login-demo.html 一致的 TP DeepLink 登录 */
 export type TpLoginInit = {
 	ticket: string
 	deeplink: string
@@ -1777,7 +1997,7 @@ export function injectTpCallbackSchema(deeplink: string, schema: string): string
 		// 强制保留/恢复 HTTPS 回调，防止被 scheme 污染
 		const cb = pickStr(o, 'callbackUrl')
 		if (cb.indexOf('http') != 0) {
-			o['callbackUrl'] = API_HOST + '/api/v1/auth/wallet/tp-login'
+			o['callbackUrl'] = TP_LOGIN_CALLBACK
 		}
 		// 服务端 deeplink 常缺 signType，不补齐时 TP 可能只打开 App 不弹签名窗
 		const st = pickStr(o, 'signType')

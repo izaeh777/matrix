@@ -1,4 +1,10 @@
 import { t } from './i18n.uts'
+import {
+	DAPP_FAVICON,
+	DAPP_LOGO,
+	TP_LOGIN_CALLBACK,
+	TP_WALLET_CALLBACK
+} from './config.uts'
 /**
  * TokenPocket App 钱包：优先 Mobile-SDK（authorize / ethPersonalSign）
  * DeepLink 仅作兜底（需 callbackUrl + 自定义 scheme）
@@ -22,10 +28,10 @@ const TP_PKG = 'vip.mytokenpocket'
 const ASSIST_CLASS = 'uts.sdk.modules.tpWalletSdk.TpAssistActivity'
 
 const DAPP_NAME = 'i-tiklink'
-const DAPP_ICON = 'https://m.itiklink.com/favicon.ico'
+const DAPP_ICON = DAPP_FAVICON
 export const TP_CALLBACK_SCHEMA = 'itiklink://tp-wallet'
 /** DeepLink 兜底用；SDK 主路径不依赖它 */
-export const TP_CALLBACK_URL = 'https://m.itiklink.com/api/v1/auth/wallet/tp-callback'
+export const TP_CALLBACK_URL = TP_WALLET_CALLBACK
 const PENDING_KEY = 'tp_wallet_pending'
 const LAST_CB_KEY = 'tp_last_callback_uri'
 
@@ -384,13 +390,398 @@ export async function waitBscTxConfirmed(txHash: string, maxWaitMs: number = 450
 	return out
 }
 
+/** H5 / 系统浏览器：DeepLink 拉起 TP 转 USDT（BSC） */
+export function buildTpUsdtTransferUrl(to: string, amount: string, desc: string = '', actionId: string = ''): string {
+	const aid = actionId.length > 0 ? actionId : newActionId()
+	const amtNum = parseFloat(amount.trim())
+	const chains: Array<UTSJSONObject> = []
+	const c1: UTSJSONObject = { chainId: TP_PAY_CHAIN_ID, network: 'ethereum' }
+	chains.push(c1)
+	const param: UTSJSONObject = {
+		protocol: 'TokenPocket',
+		version: '2.0',
+		dappName: DAPP_NAME,
+		dappIcon: DAPP_ICON,
+		action: 'transfer',
+		actionId: aid,
+		to: to,
+		amount: amtNum == amtNum ? amtNum : 0,
+		contract: TP_USDT_CONTRACT,
+		symbol: 'USDT',
+		decimal: TP_USDT_DECIMALS,
+		desc: desc.length > 0 ? desc : 'itiklink-usdt-pay',
+		memo: desc.length > 0 ? desc : 'itiklink-usdt-pay',
+		callbackUrl: TP_CALLBACK_URL,
+		blockchains: chains
+	}
+	const from = loadTpWalletAddress()
+	if (from.length > 0) param['from'] = from
+	return buildPullUrl(param)
+}
+
+/**
+ * H5：官方推荐 `<a href="tpoutside://…">` / location（勿用 applink，易进 App Store Today）。
+ * 文档: https://help.tokenpocket.pro/developer-cn/mobile-wallet/deeplink
+ * 须在用户点击回调里同步调用；不要先 showToast，否则手势丢失表现为「正在打开没反应」。
+ */
+function tpAndroidIntentUrl(deeplink: string): string {
+	const prefix = 'tpoutside://'
+	if (deeplink.indexOf(prefix) != 0) return ''
+	const rest = deeplink.substring(prefix.length)
+	return 'intent://' + rest + '#Intent;scheme=tpoutside;package=' + TP_PKG + ';end'
+}
+
+function openH5TpScheme(deeplink: string): boolean {
+	if (deeplink.length == 0) return false
+	// #ifdef H5
+	try {
+		const w = window as any
+		const doc = document as any
+		console.log('[tp] open H5 scheme head=', deeplink.substring(0, 48), 'len=', deeplink.length)
+		// 1) 隐藏 iframe：不少 Android WebView / Chrome 对自定义 scheme 更认这个
+		if (doc != null && doc.body != null) {
+			try {
+				const iframe = doc.createElement('iframe') as any
+				iframe.setAttribute('src', deeplink)
+				iframe.style.cssText = 'display:none;width:0;height:0;border:0;position:fixed;left:0;top:0;'
+				doc.body.appendChild(iframe)
+				setTimeout(() => {
+					try {
+						if (iframe.parentNode != null) doc.body.removeChild(iframe)
+					} catch (eRm) {}
+				}, 2500)
+			} catch (eIf) {
+				console.warn('[tp] iframe fail', eIf)
+			}
+		}
+		// 2) 同页 location（保留用户手势；勿 target=_blank）
+		if (w != null && w.location != null) {
+			try {
+				w.location.href = deeplink
+			} catch (eLoc) {
+				try {
+					w.location.assign(deeplink)
+				} catch (eAs) {
+					console.warn('[tp] location fail', eAs)
+				}
+			}
+		}
+		// 3) 官方示例：同步 a.click，且不要 _blank（自定义 scheme 会被拦）
+		if (doc != null && doc.body != null) {
+			try {
+				const a = doc.createElement('a') as any
+				a.setAttribute('href', deeplink)
+				a.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0.01;'
+				doc.body.appendChild(a)
+				a.click()
+				setTimeout(() => {
+					try {
+						if (a.parentNode != null) doc.body.removeChild(a)
+					} catch (eRm2) {}
+				}, 800)
+			} catch (eA) {
+				console.warn('[tp] a.click fail', eA)
+			}
+		}
+		// 4) Android Chrome：短暂延迟后再试 intent://（TP 未响应时）
+		try {
+			const nav = w != null ? w.navigator : null
+			const ua = ('' + (nav != null ? nav.userAgent : '')).toLowerCase()
+			if (ua.indexOf('android') >= 0) {
+				const intent = tpAndroidIntentUrl(deeplink)
+				if (intent.length > 0) {
+					setTimeout(() => {
+						try {
+							const still = document as any
+							if (still != null && still.hidden == true) return
+							console.log('[tp] android intent fallback')
+							if (w != null && w.location != null) w.location.href = intent
+						} catch (eIn) {}
+					}, 600)
+				}
+			}
+		} catch (eUa) {}
+		return true
+	} catch (e) {
+		console.warn('[tp] openH5TpScheme fail', e)
+		return false
+	}
+	// #endif
+	return false
+}
+
+/** 供支付按钮点击时同步调用 */
+export function openTpDeeplinkNow(deeplink: string): boolean {
+	return openH5TpScheme(deeplink) || openExternalUrl(deeplink)
+}
+
+/** H5 是否像桌面浏览器（无 TP scheme 处理器） */
+export function isH5DesktopBrowser(): boolean {
+	// #ifdef H5
+	try {
+		const nav = (window as any).navigator
+		if (nav == null) return true
+		const ua = ('' + nav.userAgent).toLowerCase()
+		if (ua.indexOf('android') >= 0) return false
+		if (ua.indexOf('iphone') >= 0 || ua.indexOf('ipod') >= 0 || ua.indexOf('ipad') >= 0) return false
+		if (ua.indexOf('mobile') >= 0) return false
+		return true
+	} catch (e) {
+		return true
+	}
+	// #endif
+	return false
+}
+
+/** 微信 / QQ 内置浏览器会拦自定义 scheme（不含 TP DApp） */
+export function isH5InAppBrowser(): boolean {
+	// #ifdef H5
+	try {
+		if (isH5InWalletDapp()) return false
+		const nav = (window as any).navigator
+		if (nav == null) return false
+		const ua = ('' + nav.userAgent).toLowerCase()
+		if (ua.indexOf('micromessenger') >= 0) return true
+		if (ua.indexOf('qq/') >= 0 || ua.indexOf('mqqbrowser') >= 0) return true
+		if (ua.indexOf('alipayclient') >= 0) return true
+		return false
+	} catch (e) {
+		return false
+	}
+	// #endif
+	return false
+}
+
+/** 取 H5 注入的 EVM provider（TP / MetaMask 兼容） */
+export function getH5EthProvider(): any | null {
+	// #ifdef H5
+	try {
+		const w = window as any
+		if (w == null) return null
+		try {
+			if (w.tokenpocket != null && w.tokenpocket.ethereum != null) return w.tokenpocket.ethereum
+		} catch (e0) {}
+		try {
+			if (w.ethereum != null) return w.ethereum
+		} catch (e1) {}
+	} catch (e) {}
+	// #endif
+	return null
+}
+
+/**
+ * 已在 TokenPocket / 钱包 DApp 浏览器内（有注入 ethereum）
+ * 此场景禁止再用 tpoutside://，应走 eth_sendTransaction
+ */
+export function isH5InWalletDapp(): boolean {
+	// #ifdef H5
+	try {
+		const w = window as any
+		if (w == null) return false
+		try {
+			if (w.tokenpocket != null) return true
+		} catch (e0) {}
+		const eth = getH5EthProvider()
+		if (eth == null) return false
+		try {
+			if (eth.isTokenPocket == true) return true
+		} catch (e1) {}
+		try {
+			const nav = w.navigator
+			const ua = ('' + (nav != null ? nav.userAgent : '')).toLowerCase()
+			if (ua.indexOf('tokenpocket') >= 0) return true
+		} catch (e2) {}
+		// 手机端已注入 ethereum ≈ 钱包内置浏览器
+		if (!isH5DesktopBrowser()) return true
+		return false
+	} catch (e) {
+		return false
+	}
+	// #endif
+	return false
+}
+
+function strip0xHex(s: string): string {
+	const t = s.trim()
+	if (t.length >= 2 && (t.indexOf('0x') == 0 || t.indexOf('0X') == 0)) return t.substring(2)
+	return t
+}
+
+function padLeft64(hex: string): string {
+	let h = strip0xHex(hex).toLowerCase()
+	while (h.length < 64) h = '0' + h
+	if (h.length > 64) h = h.substring(h.length - 64)
+	return h
+}
+
+/** 十进制整数字符串 → hex（无 0x），避免 Number 精度丢 18 位金额 */
+function decStringToHex(decIn: string): string {
+	let n = decIn
+	while (n.length > 1 && n.charAt(0) == '0') n = n.substring(1)
+	if (n.length == 0 || n == '0') return '0'
+	const hexChars = '0123456789abcdef'
+	let hex = ''
+	while (n != '0') {
+		let rem = 0
+		let next = ''
+		for (let i = 0; i < n.length; i++) {
+			const code = n.charCodeAt(i)
+			const digit = code >= 48 && code <= 57 ? code - 48 : 0
+			const cur = rem * 10 + digit
+			const q = Math.floor(cur / 16)
+			rem = cur % 16
+			if (next.length > 0 || q > 0) next += '' + q
+		}
+		hex = hexChars.charAt(rem) + hex
+		n = next.length > 0 ? next : '0'
+	}
+	return hex.length > 0 ? hex : '0'
+}
+
+/** "0.10" + decimals → 0x… wei */
+export function amountToTokenWeiHex(amount: string, decimals: number): string {
+	let s = amount.trim()
+	if (s.length == 0) return '0x0'
+	const dot = s.indexOf('.')
+	let whole = dot >= 0 ? s.substring(0, dot) : s
+	let frac = dot >= 0 ? s.substring(dot + 1) : ''
+	if (whole.length == 0) whole = '0'
+	let wClean = ''
+	for (let i = 0; i < whole.length; i++) {
+		const c = whole.charAt(i)
+		if (c >= '0' && c <= '9') wClean += c
+	}
+	if (wClean.length == 0) wClean = '0'
+	let fClean = ''
+	for (let j = 0; j < frac.length; j++) {
+		const c2 = frac.charAt(j)
+		if (c2 >= '0' && c2 <= '9') fClean += c2
+	}
+	if (fClean.length > decimals) fClean = fClean.substring(0, decimals)
+	while (fClean.length < decimals) fClean += '0'
+	const digits = wClean + fClean
+	return '0x' + decStringToHex(digits)
+}
+
+function encodeErc20TransferData(to: string, amountWeiHex: string): string {
+	return '0xa9059cbb' + padLeft64(to) + padLeft64(amountWeiHex)
+}
+
+async function h5EnsureBscChain(eth: any): Promise<void> {
+	const target = '0x38'
+	try {
+		const cur = await eth.request({ method: 'eth_chainId', params: [] })
+		const curS = ('' + cur).toLowerCase()
+		if (curS == target || curS == '0x38' || curS == '56') return
+	} catch (e0) {}
+	try {
+		await eth.request({
+			method: 'wallet_switchEthereumChain',
+			params: [{ chainId: target }]
+		})
+		return
+	} catch (eSwitch) {
+		console.warn('[tp] switch chain', eSwitch)
+	}
+	try {
+		await eth.request({
+			method: 'wallet_addEthereumChain',
+			params: [{
+				chainId: target,
+				chainName: 'BNB Smart Chain',
+				nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+				rpcUrls: ['https://bsc-dataseed.binance.org/'],
+				blockExplorerUrls: ['https://bscscan.com']
+			}]
+		})
+	} catch (eAdd) {
+		console.warn('[tp] add chain', eAdd)
+		throw new Error(t('tp.transferFail'))
+	}
+}
+
+/**
+ * TokenPocket / 钱包 DApp 内：用注入 ethereum 发 BSC USDT（ERC20 transfer）
+ * 返回 txHash，可直接走订单确认
+ */
+export async function h5DappTransferUsdt(to: string, amount: string): Promise<TpTransferResult> {
+	if (to.length == 0) throw new Error(t('tp.emptyAddr'))
+	if (amount.trim().length == 0) throw new Error(t('tp.emptyAmount'))
+	// #ifdef H5
+	const eth = getH5EthProvider()
+	if (eth == null) throw new Error(t('login.noWallet'))
+	console.log('[tp] dapp transfer to=', to, 'amt=', amount)
+	const accountsRaw = await eth.request({ method: 'eth_requestAccounts', params: [] })
+	let from = ''
+	try {
+		const arr = accountsRaw as string[]
+		if (arr != null && arr.length > 0) from = ('' + arr[0]).trim()
+	} catch (eAcc) {
+		from = ('' + accountsRaw).trim()
+	}
+	if (from.length < 10) throw new Error(t('login.noAddr'))
+	saveTpWalletAddress(from)
+	await h5EnsureBscChain(eth)
+	const weiHex = amountToTokenWeiHex(amount, TP_USDT_DECIMALS)
+	if (weiHex == '0x0' || weiHex == '0x') throw new Error(t('tp.emptyAmount'))
+	const data = encodeErc20TransferData(to, weiHex)
+	const txParams: UTSJSONObject = {
+		from: from,
+		to: TP_USDT_CONTRACT,
+		value: '0x0',
+		data: data
+	}
+	console.log('[tp] eth_sendTransaction from=', from, 'wei=', weiHex)
+	const rawHash = await eth.request({
+		method: 'eth_sendTransaction',
+		params: [txParams]
+	})
+	let txHash = ('' + rawHash).trim()
+	if (txHash.indexOf('0x') != 0 && txHash.length > 0) txHash = '0x' + txHash
+	if (txHash.length < 10) throw new Error(t('tp.noHash'))
+	console.log('[tp] dapp txHash=', txHash)
+	const out: TpTransferResult = { ok: true, txHash: txHash, wallet: from, raw: 'h5-dapp' }
+	return out
+	// #endif
+	throw new Error(t('login.openInWallet'))
+}
+
+/**
+ * 浏览器拉起 TokenPocket 转账页（tpoutside:// → App）
+ * 不返回 txHash；调用方转账完成后自行确认哈希并 notify
+ */
+export function openTpUsdtTransfer(to: string, amount: string, desc: string = ''): boolean {
+	if (to.length == 0 || amount.trim().length == 0) return false
+	const deeplink = buildTpUsdtTransferUrl(to, amount, desc, newActionId())
+	console.log('[tp] open transfer H5/deeplink to=', to, 'amt=', amount)
+	// #ifdef H5
+	if (openH5TpScheme(deeplink)) return true
+	try {
+		const w = window as any
+		if (w != null && w.location != null) {
+			w.location.href = deeplink
+			return true
+		}
+	} catch (eH5) {
+		console.warn('[tp] open transfer H5 fail', eH5)
+	}
+	// #endif
+	return openTpPullUri(deeplink) || openExternalUrl(deeplink)
+}
+
 /**
  * 拉起 TP 转 USDT（BSC）
- * to=收款地址 amount=人类可读数量（如 "100"）
+ * App：Mobile-SDK；H5：DeepLink 拉起后需用户回填哈希（见 openTpUsdtTransfer）
  */
 export async function tpTransferUsdt(to: string, amount: string, desc: string = ''): Promise<TpTransferResult> {
 	if (to.length == 0) throw new Error(t('tp.emptyAddr'))
 	if (amount.length == 0) throw new Error(t('tp.emptyAmount'))
+	// #ifdef H5
+	const opened = openTpUsdtTransfer(to, amount, desc)
+	if (!opened) throw new Error(t('tp.transferFail'))
+	const empty: TpTransferResult = { ok: true, txHash: '', wallet: loadTpWalletAddress(), raw: 'h5-deeplink' }
+	return empty
+	// #endif
 	let from = loadTpWalletAddress()
 	if (from.length == 0) {
 		// 未缓存地址时先授权拿 from
@@ -511,7 +902,7 @@ export function enrichTpLoginDeeplink(deeplink: string): string {
 		o['callbackSchema'] = TP_CALLBACK_SCHEMA
 		const cb = pickStr(o, 'callbackUrl')
 		if (cb.indexOf('http') != 0) {
-			o['callbackUrl'] = 'https://m.itiklink.com/api/v1/auth/wallet/tp-login'
+			o['callbackUrl'] = TP_LOGIN_CALLBACK
 		}
 		const msg = pickStr(o, 'message')
 		console.log(
@@ -566,26 +957,37 @@ export function openTpPullUri(deeplink: string): boolean {
 		}
 	}
 	// #endif
-	return openExternalUrl(deeplink)
+	// #ifdef H5
+	return openH5TpScheme(deeplink)
+	// #endif
+	return false
 }
 
-/** 走官方 applink 页（文档写明 DeepLink 面向系统浏览器；App 内直调常只进首页） */
+/**
+ * 拉起 TP：H5 直接 tpoutside://；Android App 可用 Intent VIEW。
+ * 不再走 github applink（易 500 / 落到 App Store Today）。
+ */
 export function openTpUniversalLink(deeplink: string): boolean {
+	if (deeplink.length == 0) return false
+	let uri = deeplink
 	const p = parseTpDeeplinkParam(deeplink)
-	if (p == null) return false
-	const st = pickStr(p, 'signType')
-	if (st.length == 0 && pickStr(p, 'action') == 'sign') {
-		p['signType'] = 'ethPersonalSign'
-		p['hash'] = false
+	if (p != null) {
+		const st = pickStr(p, 'signType')
+		if (st.length == 0 && pickStr(p, 'action') == 'sign') {
+			p['signType'] = 'ethPersonalSign'
+			p['hash'] = false
+			uri = 'tpoutside://pull.activity?param=' + encodeURIComponent(JSON.stringify(p))
+		}
 	}
-	const enc = encodeURIComponent(JSON.stringify(p))
-	const link = 'https://tokenpocket.github.io/applink?param=' + enc
-	console.log('[tp] open universal len=', link.length)
+	console.log('[tp] open universal head=', uri.substring(0, 48))
+	// #ifdef H5
+	if (openH5TpScheme(uri)) return true
+	// #endif
 	// #ifdef APP-ANDROID
 	try {
 		const act = UTSAndroid.getUniActivity()
 		if (act == null) return false
-		const intent = new Intent(Intent.ACTION_VIEW, Uri.parse(link))
+		const intent = new Intent(Intent.ACTION_VIEW, Uri.parse(uri))
 		act.startActivity(intent)
 		return true
 	} catch (e) {
@@ -593,7 +995,7 @@ export function openTpUniversalLink(deeplink: string): boolean {
 		return false
 	}
 	// #endif
-	return openExternalUrl(link)
+	return openExternalUrl(uri)
 }
 
 /**
@@ -606,7 +1008,7 @@ export function openTpTicketSign(
 	chainId: string
 ): boolean {
 	if (message.length == 0 || actionId.length == 0) return false
-	const cb = callbackUrl.length > 0 ? callbackUrl : 'https://m.itiklink.com/api/v1/auth/wallet/tp-login'
+	const cb = callbackUrl.length > 0 ? callbackUrl : TP_LOGIN_CALLBACK
 	const cid = chainId.length > 0 ? chainId : '56'
 	const chains: Array<UTSJSONObject> = []
 	const c1: UTSJSONObject = { chainId: cid, network: 'ethereum' }
@@ -615,7 +1017,7 @@ export function openTpTicketSign(
 		protocol: 'TokenPocket',
 		version: '1.0',
 		dappName: 'ITIK',
-		dappIcon: 'https://m.itiklink.com/assets/img/logo.png',
+		dappIcon: DAPP_LOGO,
 		action: 'sign',
 		actionId: actionId,
 		message: message,
@@ -680,6 +1082,9 @@ export function buildTpSignUrl(actionId: string, message: string): string {
 export function openExternalUrl(url: string): boolean {
 	if (url.length == 0) return false
 	if (url.indexOf('tpoutside://') == 0 || url.indexOf('tp://') == 0) {
+		// #ifdef H5
+		return openH5TpScheme(url)
+		// #endif
 		return openTpPullUri(url)
 	}
 	// #ifdef APP-ANDROID
