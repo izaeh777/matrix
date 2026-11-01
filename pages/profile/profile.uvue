@@ -37,7 +37,12 @@
 				<view class="balance-left">
 					<view class="balance-label-row">
 						<text class="balance-label">{{ i18n.balance }}</text>
-						<text class="balance-eye" @click="toggleBalanceVisible">{{ balanceVisible ? '👁' : '🔒' }}</text>
+						<image
+							class="balance-eye"
+							:src="balanceVisible ? '/static/login/y2.png' : '/static/login/y1.png'"
+							mode="aspectFit"
+							@click="toggleBalanceVisible"
+						></image>
 					</view>
 					<text class="balance-value">{{ displayBalance }}</text>
 				</view>
@@ -1415,9 +1420,9 @@
 	}
 	.balance-eye {
 		margin-left: 12rpx;
-		font-size: 30rpx;
-		color: #6b7280;
-		padding: 4rpx 8rpx;
+		width: 36rpx;
+		height: 36rpx;
+		padding: 4rpx;
 	}
 	.balance-value {
 		font-size: 34rpx;
