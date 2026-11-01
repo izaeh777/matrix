@@ -240,6 +240,7 @@
 	import { openChat, bootstrapMatrix, openGroupPick, hasPlatformLogin, openMatrixLogin } from '@/common/app.uts'
 	import { getCallManager, CallSnapshot, h5TapRunAnswer, unlockH5CallMedia } from '@/common/call.uts'
 	import { t } from '@/common/i18n.uts'
+	import { defaultAvatar, DEFAULT_AVATAR } from '@/common/avatar.uts'
 
 	type RoomsI18n = {
 		title: string
@@ -408,13 +409,13 @@
 		return '' + c
 	}
 	function avatarHttp(raw: string, size: number = 96): string {
-		if (raw.length == 0) return '/static/login/tiki.png'
+		if (raw.length == 0) return DEFAULT_AVATAR
 		if (raw.indexOf('http://') == 0 || raw.indexOf('https://') == 0) return raw
 		if (raw.indexOf('/static/') == 0) return raw
 		const matrix = getMatrix()
-		if (matrix == null) return '/static/login/tiki.png'
+		if (matrix == null) return DEFAULT_AVATAR
 		const http = matrix.mxcToHttp(raw, size, size)
-		if (http.length == 0) return '/static/login/tiki.png'
+		if (http.length == 0) return DEFAULT_AVATAR
 		return http
 	}
 	function roomAvatarSrc(room: MatrixRoom): string {
@@ -423,7 +424,11 @@
 			const other = room.other_avatar
 			if (other != null && other.length > 0) a = other
 		}
-		if (a == null || a.length == 0) return '/static/login/tiki.png'
+		if (a == null || a.length == 0) {
+			const oid = room.other_user_id
+			if (oid != null && oid.length > 0) return defaultAvatar(oid)
+			return defaultAvatar(room.room_id)
+		}
 		return avatarHttp(a, 96)
 	}
 	/** 群聊且无自定义房间头像 → 微信式成员九宫格 */
@@ -519,10 +524,11 @@
 	const avatarUrl = computed(() => {
 		const m = getMatrix()
 		const s = session.value
-		if (s == null || s.avatar_url == null || s.avatar_url.length == 0) return '/static/login/tiki.png'
-		if (m == null) return '/static/login/tiki.png'
+		const seed = s != null ? s.user_id : ''
+		if (s == null || s.avatar_url == null || s.avatar_url.length == 0) return defaultAvatar(seed)
+		if (m == null) return defaultAvatar(seed)
 		const http = m.mxcToHttp(s.avatar_url, 96, 96)
-		if (http.length == 0) return '/static/login/tiki.png'
+		if (http.length == 0) return defaultAvatar(seed)
 		return http
 	})
 	const syncClass = computed(() => {

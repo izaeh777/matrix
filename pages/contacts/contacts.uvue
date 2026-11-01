@@ -39,7 +39,7 @@
 					<image
 						class="avatar"
 						:src="getAvatar(user)"
-						fallback="/static/login/tiki.png"
+						fallback="/static/login/tk1.jpg"
 					></image>
 					<view class="presence-dot" :class="getPresenceClass(user.user_id)"></view>
 				</view>
@@ -117,9 +117,9 @@
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted } from 'vue'
 	import { t as __i18nT } from '@/common/i18n.uts'
-
 	import { getMatrix, errText, DirectoryUser } from '@/common/matrix.uts'
 	import { openChat, openGroupPick } from '@/common/app.uts'
+	import { defaultAvatar } from '@/common/avatar.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
@@ -157,12 +157,12 @@
 
 	function getAvatar(user: DirectoryUser): string {
 		const matrix = getMatrix()
-		if (matrix == null) return '/static/login/tiki.png'
+		if (matrix == null) return defaultAvatar(user.user_id)
 		if (user.avatar_url.length > 0) {
 			const http = matrix.mxcToHttp(user.avatar_url, 80, 80)
 			if (http.length > 0) return http
 		}
-		return '/static/login/tiki.png'
+		return defaultAvatar(user.user_id)
 	}
 
 	function getPresenceClass(userId: string): string {

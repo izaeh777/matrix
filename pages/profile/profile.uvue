@@ -1,4 +1,4 @@
-<template>
+﻿<template>
 	<view class="profile-page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -297,6 +297,7 @@
 	import { openChat } from '@/common/app.uts'
 	import { scanAddFriendOrInvite } from '@/common/deeplink.uts'
 	import { getLocaleLabel, openLanguagePage, t as __i18nT, tx } from '@/common/i18n.uts'
+	import { DEFAULT_AVATAR } from '@/common/avatar.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
@@ -462,7 +463,7 @@
 		}
 		return ''
 	})
-	const avatarUrl = ref<string>('/static/login/tiki.png')
+	const avatarUrl = ref<string>(DEFAULT_AVATAR)
 	const showInvite = ref<boolean>(false)
 	/** reg=邀请注册码 friend=加好友码；扫码按链接类型区分行为 */
 	const inviteTab = ref<string>('reg')

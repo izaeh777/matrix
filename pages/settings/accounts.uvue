@@ -58,6 +58,7 @@
 		removeAccountById,
 		rememberActiveAccount
 	} from '@/common/accounts.uts'
+	import { defaultAvatar } from '@/common/avatar.uts'
 
 	const pageTitle = ref<string>(t('accounts.title'))
 	const addLabel = ref<string>(t('accounts.add'))
@@ -93,7 +94,7 @@
 
 	function avatarOf(item: AccountSlot): string {
 		if (item.avatar_url.length > 0) return item.avatar_url
-		return '/static/login/tiki.png'
+		return defaultAvatar(item.id)
 	}
 
 	function onBack(): void {

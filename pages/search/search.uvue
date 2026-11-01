@@ -48,7 +48,7 @@
 			</view>
 
 			<view v-for="item in results" :key="item.event_id" class="result-item" @click="onTapResult(item)">
-				<image class="result-avatar" :src="getAvatarForRoom(item.room_id)" fallback="/static/login/tiki.png" />
+				<image class="result-avatar" :src="getAvatarForRoom(item.room_id)" fallback="/static/login/tk1.jpg" />
 				<view class="result-body">
 					<view class="result-line1">
 						<text class="result-room">{{ getRoomName(item.room_id) }}</text>
@@ -79,6 +79,7 @@
 
 	import { getMatrix, errText, SearchHit } from '@/common/matrix.uts'
 	import { openChat } from '@/common/app.uts'
+	import { defaultAvatar } from '@/common/avatar.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
@@ -174,9 +175,7 @@
 	}
 
 	function getAvatarForRoom(roomId: string): string {
-		const matrix = getMatrix()
-		if (matrix == null) return '/static/login/tiki.png'
-		return '/static/login/tiki.png'
+		return defaultAvatar(roomId)
 	}
 
 	function formatTime(ts: number): string {

@@ -96,6 +96,7 @@
 
 	import { getMatrix, errText, RoomMember, roomIsGroup, memberDisplayName, MatrixRoom } from '@/common/matrix.uts'
 	import { openGroupPick } from '@/common/app.uts'
+	import { defaultAvatar } from '@/common/avatar.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
@@ -143,13 +144,13 @@
 
 	function memberAvatar(m: RoomMember): string {
 		const matrix = getMatrix()
-		if (matrix == null) return '/static/login/tiki.png'
+		if (matrix == null) return defaultAvatar(m.user_id)
 		const av = m.avatar_url
 		if (av != null && av.length > 0) {
 			const http = matrix.mxcToHttp(av, 80, 80)
 			if (http.length > 0) return http
 		}
-		return '/static/login/tiki.png'
+		return defaultAvatar(m.user_id)
 	}
 
 	function applySummary(summary: MatrixRoom): void {

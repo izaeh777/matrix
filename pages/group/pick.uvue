@@ -50,6 +50,7 @@
 	import { t as __i18nT } from '@/common/i18n.uts'
 
 	import { getMatrix, errText, DirectoryUser, localPartOf, CreateRoomOpts } from '@/common/matrix.uts'
+	import { defaultAvatar } from '@/common/avatar.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
@@ -84,12 +85,12 @@
 
 	function avatarOf(user: PickUser): string {
 		const matrix = getMatrix()
-		if (matrix == null) return '/static/login/tiki.png'
+		if (matrix == null) return defaultAvatar(user.user_id)
 		if (user.avatar_url.length > 0) {
 			const http = matrix.mxcToHttp(user.avatar_url, 80, 80)
 			if (http.length > 0) return http
 		}
-		return '/static/login/tiki.png'
+		return defaultAvatar(user.user_id)
 	}
 
 	function isSelected(uid: string): boolean {
