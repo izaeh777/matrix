@@ -75,10 +75,10 @@ export function startMatrixSession(session: SessionInfo): MatrixClient {
 	return client
 }
 
-export function endMatrixSession(): void {
+export function endMatrixSession(wipeAllChats: boolean = false): void {
 	try { getCallManager().hangup(false) } catch (e) {}
 	try { getCallManager().unbind() } catch (e) {}
-	clearSession()
+	clearSession(wipeAllChats)
 	clearMatrix()
 }
 

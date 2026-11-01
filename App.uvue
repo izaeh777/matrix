@@ -4,6 +4,8 @@
 	import { bindCallToMatrix } from '@/common/call.uts'
 	import { captureTpCallbackFromIntent, readAndroidLaunchUri } from '@/common/tp-wallet.uts'
 	import { handleLaunchDeepLink } from '@/common/deeplink.uts'
+	import { checkAppUpdate } from '@/common/app-update.uts'
+	import { registerAccountPersistence, rememberActiveAccount } from '@/common/accounts.uts'
 	import { t } from '@/common/i18n.uts'
 
 	// #ifdef APP-ANDROID || APP-HARMONY
@@ -29,13 +31,20 @@
 
 	onLaunch(() => {
 		console.log('App Launch')
+		registerAccountPersistence()
 		const matrix = bootstrapMatrix()
 		bindCallToMatrix()
 		if (matrix != null) {
 			matrix.startSync()
 		}
+		try { rememberActiveAccount() } catch (e0) {}
 		maybeTpSchema()
 		maybeAppDeepLink()
+		// #ifdef APP
+		setTimeout(() => {
+			checkAppUpdate(true)
+		}, 1800)
+		// #endif
 	})
 
 	onAppShow(() => {

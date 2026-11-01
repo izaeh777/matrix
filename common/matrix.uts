@@ -63,6 +63,8 @@ export type MatrixRoom = {
 	encrypted?: boolean
 	is_direct?: boolean
 	member_count?: number
+	/** 群头像九宫格：最多 9 个成员 mxc/http，无自定义群头像时用 */
+	member_avatars?: string[]
 	favourite?: boolean
 	muted?: boolean
 }
@@ -1731,23 +1733,49 @@ export class MatrixClient {
 		}
 
 		const memberIds: Array<string> = []
+		const avOther: Array<string> = []
+		const avSelf: Array<string> = []
 		for (let sj = 0; sj < state.length; sj++) {
 			const ev2 = state[sj]
 			if (jsonStr(ev2, 'type') != 'm.room.member') continue
 			const sk = jsonStr(ev2, 'state_key')
 			if (sk.length == 0) continue
-			const mem = jsonStr(jsonObj(ev2, 'content'), 'membership')
+			const content2 = jsonObj(ev2, 'content')
+			const mem = jsonStr(content2, 'membership')
 			if (mem != 'join' && mem != 'invite') continue
 			if (memberIds.indexOf(sk) < 0) memberIds.push(sk)
+			let av = jsonStr(content2, 'avatar_url')
+			if (av.length > 0) {
+				this.userAvatars.set(sk, av)
+			} else {
+				const cachedAv2 = this.userAvatars.get(sk)
+				if (cachedAv2 != null && cachedAv2.length > 0) av = cachedAv2
+			}
+			// 空串也占一格（UI 用默认头像），保证九宫格人数正确
+			if (sk == this.userId) {
+				if (avSelf.length == 0) avSelf.push(av)
+			} else if (avOther.length < 9) {
+				avOther.push(av)
+			}
 		}
 		if (this.userId.length > 0 && memberIds.indexOf(this.userId) < 0) {
 			memberIds.push(this.userId)
+			if (avSelf.length == 0) {
+				const meAv = this.userAvatars.get(this.userId)
+				avSelf.push(meAv != null ? meAv : '')
+			}
 		}
 		room.member_count = memberIds.length
 		const isDM = memberIds.length == 2
 		room.is_direct = isDM
 		room.favourite = this.favouriteRooms.get(roomId) == '1'
 		room.muted = this.mutedRooms.get(roomId) == '1'
+		if (!isDM) {
+			const grid: Array<string> = []
+			for (let ai = 0; ai < avOther.length && grid.length < 9; ai++) grid.push(avOther[ai])
+			for (let bi = 0; bi < avSelf.length && grid.length < 9; bi++) grid.push(avSelf[bi])
+			if (grid.length > 0) room.member_avatars = grid
+		}
 
 		// DM 情况下，强制用对方 displayname 覆盖
 		if (isDM && room.other_user_id != null) {

@@ -30,12 +30,23 @@ export type SessionInfo = {
 	avatar_url: string
 }
 
+type SessionSaveHook = () => void
+let _afterSessionSave: SessionSaveHook | null = null
+
+/** 多账号：Matrix 会话落盘后回调（由 accounts 注册） */
+export function setAfterSessionSave(fn: SessionSaveHook | null): void {
+	_afterSessionSave = fn
+}
+
 export function saveSession(session: SessionInfo): void {
 	try {
 		uni.setStorageSync(KEY_SESSION, JSON.stringify(session))
 	} catch (e) {
 		console.error('saveSession 失败', e)
 	}
+	try {
+		if (_afterSessionSave != null) _afterSessionSave()
+	} catch (e2) {}
 }
 
 export function loadSession(): SessionInfo | null {
@@ -102,11 +113,15 @@ export function clearSyncSince(): void {
 	} catch (e) {}
 }
 
-export function clearSession(): void {
+/**
+ * 清除当前 Matrix 会话。
+ * wipeAllChats=false 时保留各账号聊天缓存（多账号切换 / 仅退当前号）。
+ */
+export function clearSession(wipeAllChats: boolean = true): void {
 	try {
 		uni.removeStorageSync(KEY_SESSION)
 		uni.removeStorageSync(KEY_SYNC_SINCE)
-		clearRoomChats()
+		if (wipeAllChats) clearRoomChats()
 	} catch (e) {
 		console.error('clearSession 失败', e)
 	}
@@ -252,6 +267,23 @@ export function clearRoomChats(): void {
 		for (let i = 0; i < keys.length; i++) {
 			const k = keys[i]
 			if (k.indexOf(KEY_CHAT_PREFIX) == 0 || k.indexOf(KEY_ROOM_LIST_PREFIX) == 0) {
+				uni.removeStorageSync(k)
+			}
+		}
+	} catch (e) {}
+}
+
+/** 只清某个 Matrix 用户的房间列表 / 聊天缓存（多账号切换时用） */
+export function clearUserRoomCaches(userId: string): void {
+	if (userId.length == 0) return
+	const chatPref = KEY_CHAT_PREFIX + userId + ':'
+	const roomKey = KEY_ROOM_LIST_PREFIX + userId
+	try {
+		const info = uni.getStorageInfoSync()
+		const keys = info.keys
+		for (let i = 0; i < keys.length; i++) {
+			const k = keys[i]
+			if (k == roomKey || k.indexOf(chatPref) == 0) {
 				uni.removeStorageSync(k)
 			}
 		}

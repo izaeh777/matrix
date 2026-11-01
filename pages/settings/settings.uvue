@@ -77,24 +77,29 @@
 			</view>
 			<view class="section">
 				<view class="section-title">{{ t('settings.accountSafe') }}</view>
+				<view class="setting-row" @click="onOpenAccounts">
+					<text class="setting-label">{{ t('accounts.title') }}</text>
+					<text class="setting-arrow">›</text>
+				</view>
 				<view class="setting-row" @click="onChangePassword">
 					<text class="setting-label">{{ t('settings.changePwd') }}</text>
 					<text class="setting-arrow">›</text>
 				</view>
-				<view class="setting-row" @click="onDeactivate">
+				<!-- 注销账号：暂隐 -->
+				<view v-if="false" class="setting-row" @click="onDeactivate">
 					<text class="setting-label danger-text">{{ t('settings.deactivate') }}</text>
 					<text class="setting-arrow">›</text>
 				</view>
 			</view>
-			<view v-if="false" class="section">
+			<view class="section">
 				<view class="section-title">{{ t('settings.about') }}</view>
 				<view class="setting-row">
-					<text class="setting-label">{{ t('settings.matrixVer') }}</text>
-					<text class="setting-value">Client-Server API v3</text>
-				</view>
-				<view class="setting-row">
 					<text class="setting-label">{{ t('settings.appVer') }}</text>
-					<text class="setting-value">1.0.0</text>
+					<text class="setting-value">{{ appVerText }}</text>
+				</view>
+				<view class="setting-row" @click="onCheckUpdate">
+					<text class="setting-label">{{ t('update.check') }}</text>
+					<text class="setting-arrow">›</text>
 				</view>
 			</view>
 
@@ -243,8 +248,8 @@
 			</view>
 		</view>
 
-		<!-- 注销二次确认弹窗 -->
-		<view v-if="showDeactivateModal" class="modal-overlay" @click="closeDeactivateModal">
+		<!-- 注销二次确认弹窗（入口已隐） -->
+		<view v-if="false && showDeactivateModal" class="modal-overlay" @click="closeDeactivateModal">
 			<view class="modal-card" @click.stop="noopModal">
 				<text class="modal-title danger-text">{{ t('settings.deactivateTitle') }}</text>
 				<text class="modal-desc">{{ t('settings.deactivateDesc') }}</text>
@@ -273,6 +278,7 @@
 	import { getMatrix, errText, errCode, DeviceInfo } from '@/common/matrix.uts'
 	import { loadSession, saveSession, SessionInfo } from '@/common/storage.uts'
 	import { endMatrixSession } from '@/common/app.uts'
+	import { forgetActiveAccount } from '@/common/accounts.uts'
 	import {
 		platformLogout,
 		loadPlatformSession,
@@ -285,6 +291,7 @@
 		modifyPlatformPassword
 	} from '@/common/platform.uts'
 	import { t as __i18nT } from '@/common/i18n.uts'
+	import { checkAppUpdate, localAppVersionName, localAppVersionCode } from '@/common/app-update.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
@@ -410,6 +417,20 @@
 	// 注销
 	const showDeactivateModal = ref<boolean>(false)
 	const deactivateForm = ref<DeactivateForm>({ password: '' })
+	const appVerText = ref<string>('')
+
+	function refreshAppVerText(): void {
+		const name = localAppVersionName()
+		const code = localAppVersionCode()
+		if (name.length > 0 && code > 0) appVerText.value = name + ' (' + code + ')'
+		else if (name.length > 0) appVerText.value = name
+		else if (code > 0) appVerText.value = '' + code
+		else appVerText.value = '—'
+	}
+
+	async function onCheckUpdate(): Promise<void> {
+		await checkAppUpdate(false)
+	}
 
 	function goBack() {
 		uni.navigateBack()
@@ -893,6 +914,7 @@
 
 	async function setupSettings(): Promise<void> {
 		i18n.value = buildSettingsI18n()
+		refreshAppVerText()
 		await loadProfileInfo()
 		await loadDevices()
 		await checkPushStatus()
@@ -904,6 +926,7 @@
 
 	onShow(() => {
 		i18n.value = buildSettingsI18n()
+		refreshAppVerText()
 		if (emailBound.value) {
 			const local = loadPlatformSession()
 			const em = local != null ? local.email : ''
@@ -1208,8 +1231,13 @@
 		})
 	}
 
+	function onOpenAccounts(): void {
+		uni.navigateTo({ url: '/pages/settings/accounts' })
+	}
+
 	async function doLogout(): Promise<void> {
-		// 平台登出：服务端作废平台 token，并清本地平台会话（内含 matrix 凭证）
+		// 从多账号列表移除当前，再作废服务端 token / 清本地
+		try { forgetActiveAccount() } catch (e0) {}
 		await platformLogout()
 		const matrix = getMatrix()
 		try {

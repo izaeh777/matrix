@@ -22,6 +22,11 @@
 				<text v-if="item.code == current" class="row-check">✓</text>
 			</view>
 		</scroll-view>
+
+		<!-- 切语言遮罩：挡住返回动画里露出来的旧文案 -->
+		<view v-if="switching" class="lang-mask">
+			<text class="lang-mask-text">{{ switchingTip }}</text>
+		</view>
 	</view>
 </template>
 
@@ -33,30 +38,46 @@
 		getLocale,
 		getLocaleLabel,
 		t,
+		setLocale,
 		applyLocaleAndReload
 	} from '@/common/i18n.uts'
 
 	const options = ref<Array<LocaleOption>>(LOCALE_OPTIONS)
 	const current = ref<string>(getLocale())
 	const pageTitle = ref<string>(t('lang.title'))
+	const switching = ref<boolean>(false)
+	const switchingTip = ref<string>('')
+	let picking = false
 
 	function onBack(): void {
+		if (switching.value) return
 		uni.navigateBack({})
 	}
 
 	function onPick(idx: number): void {
+		if (picking) return
 		if (idx < 0 || idx >= options.value.length) return
 		const item = options.value[idx]
+		if (item.code == getLocale()) {
+			uni.navigateBack({})
+			return
+		}
+		picking = true
+		// 先落盘 + 本页切到新语言，再盖白屏，避免「先旧后新」
+		setLocale(item.code)
 		current.value = item.code
 		pageTitle.value = t('lang.title')
-		uni.showToast({ title: getLocaleLabel(item.code), icon: 'none' })
+		switchingTip.value = getLocaleLabel(item.code)
+		switching.value = true
+		// 等遮罩先画出来再跳转
 		setTimeout(() => {
-			// 重建首页，让各页文案按新语言加载
 			applyLocaleAndReload(item.code)
-		}, 250)
+			picking = false
+		}, 40)
 	}
 
 	onShow(() => {
+		if (switching.value) return
 		current.value = getLocale()
 		pageTitle.value = t('lang.title')
 	})
@@ -118,5 +139,20 @@
 		font-size: 36rpx;
 		color: #1a1a1a;
 		font-weight: 700;
+	}
+	.lang-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		background-color: #ffffff;
+		align-items: center;
+		justify-content: center;
+		z-index: 9999;
+	}
+	.lang-mask-text {
+		font-size: 32rpx;
+		color: #666666;
 	}
 </style>

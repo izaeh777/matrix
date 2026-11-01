@@ -187,81 +187,109 @@
 			<view id="chat-bottom" class="chat-bottom-anchor"></view>
 		</scroll-view>
 
-		<!-- 底部输入区：按键盘高度上移，顶栏不动 -->
+		<!-- 底部输入区：输入栏在上，表情/更多在下（同微信） -->
 		<view class="composer" :style="composerStyle">
-		<!-- 输入栏 -->
-		<view class="input-bar">
-			<view class="input-tool" @click="toggleVoiceMode">
-				<image
-					class="input-tool-img"
-					:src="voiceMode ? '/static/login/j1.png' : '/static/login/yuying.png'"
-					mode="aspectFit"
-				></image>
-			</view>
-			<view
-				v-if="voiceMode && inputText.trim().length == 0"
-				class="voice-hold"
-				@touchstart="onVoiceTouchStart"
-				@touchmove="onVoiceTouchMove"
-				@touchend="onVoiceTouchEnd"
-				@touchcancel="onVoiceTouchCancel"
-			>
-				<text class="voice-hold-text">{{ isRecording ? voiceStatusText : t('chat.holdTalk') }}</text>
-			</view>
-			<view v-else class="input-field-wrap">
+			<view class="input-bar" :class="(showEmojiPanel || showMorePanel) ? 'input-bar-panel' : ''">
+				<view class="input-tool" @click="toggleVoiceMode">
+					<image
+						class="input-tool-img"
+						:src="voiceMode ? '/static/login/j1.png' : '/static/login/yuying.png'"
+						mode="aspectFit"
+					></image>
+				</view>
+				<view
+					v-if="voiceMode && inputText.trim().length == 0"
+					class="voice-hold"
+					@touchstart="onVoiceTouchStart"
+					@touchmove="onVoiceTouchMove"
+					@touchend="onVoiceTouchEnd"
+					@touchcancel="onVoiceTouchCancel"
+				>
+					<text class="voice-hold-text">{{ isRecording ? voiceStatusText : t('chat.holdTalk') }}</text>
+				</view>
+				<view v-else class="input-field-wrap">
 					<input
-					class="msg-input"
-					v-model="inputText"
-					:placeholder="chatInputPh"
-					placeholder-class="input-placeholder"
-					confirm-type="send"
-					:adjust-position="false"
-					@input="onInputChange"
-					@focus="onInputFocus"
-					@blur="onInputBlur"
-					@confirm="onSend"
-					@keyboardheightchange="onInputKeyboardHeight"
-				/>
+						class="msg-input"
+						v-model="inputText"
+						:placeholder="chatInputPh"
+						placeholder-class="input-placeholder"
+						confirm-type="send"
+						:adjust-position="false"
+						@input="onInputChange"
+						@focus="onInputFocus"
+						@blur="onInputBlur"
+						@confirm="onSend"
+						@keyboardheightchange="onInputKeyboardHeight"
+					/>
+				</view>
+				<view class="input-tool" @click="toggleEmojiPanel">
+					<image class="input-tool-img" src="/static/login/b1.png" mode="aspectFit"></image>
+				</view>
+				<view v-if="inputText.trim().length == 0" class="input-tool" @click="toggleMorePanel">
+					<image class="input-tool-img" src="/static/login/b2.png" mode="aspectFit"></image>
+				</view>
+				<view v-else class="btn-send" @click="onSend">
+					<text class="btn-send-text">{{ chatSendText }}</text>
+				</view>
 			</view>
-			<view class="input-tool" @click="toggleEmojiPanel">
-				<image class="input-tool-img" src="/static/login/b1.png" mode="aspectFit"></image>
-			</view>
-			<view v-if="inputText.trim().length == 0" class="input-tool" @click="toggleMorePanel">
-				<image class="input-tool-img" src="/static/login/b2.png" mode="aspectFit"></image>
-			</view>
-			<view v-else class="btn-send" @click="onSend">
-				<text class="btn-send-text">{{ chatSendText }}</text>
-			</view>
-		</view>
-		</view>
 
-		<!-- 底部更多功能面板 -->
-		<view v-if="showMorePanel" class="more-panel">
-			<view class="more-grid">
-				<view class="more-item" @click="onPickImage">
-					<view class="more-icon-bg">
-						<image class="more-icon-img" src="/static/login/t1.png" mode="aspectFit"></image>
+			<!-- 底部更多功能面板 -->
+			<view v-if="showMorePanel" class="more-panel">
+				<view class="more-grid">
+					<view class="more-item" @click="onPickImage">
+						<view class="more-icon-bg">
+							<image class="more-icon-img" src="/static/login/t1.png" mode="aspectFit"></image>
+						</view>
+						<text class="more-label">{{ t('chat.moreImage') }}</text>
 					</view>
-					<text class="more-label">{{ t('chat.moreImage') }}</text>
-				</view>
-				<view class="more-item" @click="onPickFile">
-					<view class="more-icon-bg">
-						<image class="more-icon-img" src="/static/login/t2.png" mode="aspectFit"></image>
+					<view class="more-item" @click="onPickFile">
+						<view class="more-icon-bg">
+							<image class="more-icon-img" src="/static/login/t2.png" mode="aspectFit"></image>
+						</view>
+						<text class="more-label">{{ t('chat.moreFile') }}</text>
 					</view>
-					<text class="more-label">{{ t('chat.moreFile') }}</text>
-				</view>
-				<view class="more-item" @click.stop="startCallVoice">
-					<view class="more-icon-bg">
-						<image class="more-icon-img" src="/static/login/t3.png" mode="aspectFit"></image>
+					<view class="more-item" @click.stop="startCallVoice">
+						<view class="more-icon-bg">
+							<image class="more-icon-img" src="/static/login/t3.png" mode="aspectFit"></image>
+						</view>
+						<text class="more-label">{{ isGroup ? t('chat.groupVoice') : t('chat.voiceCall') }}</text>
 					</view>
-					<text class="more-label">{{ isGroup ? t('chat.groupVoice') : t('chat.voiceCall') }}</text>
-				</view>
-				<view class="more-item" @click.stop="startCallVideo">
-					<view class="more-icon-bg">
-						<image class="more-icon-img" src="/static/login/t4.png" mode="aspectFit"></image>
+					<view class="more-item" @click.stop="startCallVideo">
+						<view class="more-icon-bg">
+							<image class="more-icon-img" src="/static/login/t4.png" mode="aspectFit"></image>
+						</view>
+						<text class="more-label">{{ isGroup ? t('chat.groupVideo') : t('chat.videoCall') }}</text>
 					</view>
-					<text class="more-label">{{ isGroup ? t('chat.groupVideo') : t('chat.videoCall') }}</text>
 				</view>
+			</view>
+
+			<!-- 表情包面板：跟在输入栏下方，输入框始终在上面 -->
+			<view v-if="showEmojiPanel" class="emoji-panel">
+				<view class="emoji-panel-tabs">
+					<view
+						v-for="(icon, idx) in emojiCatIcons"
+						:key="idx"
+						class="emoji-tab"
+						:class="idx == activeEmojiCat ? 'emoji-tab-active' : ''"
+						@click="setEmojiCat(idx)"
+					>
+						<text class="emoji-tab-text">{{ icon }}</text>
+					</view>
+				</view>
+				<scroll-view class="emoji-grid-scroll" scroll-y>
+					<view class="emoji-grid">
+						<view
+							v-for="(e, i) in activeEmojiList"
+							:key="i"
+							class="emoji-cell"
+							@click="insertEmoji(e)"
+						>
+							<view class="emoji-cell-bg">
+								<text class="emoji-cell-text">{{ e }}</text>
+							</view>
+						</view>
+					</view>
+				</scroll-view>
 			</view>
 		</view>
 
@@ -276,35 +304,6 @@
 					</view>
 				</scroll-view>
 			</view>
-		</view>
-
-		<!-- 表情包面板 -->
-		<view v-if="showEmojiPanel" class="emoji-panel">
-			<view class="emoji-panel-tabs">
-				<view
-					v-for="(icon, idx) in emojiCatIcons"
-					:key="idx"
-					class="emoji-tab"
-					:class="idx == activeEmojiCat ? 'emoji-tab-active' : ''"
-					@click="setEmojiCat(idx)"
-				>
-					<text class="emoji-tab-text">{{ icon }}</text>
-				</view>
-			</view>
-			<scroll-view class="emoji-grid-scroll" scroll-y>
-				<view class="emoji-grid">
-					<view
-						v-for="(e, i) in activeEmojiList"
-						:key="i"
-						class="emoji-cell"
-						@click="insertEmoji(e)"
-					>
-						<view class="emoji-cell-bg">
-							<text class="emoji-cell-text">{{ e }}</text>
-						</view>
-					</view>
-				</view>
-			</scroll-view>
 		</view>
 
 		<!-- 语音录制面板 -->
@@ -1059,9 +1058,20 @@
 	})
 
 	function noop(): void {}
+	function dismissKeyboardForPanel(): void {
+		try {
+			uni.hideKeyboard()
+		} catch (eKb) {}
+		keyboardHeight.value = 0
+	}
+
 	function toggleMorePanel(): void {
-		showMorePanel.value = !showMorePanel.value
-		if (showMorePanel.value) showEmojiPanel.value = false
+		const next = !showMorePanel.value
+		showMorePanel.value = next
+		if (next) {
+			showEmojiPanel.value = false
+			dismissKeyboardForPanel()
+		}
 	}
 	const activeEmojiList = computed<Array<string>>(() => {
 		const cats = emojiCategories.value
@@ -2206,50 +2216,20 @@
 	// 表情包
 	// ============================================================
 	function toggleEmojiPanel() {
-		showEmojiPanel.value = !showEmojiPanel.value
-	}
-	async function sendEmojiAsMessage(text: string) {
-		if (sending.value) return
-		sending.value = true
-		try {
-			const matrix = await getMatrix2()
-			if (matrix == null) {
-				sending.value = false
-				return
-			}
-			// 乐观更新
-			const tempId = matrix.genTxnId()
-			const msgObj = emptyChatMsg()
-			msgObj.event_id = tempId
-			msgObj.sender = matrix.userId
-			msgObj.type = 'm.room.message'
-			msgObj.body = text
-			msgObj.msgtype = 'm.text'
-			msgObj.ts = Date.now()
-			msgObj._pending = true
-			messages.value.push(msgObj)
-			messages.value = messages.value.slice()
-			scrollToBottom()
-			// 发送
-			const ev = await matrix.sendText(roomId.value, text)
-			const idx = messages.value.findIndex(m => m.event_id == tempId)
-			const newId = ev.event_id != null ? ev.event_id : ''
-			if (idx >= 0 && newId.length > 0) {
-				messages.value[idx].event_id = newId
-				messages.value[idx]._pending = false
-				messages.value = messages.value.slice()
-			}
-		} catch (e) {
-			uni.showToast({ title: errText(e, '表情发送失败'), icon: 'none' })
+		const next = !showEmojiPanel.value
+		showEmojiPanel.value = next
+		if (next) {
+			showMorePanel.value = false
+			voiceMode.value = false
+			dismissKeyboardForPanel()
 		}
-		sending.value = false
 	}
 	function insertEmoji(e: string) {
 		const text = e
 		if (text.length == 0) return
-		inputText.value = ''
-		showEmojiPanel.value = false
-		sendEmojiAsMessage(text)
+		// 插入输入框，不直接发送
+		inputText.value = inputText.value + text
+		if (voiceMode.value) voiceMode.value = false
 	}
 
 	// ============================================================
@@ -4206,6 +4186,11 @@
 		border-top-width: 1rpx;
 		border-top-color: #f0f2f5;
 		z-index: 20;
+		flex-shrink: 0;
+	}
+	.input-bar-panel {
+		/* 面板打开时输入栏贴着面板，不必再留底部安全区 */
+		padding-bottom: 16rpx;
 	}
 	.input-tool {
 		width: 64rpx;
@@ -4625,16 +4610,15 @@
 		font-style: italic;
 	}
 
-	/* ---- 表情包面板（微信风格：深色网格） ---- */
+	/* ---- 表情包面板：文档流排在输入栏下方 ---- */
 	.emoji-panel {
-		position: fixed;
-		left: 0;
-		right: 0;
-		bottom: 0;
+		width: 100%;
 		height: 520rpx;
 		background-color: #ffffff;
 		flex-direction: column;
-		z-index: 10;
+		flex-shrink: 0;
+		border-top-width: 1rpx;
+		border-top-color: #f0f2f5;
 	}
 
 	.emoji-panel-tabs {

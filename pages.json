@@ -161,6 +161,14 @@
 			}
 		},
 		{
+			"path": "pages/settings/accounts",
+			"style": {
+				"navigationBarTitleText": "Accounts",
+				"navigationStyle": "custom",
+				"backgroundColor": "#FFFFFF"
+			}
+		},
+		{
 			"path": "pages/project/publish",
 			"style": {
 				"navigationBarTitleText": "Publish",

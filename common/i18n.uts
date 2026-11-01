@@ -636,6 +636,22 @@ function fillZhCnP4(): void {
 		'settings.changePwd', '修改密码',
 		'settings.deactivate', '注销账号',
 		'settings.about', '关于',
+		'update.check', '检查更新',
+		'update.title', '发现新版本',
+		'update.now', '立即更新',
+		'update.later', '稍后',
+		'update.latest', '已是最新版本',
+		'update.downloading', '下载中',
+		'update.installing', '正在安装…',
+		'update.downloadFail', '下载失败',
+		'update.installFail', '安装失败',
+		'update.checkFail', '检查更新失败',
+		'update.noUrl', '未配置下载地址',
+		'update.openStore', '请前往应用商店更新',
+		'update.h5Skip', '请在 App 内检查更新',
+		'update.platformUnsupported', '当前平台不支持安装更新包',
+		'update.wgtUnsupported', '当前为 VDOM 模式，不支持 wgt 热更新，请下发 APK',
+		'update.contentTpl', '有新版本 {v} 可用，是否更新？',
 		'cms.linkFail', '加载友链失败',
 		'cms.homeFail', '加载首页失败',
 		'cms.needChannel', '缺少栏目标识（channel_id 或 diyname）',
@@ -691,7 +707,14 @@ function fillZhCnP4(): void {
 		'invite.title', '邀请好友注册',
 		'invite.desc', '分享邀请码，新用户注册时绑定推荐关系',
 		'invite.myCode', '我的邀请码',
-		'invite.scan', '扫码加好友',
+		'invite.tabReg', '邀请注册',
+		'invite.tabFriend', '加好友',
+		'invite.friendTitle', '加我好友',
+		'invite.friendDesc', '对方扫此码可直接发起聊天',
+		'invite.myFriendId', '我的账号',
+		'invite.friendCopied', '好友链接已复制',
+		'invite.scanTip', '扫一扫会按码类型处理：邀请码→注册，好友码→聊天',
+		'invite.scan', '扫一扫',
 		'invite.searchUser', '搜用户名',
 		'invite.enterUser', '输入用户名加好友',
 	] as Array<string>))
@@ -789,6 +812,16 @@ function fillZhCnP5(): void {
 		'api.tagOriginal', '原创',
 		'api.tagFromX', '摘自于X',
 		'api.memberSuffix', '会员',
+		'accounts.title', '切换账号',
+		'accounts.add', '添加账号',
+		'accounts.addConfirm', '将保留当前账号，并前往登录新账号。确定继续？',
+		'accounts.current', '当前',
+		'accounts.hint', '点击账号即可切换；长按非当前账号可从本机移除。退出登录会移除当前账号。',
+		'accounts.switching', '正在切换…',
+		'accounts.switchFail', '切换失败，请重新登录该账号',
+		'accounts.removeTitle', '移除账号',
+		'accounts.removeConfirm', '从本机移除该账号登录信息？不会注销服务端账号。',
+		'accounts.cannotRemoveCurrent', '请先切换到其他账号，或使用退出登录',
 	] as Array<string>))
 }
 
@@ -1544,6 +1577,16 @@ function fillZhTwP5(): void {
 		'api.tagOriginal', '原創',
 		'api.tagFromX', '摘自於X',
 		'api.memberSuffix', '會員',
+		'accounts.title', '切換帳號',
+		'accounts.add', '新增帳號',
+		'accounts.addConfirm', '將保留目前帳號，並前往登入新帳號。確定繼續？',
+		'accounts.current', '目前',
+		'accounts.hint', '點擊帳號即可切換；長按非目前帳號可從本機移除。退出登入會移除目前帳號。',
+		'accounts.switching', '正在切換…',
+		'accounts.switchFail', '切換失敗，請重新登入該帳號',
+		'accounts.removeTitle', '移除帳號',
+		'accounts.removeConfirm', '從本機移除該帳號登入資訊？不會註銷伺服端帳號。',
+		'accounts.cannotRemoveCurrent', '請先切換到其他帳號，或使用退出登入',
 	] as Array<string>))
 }
 
@@ -2158,6 +2201,22 @@ function fillEnP4(): void {
 		'settings.changePwd', 'Change password',
 		'settings.deactivate', 'Deactivate account',
 		'settings.about', 'About',
+		'update.check', 'Check for updates',
+		'update.title', 'Update available',
+		'update.now', 'Update now',
+		'update.later', 'Later',
+		'update.latest', 'You are up to date',
+		'update.downloading', 'Downloading',
+		'update.installing', 'Installing…',
+		'update.downloadFail', 'Download failed',
+		'update.installFail', 'Install failed',
+		'update.checkFail', 'Update check failed',
+		'update.noUrl', 'Download URL not configured',
+		'update.openStore', 'Please update from the App Store',
+		'update.h5Skip', 'Check for updates in the App',
+		'update.platformUnsupported', 'Updates are not supported on this platform',
+		'update.wgtUnsupported', 'VDOM build cannot install wgt; publish an APK',
+		'update.contentTpl', 'Version {v} is available. Update now?',
 		'cms.linkFail', 'Failed to load links',
 		'cms.homeFail', 'Failed to load home',
 		'cms.needChannel', 'Missing channel id',
@@ -2210,10 +2269,17 @@ function fillEnP4(): void {
 		'chat.callPeerRejected', 'Peer rejected',
 		'chat.callMissed', 'Missed',
 		'chat.callNoAnswer', 'No answer',
-		'invite.title', 'Invite friends',
+		'invite.title', 'Invite to register',
 		'invite.desc', 'Share your invite code for new users',
 		'invite.myCode', 'My invite code',
-		'invite.scan', 'Scan to add',
+		'invite.tabReg', 'Invite',
+		'invite.tabFriend', 'Add friend',
+		'invite.friendTitle', 'Add me',
+		'invite.friendDesc', 'Scan this code to start a chat',
+		'invite.myFriendId', 'My ID',
+		'invite.friendCopied', 'Friend link copied',
+		'invite.scanTip', 'Scan decides the action: invite code → register, friend code → chat',
+		'invite.scan', 'Scan',
 		'invite.searchUser', 'Search user',
 		'invite.enterUser', 'Enter username',
 	] as Array<string>))
@@ -2311,6 +2377,16 @@ function fillEnP5(): void {
 		'api.tagOriginal', 'Original',
 		'api.tagFromX', 'From X',
 		'api.memberSuffix', ' Member',
+		'accounts.title', 'Switch account',
+		'accounts.add', 'Add account',
+		'accounts.addConfirm', 'Keep the current account and sign in to another. Continue?',
+		'accounts.current', 'Current',
+		'accounts.hint', 'Tap an account to switch. Long-press another account to remove it from this device. Sign out removes the current account.',
+		'accounts.switching', 'Switching…',
+		'accounts.switchFail', 'Switch failed. Please sign in again.',
+		'accounts.removeTitle', 'Remove account',
+		'accounts.removeConfirm', 'Remove this account from this device? The server account will not be deleted.',
+		'accounts.cannotRemoveCurrent', 'Switch to another account first, or use Sign out',
 	] as Array<string>))
 }
 
@@ -2911,6 +2987,22 @@ function fillJaP4(): void {
 		'settings.changePwd', 'Change password',
 		'settings.deactivate', 'Deactivate account',
 		'settings.about', 'About',
+		'update.check', 'Check for updates',
+		'update.title', 'Update available',
+		'update.now', 'Update now',
+		'update.later', 'Later',
+		'update.latest', 'You are up to date',
+		'update.downloading', 'Downloading',
+		'update.installing', 'Installing…',
+		'update.downloadFail', 'Download failed',
+		'update.installFail', 'Install failed',
+		'update.checkFail', 'Update check failed',
+		'update.noUrl', 'Download URL not configured',
+		'update.openStore', 'Please update from the App Store',
+		'update.h5Skip', 'Check for updates in the App',
+		'update.platformUnsupported', 'Updates are not supported on this platform',
+		'update.wgtUnsupported', 'VDOM build cannot install wgt; publish an APK',
+		'update.contentTpl', 'Version {v} is available. Update now?',
 		'cms.linkFail', 'Failed to load links',
 		'cms.homeFail', 'Failed to load home',
 		'cms.needChannel', 'Missing channel id',
@@ -3664,6 +3756,22 @@ function fillKoP4(): void {
 		'settings.changePwd', 'Change password',
 		'settings.deactivate', 'Deactivate account',
 		'settings.about', 'About',
+		'update.check', 'Check for updates',
+		'update.title', 'Update available',
+		'update.now', 'Update now',
+		'update.later', 'Later',
+		'update.latest', 'You are up to date',
+		'update.downloading', 'Downloading',
+		'update.installing', 'Installing…',
+		'update.downloadFail', 'Download failed',
+		'update.installFail', 'Install failed',
+		'update.checkFail', 'Update check failed',
+		'update.noUrl', 'Download URL not configured',
+		'update.openStore', 'Please update from the App Store',
+		'update.h5Skip', 'Check for updates in the App',
+		'update.platformUnsupported', 'Updates are not supported on this platform',
+		'update.wgtUnsupported', 'VDOM build cannot install wgt; publish an APK',
+		'update.contentTpl', 'Version {v} is available. Update now?',
 		'cms.linkFail', 'Failed to load links',
 		'cms.homeFail', 'Failed to load home',
 		'cms.needChannel', 'Missing channel id',
@@ -4417,6 +4525,22 @@ function fillRuP4(): void {
 		'settings.changePwd', 'Change password',
 		'settings.deactivate', 'Deactivate account',
 		'settings.about', 'About',
+		'update.check', 'Check for updates',
+		'update.title', 'Update available',
+		'update.now', 'Update now',
+		'update.later', 'Later',
+		'update.latest', 'You are up to date',
+		'update.downloading', 'Downloading',
+		'update.installing', 'Installing…',
+		'update.downloadFail', 'Download failed',
+		'update.installFail', 'Install failed',
+		'update.checkFail', 'Update check failed',
+		'update.noUrl', 'Download URL not configured',
+		'update.openStore', 'Please update from the App Store',
+		'update.h5Skip', 'Check for updates in the App',
+		'update.platformUnsupported', 'Updates are not supported on this platform',
+		'update.wgtUnsupported', 'VDOM build cannot install wgt; publish an APK',
+		'update.contentTpl', 'Version {v} is available. Update now?',
 		'cms.linkFail', 'Failed to load links',
 		'cms.homeFail', 'Failed to load home',
 		'cms.needChannel', 'Missing channel id',
@@ -5184,6 +5308,22 @@ function fillViP4(): void {
 		'settings.changePwd', 'Change password',
 		'settings.deactivate', 'Deactivate account',
 		'settings.about', 'About',
+		'update.check', 'Check for updates',
+		'update.title', 'Update available',
+		'update.now', 'Update now',
+		'update.later', 'Later',
+		'update.latest', 'You are up to date',
+		'update.downloading', 'Downloading',
+		'update.installing', 'Installing…',
+		'update.downloadFail', 'Download failed',
+		'update.installFail', 'Install failed',
+		'update.checkFail', 'Update check failed',
+		'update.noUrl', 'Download URL not configured',
+		'update.openStore', 'Please update from the App Store',
+		'update.h5Skip', 'Check for updates in the App',
+		'update.platformUnsupported', 'Updates are not supported on this platform',
+		'update.wgtUnsupported', 'VDOM build cannot install wgt; publish an APK',
+		'update.contentTpl', 'Version {v} is available. Update now?',
 		'cms.linkFail', 'Failed to load links',
 		'cms.homeFail', 'Failed to load home',
 		'cms.needChannel', 'Missing channel id',
@@ -5236,10 +5376,17 @@ function fillViP4(): void {
 		'chat.callPeerRejected', 'Peer rejected',
 		'chat.callMissed', 'Missed',
 		'chat.callNoAnswer', 'No answer',
-		'invite.title', 'Invite friends',
+		'invite.title', 'Invite to register',
 		'invite.desc', 'Share your invite code for new users',
 		'invite.myCode', 'My invite code',
-		'invite.scan', 'Scan to add',
+		'invite.tabReg', 'Invite',
+		'invite.tabFriend', 'Add friend',
+		'invite.friendTitle', 'Add me',
+		'invite.friendDesc', 'Scan this code to start a chat',
+		'invite.myFriendId', 'My ID',
+		'invite.friendCopied', 'Friend link copied',
+		'invite.scanTip', 'Scan decides the action: invite code → register, friend code → chat',
+		'invite.scan', 'Scan',
 		'invite.searchUser', 'Search user',
 		'invite.enterUser', 'Enter username',
 	] as Array<string>))
@@ -5511,8 +5658,42 @@ export function openLanguagePage(): void {
 	uni.navigateTo({ url: '/pages/settings/language' })
 }
 
-/** 选语言后回到首页并重建界面，确保文案生效 */
+/**
+ * 选语言后回到上一页（在哪进语言页就停在哪），由该页 onShow 刷新文案。
+ * 无上一页时再按登录态落到首页/登录。
+ */
 export function applyLocaleAndReload(code: string): void {
 	setLocale(code)
-	uni.reLaunch({ url: '/pages/home/home' })
+	try {
+		const pages = getCurrentPages()
+		if (pages != null && pages.length > 1) {
+			uni.navigateBack({
+				delta: 1,
+				fail: (_e) => {
+					relaunchAfterLocaleFallback()
+				}
+			})
+			return
+		}
+	} catch (e0) {}
+	relaunchAfterLocaleFallback()
+}
+
+function relaunchAfterLocaleFallback(): void {
+	// 不 import platform（与 i18n 循环依赖），只读本地会话标记
+	try {
+		const raw = uni.getStorageSync('platform_session_v1')
+		if (raw != null && ('' + raw).length > 8) {
+			uni.reLaunch({ url: '/pages/home/home' })
+			return
+		}
+	} catch (e2) {}
+	try {
+		const raw2 = uni.getStorageSync('matrix_session_v1')
+		if (raw2 != null && ('' + raw2).length > 8) {
+			uni.reLaunch({ url: '/pages/home/home' })
+			return
+		}
+	} catch (e3) {}
+	uni.reLaunch({ url: '/pages/login/login' })
 }

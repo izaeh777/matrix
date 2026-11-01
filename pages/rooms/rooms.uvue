@@ -34,7 +34,16 @@
 					@click="onOpenRoom(room.room_id)"
 				>
 					<view class="strip-ava-wrap">
-						<image class="strip-ava" :src="roomAvatarSrc(room)" mode="aspectFill"></image>
+						<view v-if="roomShowGrid(room)" class="group-ava-grid group-ava-grid-sm" :class="'gava-n' + roomGridCount(room)">
+							<image
+								v-for="(src, gi) in roomGridSrcs(room)"
+								:key="'sg-' + room.room_id + '-' + gi"
+								class="group-ava-cell"
+								:src="src"
+								mode="aspectFill"
+							></image>
+						</view>
+						<image v-else class="strip-ava" :src="roomAvatarSrc(room)" mode="aspectFill"></image>
 						<view v-if="roomHasUnread(room)" class="strip-badge">
 							<text class="strip-badge-text">{{ roomUnreadText(room) }}</text>
 						</view>
@@ -54,7 +63,16 @@
 					@click="onOpenRoom(room.room_id)"
 				>
 					<view class="strip-ava-wrap">
-						<image class="strip-ava" :src="roomAvatarSrc(room)" mode="aspectFill"></image>
+						<view v-if="roomShowGrid(room)" class="group-ava-grid group-ava-grid-sm" :class="'gava-n' + roomGridCount(room)">
+							<image
+								v-for="(src, gi) in roomGridSrcs(room)"
+								:key="'sg2-' + room.room_id + '-' + gi"
+								class="group-ava-cell"
+								:src="src"
+								mode="aspectFill"
+							></image>
+						</view>
+						<image v-else class="strip-ava" :src="roomAvatarSrc(room)" mode="aspectFill"></image>
 						<view v-if="roomHasUnread(room)" class="strip-badge">
 							<text class="strip-badge-text">{{ roomUnreadText(room) }}</text>
 						</view>
@@ -128,7 +146,17 @@
 			>
 				<view class="room-row">
 					<view class="avatar-wrap">
+						<view v-if="roomShowGrid(room)" class="group-ava-grid" :class="'gava-n' + roomGridCount(room)">
+							<image
+								v-for="(src, gi) in roomGridSrcs(room)"
+								:key="'g-' + room.room_id + '-' + gi"
+								class="group-ava-cell"
+								:src="src"
+								mode="aspectFill"
+							></image>
+						</view>
 						<image
+							v-else
 							class="room-avatar"
 							:src="roomAvatarSrc(room)"
 							mode="aspectFill"
@@ -379,6 +407,16 @@
 		if (c > 99) return '99+'
 		return '' + c
 	}
+	function avatarHttp(raw: string, size: number = 96): string {
+		if (raw.length == 0) return '/static/login/tiki.png'
+		if (raw.indexOf('http://') == 0 || raw.indexOf('https://') == 0) return raw
+		if (raw.indexOf('/static/') == 0) return raw
+		const matrix = getMatrix()
+		if (matrix == null) return '/static/login/tiki.png'
+		const http = matrix.mxcToHttp(raw, size, size)
+		if (http.length == 0) return '/static/login/tiki.png'
+		return http
+	}
 	function roomAvatarSrc(room: MatrixRoom): string {
 		let a = room.avatar_url
 		if (a == null || a.length == 0) {
@@ -386,12 +424,32 @@
 			if (other != null && other.length > 0) a = other
 		}
 		if (a == null || a.length == 0) return '/static/login/tiki.png'
-		if (a.indexOf('http://') == 0 || a.indexOf('https://') == 0) return a
-		const matrix = getMatrix()
-		if (matrix == null) return '/static/login/tiki.png'
-		const http = matrix.mxcToHttp(a, 96, 96)
-		if (http.length == 0) return '/static/login/tiki.png'
-		return http
+		return avatarHttp(a, 96)
+	}
+	/** 群聊且无自定义房间头像 → 微信式成员九宫格 */
+	function roomShowGrid(room: MatrixRoom): boolean {
+		if (!roomIsGroup(room)) return false
+		const av = room.avatar_url
+		if (av != null && av.length > 0) return false
+		const list = room.member_avatars
+		return list != null && list.length > 0
+	}
+	function roomGridCount(room: MatrixRoom): number {
+		const list = room.member_avatars
+		if (list == null) return 0
+		let n = list.length
+		if (n > 9) n = 9
+		return n
+	}
+	function roomGridSrcs(room: MatrixRoom): Array<string> {
+		const out: Array<string> = []
+		const list = room.member_avatars
+		if (list == null) return out
+		const n = list.length > 9 ? 9 : list.length
+		for (let i = 0; i < n; i++) {
+			out.push(avatarHttp(list[i], 48))
+		}
+		return out
 	}
 	function roomPreviewText(room: MatrixRoom): string {
 		const p = room.last_message_preview
@@ -552,6 +610,16 @@
 		if (r.is_direct == false) o['is_direct'] = 'false'
 		const mc = r.member_count
 		if (mc != null) o['member_count'] = mc
+		const mas = r.member_avatars
+		if (mas != null && mas.length > 0) {
+			let joined = ''
+			const lim = mas.length > 9 ? 9 : mas.length
+			for (let mi = 0; mi < lim; mi++) {
+				if (mi > 0) joined += '|'
+				joined += mas[mi]
+			}
+			o['member_avatars'] = joined
+		}
 		if (r.favourite == true) o['favourite'] = 'true'
 		if (r.muted == true) o['muted'] = 'true'
 		return o
@@ -586,6 +654,15 @@
 		if (directStr == 'false') room.is_direct = false
 		const mc = pickNum(o, 'member_count')
 		if (mc > 0) room.member_count = mc
+		const masRaw = pickStr(o, 'member_avatars')
+		if (masRaw.length > 0) {
+			const parts = masRaw.split('|')
+			const avs: Array<string> = []
+			for (let pi = 0; pi < parts.length && avs.length < 9; pi++) {
+				avs.push(parts[pi])
+			}
+			if (avs.length > 0) room.member_avatars = avs
+		}
 		if (pickStr(o, 'favourite') == 'true') room.favourite = true
 		if (pickStr(o, 'muted') == 'true') room.muted = true
 		return room
@@ -1689,6 +1766,38 @@
 		border-radius: 54rpx;
 		background-color: #e8eef8;
 	}
+
+	/* 微信式群头像九宫格 */
+	.group-ava-grid {
+		width: 108rpx;
+		height: 108rpx;
+		background-color: #dddee0;
+		border-radius: 12rpx;
+		flex-direction: row;
+		flex-wrap: wrap;
+		align-content: center;
+		justify-content: center;
+		overflow: hidden;
+		padding: 3rpx;
+	}
+	.group-ava-grid-sm {
+		width: 96rpx;
+		height: 96rpx;
+		border-radius: 10rpx;
+		padding: 2rpx;
+	}
+	.group-ava-cell {
+		background-color: #cfcfcf;
+	}
+	.gava-n1 .group-ava-cell { width: 100%; height: 100%; }
+	.gava-n2 .group-ava-cell { width: 48%; height: 48%; margin: 1%; }
+	.gava-n3 .group-ava-cell { width: 48%; height: 48%; margin: 1%; }
+	.gava-n4 .group-ava-cell { width: 48%; height: 48%; margin: 1%; }
+	.gava-n5 .group-ava-cell { width: 31%; height: 31%; margin: 1%; }
+	.gava-n6 .group-ava-cell { width: 31%; height: 31%; margin: 1%; }
+	.gava-n7 .group-ava-cell { width: 31%; height: 31%; margin: 1%; }
+	.gava-n8 .group-ava-cell { width: 31%; height: 31%; margin: 1%; }
+	.gava-n9 .group-ava-cell { width: 31%; height: 31%; margin: 1%; }
 
 	.avatar-badge {
 		position: absolute;

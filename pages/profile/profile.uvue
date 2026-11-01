@@ -133,18 +133,26 @@
 
 		<view v-if="showInvite" class="invite-mask" @click="closeInvite">
 			<view class="invite-sheet" @click.stop="">
-				<text class="invite-title">{{ t('invite.title') }}</text>
-				<text class="invite-desc">{{ t('invite.desc') }}</text>
-				<image class="invite-qr" :src="inviteQr" mode="aspectFit"></image>
-				<view class="code-pill" @click="copyInviteCode">
+				<view class="invite-tabs">
+					<view class="invite-tab" :class="inviteTab == 'reg' ? 'invite-tab-on' : ''" @click="inviteTab = 'reg'">
+						<text class="invite-tab-text" :class="inviteTab == 'reg' ? 'invite-tab-text-on' : ''">{{ t('invite.tabReg') }}</text>
+					</view>
+					<view class="invite-tab" :class="inviteTab == 'friend' ? 'invite-tab-on' : ''" @click="inviteTab = 'friend'">
+						<text class="invite-tab-text" :class="inviteTab == 'friend' ? 'invite-tab-text-on' : ''">{{ t('invite.tabFriend') }}</text>
+					</view>
+				</view>
+				<text class="invite-title">{{ inviteTab == 'reg' ? t('invite.title') : t('invite.friendTitle') }}</text>
+				<text class="invite-desc">{{ inviteTab == 'reg' ? t('invite.desc') : t('invite.friendDesc') }}</text>
+				<image class="invite-qr" :src="inviteTab == 'reg' ? inviteQr : friendQr" mode="aspectFit"></image>
+				<view v-if="inviteTab == 'reg'" class="code-pill" @click="copyInviteCode">
 					<text class="code-text">{{ t('invite.myCode') }} {{ inviteCodeDisplay }}</text>
 					<text class="code-copy">⧉</text>
 				</view>
-				<view class="or-row">
-					<view class="or-line"></view>
-					<text class="or-text">{{ t('invite.orFriend') }}</text>
-					<view class="or-line"></view>
+				<view v-else class="code-pill" @click="copyFriendLink">
+					<text class="code-text">{{ t('invite.myFriendId') }} {{ friendMxidShort }}</text>
+					<text class="code-copy">⧉</text>
 				</view>
+				<text class="invite-scan-tip">{{ t('invite.scanTip') }}</text>
 				<view class="invite-actions">
 					<view class="invite-action" @click="onScanFriend">
 						<text class="invite-action-text">{{ t('invite.scan') }}</text>
@@ -284,7 +292,8 @@
 	} from '@/common/platform.uts'
 	import { loadTpWalletAddress } from '@/common/tp-wallet.uts'
 	import { tpTransferUsdt, openTpUsdtTransfer, openTpDeeplinkNow, buildTpUsdtTransferUrl, waitBscTxConfirmed, isTpAppInstalled, isH5DesktopBrowser, isH5InAppBrowser, isH5InWalletDapp, h5DappTransferUsdt } from '@/common/tp-wallet.uts'
-	import { inviteRegisterQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
+	import { inviteRegisterQrUrl, friendAddQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
+	import { toMatrixUserId } from '@/common/config.uts'
 	import { openChat } from '@/common/app.uts'
 	import { scanAddFriendOrInvite } from '@/common/deeplink.uts'
 	import { getLocaleLabel, openLanguagePage, t as __i18nT, tx } from '@/common/i18n.uts'
@@ -455,6 +464,8 @@
 	})
 	const avatarUrl = ref<string>('/static/login/tiki.png')
 	const showInvite = ref<boolean>(false)
+	/** reg=邀请注册码 friend=加好友码；扫码按链接类型区分行为 */
+	const inviteTab = ref<string>('reg')
 	const showCodeInput = ref<boolean>(false)
 	const enterCode = ref<string>('')
 	const showPlans = ref<boolean>(false)
@@ -480,6 +491,27 @@
 		return accountName.value as string
 	})
 	const inviteQr = computed((): string => inviteRegisterQrUrl(inviteCodeDisplay.value as string))
+	const friendMxid = computed((): string => {
+		const id = (userId.value as string).trim()
+		if (id.length == 0) return ''
+		if (id.indexOf('@') == 0) return id
+		return toMatrixUserId(id)
+	})
+	const friendMxidShort = computed((): string => {
+		const id = friendMxid.value as string
+		if (id.length == 0) return ''
+		if (id.indexOf('@') == 0) {
+			const colon = id.indexOf(':')
+			if (colon > 1) return id.substring(1, colon)
+			return id.substring(1)
+		}
+		return id
+	})
+	const friendQr = computed((): string => {
+		const id = friendMxid.value as string
+		if (id.length == 0) return ''
+		return friendAddQrUrl(id)
+	})
 	let offSync: (() => void) | null = null
 
 	function stopOff(handler: (() => void) | null): void {
@@ -1230,6 +1262,23 @@
 
 	function closeInvite(): void {
 		showInvite.value = false
+		inviteTab.value = 'reg'
+		showCodeInput.value = false
+	}
+
+	function copyFriendLink(): void {
+		const id = friendMxid.value as string
+		if (id.length == 0) {
+			uni.showToast({ title: t('invite.noAccount'), icon: 'none' })
+			return
+		}
+		const link = 'itiklink://friend?u=' + encodeURIComponent(id)
+		uni.setClipboardData({
+			data: link,
+			success: () => {
+				uni.showToast({ title: t('invite.friendCopied'), icon: 'none' })
+			}
+		})
 	}
 
 	function copyInviteCode(): void {
@@ -1613,6 +1662,33 @@
 		padding: 40rpx 40rpx 56rpx;
 		align-items: center;
 	}
+	.invite-tabs {
+		flex-direction: row;
+		width: 100%;
+		background-color: #f3f4f6;
+		border-radius: 16rpx;
+		padding: 6rpx;
+		margin-bottom: 28rpx;
+	}
+	.invite-tab {
+		flex: 1;
+		align-items: center;
+		justify-content: center;
+		padding: 16rpx 0;
+		border-radius: 12rpx;
+	}
+	.invite-tab-on {
+		background-color: #ffffff;
+	}
+	.invite-tab-text {
+		font-size: 28rpx;
+		color: #6b7280;
+		font-weight: 500;
+	}
+	.invite-tab-text-on {
+		color: #1a1a1a;
+		font-weight: 700;
+	}
 	.invite-title {
 		font-size: 36rpx;
 		font-weight: 800;
@@ -1630,6 +1706,14 @@
 		width: 360rpx;
 		height: 360rpx;
 		margin-bottom: 28rpx;
+	}
+	.invite-scan-tip {
+		font-size: 22rpx;
+		color: #9ca3af;
+		text-align: center;
+		line-height: 32rpx;
+		margin-bottom: 20rpx;
+		padding: 0 12rpx;
 	}
 	.or-row {
 		flex-direction: row;

@@ -1,0 +1,388 @@
+/**
+ * 多账号本地保险箱：保存多套平台 + Matrix 会话，支持切换 / 添加 / 移除。
+ * 切换时不调用服务端 logout，保留各账号 token；「退出登录」才作废当前并移除。
+ */
+import {
+	PlatformSession,
+	loadPlatformSession,
+	savePlatformSession,
+	clearPlatformSession,
+	setAfterPlatformSessionSave
+} from './platform.uts'
+import {
+	SessionInfo,
+	loadSession,
+	saveSession,
+	clearSession,
+	clearUserRoomCaches,
+	setAfterSessionSave
+} from './storage.uts'
+import { MatrixClient, setMatrix, clearMatrix, getMatrix } from './matrix.uts'
+import { bindCallToMatrix, getCallManager } from './call.uts'
+
+const KEY_ACCOUNTS = 'app_accounts_v1'
+const KEY_CURRENT_ID = 'app_current_account_id_v1'
+
+export type AccountSlot = {
+	id: string
+	email: string
+	nickname: string
+	avatar_url: string
+	platform_json: string
+	matrix_json: string
+	updated_at: number
+}
+
+function pickStr(obj: UTSJSONObject, key: string): string {
+	try {
+		const v = obj[key]
+		if (v != null) {
+			const s = ('' + v).trim()
+			if (s.length > 0 && s != 'null' && s != 'undefined') return s
+		}
+	} catch (e0) {}
+	try {
+		const s2 = obj.getString(key)
+		if (s2 != null && s2.length > 0) return s2
+	} catch (e1) {}
+	return ''
+}
+
+function pickNum(obj: UTSJSONObject, key: string): number {
+	try {
+		const n = obj.getNumber(key)
+		if (n != null) return n
+	} catch (e0) {}
+	try {
+		const raw = obj[key]
+		if (raw == null) return 0
+		const n = parseFloat('' + raw)
+		if (n == n) return n
+	} catch (e1) {}
+	return 0
+}
+
+function accountIdOf(p: PlatformSession | null, m: SessionInfo | null): string {
+	if (p != null) {
+		if (p.user_id.length > 0) return 'p:' + p.user_id
+		if (p.matrix_user_id.length > 0) return 'm:' + p.matrix_user_id
+		if (p.email.length > 0) return 'e:' + p.email.toLowerCase()
+	}
+	if (m != null && m.user_id.length > 0) return 'm:' + m.user_id
+	return ''
+}
+
+function labelOf(p: PlatformSession | null, m: SessionInfo | null): string {
+	if (p != null) {
+		if (p.nickname.length > 0) return p.nickname
+		if (p.email.length > 0) return p.email
+	}
+	if (m != null) {
+		if (m.display_name.length > 0) return m.display_name
+		if (m.user_id.length > 0) return m.user_id
+	}
+	return ''
+}
+
+function emailOf(p: PlatformSession | null): string {
+	if (p == null) return ''
+	return p.email
+}
+
+function avatarOf(m: SessionInfo | null): string {
+	if (m == null) return ''
+	return m.avatar_url
+}
+
+function parseSlot(obj: UTSJSONObject): AccountSlot | null {
+	const id = pickStr(obj, 'id')
+	if (id.length == 0) return null
+	const slot: AccountSlot = {
+		id: id,
+		email: pickStr(obj, 'email'),
+		nickname: pickStr(obj, 'nickname'),
+		avatar_url: pickStr(obj, 'avatar_url'),
+		platform_json: pickStr(obj, 'platform_json'),
+		matrix_json: pickStr(obj, 'matrix_json'),
+		updated_at: pickNum(obj, 'updated_at')
+	}
+	return slot
+}
+
+export function loadAccountSlots(): Array<AccountSlot> {
+	const out: Array<AccountSlot> = []
+	try {
+		const raw = uni.getStorageSync(KEY_ACCOUNTS)
+		if (raw == null) return out
+		const text = ('' + raw).trim()
+		if (text.length == 0 || text.charAt(0) != '[') return out
+		const arr = JSON.parse(text) as Array<any>
+		for (let i = 0; i < arr.length; i++) {
+			const one = arr[i]
+			if (one == null) continue
+			const slot = parseSlot(one as UTSJSONObject)
+			if (slot != null) out.push(slot)
+		}
+	} catch (e) {
+		console.warn('loadAccountSlots fail', e)
+	}
+	return out
+}
+
+function saveAccountSlots(list: Array<AccountSlot>): void {
+	try {
+		const arr: Array<UTSJSONObject> = []
+		for (let i = 0; i < list.length; i++) {
+			const s = list[i]
+			const o: UTSJSONObject = {}
+			o['id'] = s.id
+			o['email'] = s.email
+			o['nickname'] = s.nickname
+			o['avatar_url'] = s.avatar_url
+			o['platform_json'] = s.platform_json
+			o['matrix_json'] = s.matrix_json
+			o['updated_at'] = s.updated_at
+			arr.push(o)
+		}
+		uni.setStorageSync(KEY_ACCOUNTS, JSON.stringify(arr))
+	} catch (e) {
+		console.warn('saveAccountSlots fail', e)
+	}
+}
+
+export function currentAccountId(): string {
+	try {
+		const raw = uni.getStorageSync(KEY_CURRENT_ID)
+		if (raw != null) {
+			const s = ('' + raw).trim()
+			if (s.length > 0) return s
+		}
+	} catch (e0) {}
+	const p = loadPlatformSession()
+	const m = loadSession()
+	return accountIdOf(p, m)
+}
+
+function setCurrentAccountId(id: string): void {
+	try {
+		if (id.length > 0) uni.setStorageSync(KEY_CURRENT_ID, id)
+		else uni.removeStorageSync(KEY_CURRENT_ID)
+	} catch (e) {}
+}
+
+function slotFromActive(): AccountSlot | null {
+	const p = loadPlatformSession()
+	const m = loadSession()
+	const id = accountIdOf(p, m)
+	if (id.length == 0) return null
+	let platformJson = ''
+	let matrixJson = ''
+	try {
+		if (p != null) platformJson = JSON.stringify(p)
+	} catch (e0) {
+		platformJson = ''
+	}
+	try {
+		if (m != null) matrixJson = JSON.stringify(m)
+	} catch (e1) {
+		matrixJson = ''
+	}
+	const slot: AccountSlot = {
+		id: id,
+		email: emailOf(p),
+		nickname: labelOf(p, m),
+		avatar_url: avatarOf(m),
+		platform_json: platformJson,
+		matrix_json: matrixJson,
+		updated_at: Date.now()
+	}
+	return slot
+}
+
+/** 把当前登录态写入账号列表（登录成功 / 资料更新后调用） */
+export function rememberActiveAccount(): void {
+	const slot = slotFromActive()
+	if (slot == null) return
+	const list = loadAccountSlots()
+	let found = false
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].id == slot.id) {
+			// 合并：新字段空时保留旧值
+			const old = list[i]
+			if (slot.email.length == 0) slot.email = old.email
+			if (slot.nickname.length == 0) slot.nickname = old.nickname
+			if (slot.avatar_url.length == 0) slot.avatar_url = old.avatar_url
+			if (slot.platform_json.length == 0) slot.platform_json = old.platform_json
+			if (slot.matrix_json.length == 0) slot.matrix_json = old.matrix_json
+			list[i] = slot
+			found = true
+			break
+		}
+	}
+	if (!found) list.push(slot)
+	saveAccountSlots(list)
+	setCurrentAccountId(slot.id)
+}
+
+export function removeAccountById(id: string): void {
+	if (id.length == 0) return
+	const list = loadAccountSlots()
+	const next: Array<AccountSlot> = []
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].id != id) next.push(list[i])
+	}
+	saveAccountSlots(next)
+	if (currentAccountId() == id) setCurrentAccountId('')
+}
+
+/** 退出当前账号时：从列表移除并尽量清掉该用户聊天缓存 */
+export function forgetActiveAccount(): void {
+	const id = currentAccountId()
+	const p = loadPlatformSession()
+	const m = loadSession()
+	let matrixUid = ''
+	if (m != null) matrixUid = m.user_id
+	else if (p != null) matrixUid = p.matrix_user_id
+	if (id.length > 0) removeAccountById(id)
+	if (matrixUid.length > 0) clearUserRoomCaches(matrixUid)
+}
+
+function parsePlatformJson(text: string): PlatformSession | null {
+	if (text.length == 0 || text.charAt(0) != '{') return null
+	try {
+		const obj = JSON.parse(text) as UTSJSONObject
+		const token = pickStr(obj, 'token')
+		if (token.length == 0) return null
+		const s: PlatformSession = {
+			token: token,
+			email: pickStr(obj, 'email'),
+			nickname: pickStr(obj, 'nickname'),
+			user_id: pickStr(obj, 'user_id'),
+			matrix_user_id: pickStr(obj, 'matrix_user_id'),
+			matrix_token: pickStr(obj, 'matrix_token'),
+			matrix_homeserver: pickStr(obj, 'matrix_homeserver')
+		}
+		return s
+	} catch (e) {
+		return null
+	}
+}
+
+function parseMatrixJson(text: string): SessionInfo | null {
+	if (text.length == 0 || text.charAt(0) != '{') return null
+	try {
+		const obj = JSON.parse(text) as UTSJSONObject
+		const token = pickStr(obj, 'access_token')
+		const hs = pickStr(obj, 'homeserver')
+		const uid = pickStr(obj, 'user_id')
+		if (token.length == 0 || hs.length == 0 || uid.length == 0) return null
+		const s: SessionInfo = {
+			homeserver: hs,
+			user_id: uid,
+			access_token: token,
+			device_id: pickStr(obj, 'device_id'),
+			display_name: pickStr(obj, 'display_name'),
+			avatar_url: pickStr(obj, 'avatar_url')
+		}
+		return s
+	} catch (e) {
+		return null
+	}
+}
+
+function detachActiveClient(_keepCaches: boolean): void {
+	try { getCallManager().hangup(false) } catch (e0) {}
+	try { getCallManager().unbind() } catch (e1) {}
+	try {
+		const mx = getMatrix()
+		if (mx != null) mx.stopSync()
+	} catch (e2) {}
+	clearMatrix()
+	// 不清各账号聊天缓存，只卸当前会话
+	clearSession(false)
+	clearPlatformSession()
+}
+
+function applySlot(slot: AccountSlot): boolean {
+	const p = parsePlatformJson(slot.platform_json)
+	let m = parseMatrixJson(slot.matrix_json)
+	if (p == null && m == null) return false
+	if (p != null) savePlatformSession(p)
+	if (m == null && p != null && p.matrix_token.length > 0 && p.matrix_user_id.length > 0 && p.matrix_homeserver.length > 0) {
+		const built: SessionInfo = {
+			homeserver: p.matrix_homeserver,
+			user_id: p.matrix_user_id,
+			access_token: p.matrix_token,
+			device_id: '',
+			display_name: p.nickname,
+			avatar_url: slot.avatar_url
+		}
+		m = built
+	}
+	if (m != null) {
+		try { getCallManager().unbind() } catch (e0) {}
+		const client = new MatrixClient()
+		client.applySession(m.homeserver, m.access_token, m.user_id, m.device_id)
+		setMatrix(client)
+		saveSession(m)
+		bindCallToMatrix()
+		client.startSync()
+	}
+	setCurrentAccountId(slot.id)
+	return true
+}
+
+/**
+ * 切换到列表中的账号。成功返回 true。
+ * 会先把当前账号写回列表，再装载目标账号。
+ */
+export function switchToAccount(id: string): boolean {
+	if (id.length == 0) return false
+	if (id == currentAccountId()) return true
+	const list = loadAccountSlots()
+	let target: AccountSlot | null = null
+	for (let i = 0; i < list.length; i++) {
+		if (list[i].id == id) {
+			target = list[i]
+			break
+		}
+	}
+	if (target == null) return false
+	rememberActiveAccount()
+	detachActiveClient(true)
+	return applySlot(target)
+}
+
+/** 添加账号：保留当前到列表，清空活动会话，去登录页 */
+export function prepareAddAccount(): void {
+	rememberActiveAccount()
+	detachActiveClient(true)
+	setCurrentAccountId('')
+}
+
+/** 展示用：账号主标题 */
+export function accountTitle(slot: AccountSlot): string {
+	if (slot.nickname.length > 0) return slot.nickname
+	if (slot.email.length > 0) return slot.email
+	return slot.id
+}
+
+/** 展示用：副标题 */
+export function accountSub(slot: AccountSlot): string {
+	if (slot.email.length > 0 && slot.nickname.length > 0) return slot.email
+	return ''
+}
+
+let _hooksReady = false
+
+/** App 启动时注册：登录落盘自动记入账号列表 */
+export function registerAccountPersistence(): void {
+	if (_hooksReady) return
+	_hooksReady = true
+	setAfterPlatformSessionSave(() => {
+		rememberActiveAccount()
+	})
+	setAfterSessionSave(() => {
+		rememberActiveAccount()
+	})
+}

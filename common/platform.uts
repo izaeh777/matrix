@@ -118,12 +118,23 @@ function pickObj(obj: UTSJSONObject, key: string): UTSJSONObject | null {
 	}
 }
 
+type PlatformSessionHook = () => void
+let _afterPlatformSessionSave: PlatformSessionHook | null = null
+
+/** 多账号：会话落盘后回调（由 accounts 注册，避免循环依赖） */
+export function setAfterPlatformSessionSave(fn: PlatformSessionHook | null): void {
+	_afterPlatformSessionSave = fn
+}
+
 export function savePlatformSession(session: PlatformSession): void {
 	try {
 		uni.setStorageSync(KEY_PLATFORM, JSON.stringify(session))
 	} catch (e) {
 		console.error('savePlatformSession fail', e)
 	}
+	try {
+		if (_afterPlatformSessionSave != null) _afterPlatformSessionSave()
+	} catch (e2) {}
 }
 
 export function loadPlatformSession(): PlatformSession | null {
