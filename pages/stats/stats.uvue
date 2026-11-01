@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<view class="stats-page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -150,9 +150,7 @@
 		{ key: 'total', label: t('stats.total'), value: '2,569.40', diff: '100.00%', trend: 'down' } as MetricItem,
 		{ key: 'direct', label: t('stats.direct'), value: '8600.00', diff: '100.00%', trend: 'up' } as MetricItem,
 		{ key: 'team', label: t('stats.team'), value: '0', diff: '', trend: 'flat' } as MetricItem,
-		{ key: 'reward', label: t('stats.reward'), value: '0', diff: '', trend: 'flat' } as MetricItem,
-		{ key: 'refund_n', label: t('stats.refundN'), value: '0', diff: '', trend: 'flat' } as MetricItem,
-		{ key: 'refund_m', label: t('stats.refundM'), value: '0', diff: '', trend: 'flat' } as MetricItem
+		{ key: 'reward', label: t('stats.reward'), value: '0', diff: '', trend: 'flat' } as MetricItem
 	] as MetricItem[])
 
 	const xLabels = ref(['20260519', '20260521', '20260523', '20260526'] as string[])

@@ -278,7 +278,7 @@
 	import { getMatrix, errText, errCode, DeviceInfo } from '@/common/matrix.uts'
 	import { loadSession, saveSession, SessionInfo } from '@/common/storage.uts'
 	import { endMatrixSession } from '@/common/app.uts'
-	import { forgetActiveAccount } from '@/common/accounts.uts'
+	import { forgetActiveAccount, updateActiveAccountAvatar } from '@/common/accounts.uts'
 	import { DEFAULT_AVATAR } from '@/common/avatar.uts'
 	import {
 		platformLogout,
@@ -618,7 +618,10 @@
 					if (token.length > 0 && url.indexOf('access_token=') < 0) {
 						url = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'access_token=' + encodeURIComponent(token)
 					}
-					if (url.length > 0) profileAvatar.value = url
+					if (url.length > 0) {
+						profileAvatar.value = url
+						updateActiveAccountAvatar(url)
+					}
 				}
 			}
 		}
@@ -631,10 +634,14 @@
 						const matrix = getMatrix()
 						if (matrix != null) {
 							let url = matrix.mxcToHttp(me.avatar, 160, 160)
-							if (url.length > 0) profileAvatar.value = url
+							if (url.length > 0) {
+								profileAvatar.value = url
+								updateActiveAccountAvatar(url)
+							}
 						}
 					} else {
 						profileAvatar.value = me.avatar
+						updateActiveAccountAvatar(me.avatar)
 					}
 				}
 			}

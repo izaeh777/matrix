@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<view class="profile-page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -58,42 +58,7 @@
 						<text class="renew-text">{{ renewBtnText }}</text>
 					</view>
 				</view>
-				<view class="stat-row">
-					<view class="stat-cell" @click="onSearchMessages">
-						<view class="stat-head">
-						<text class="stat-title">{{ i18n.fav }}</text>
-						<text class="stat-mini">›</text>
-					</view>
-					<text class="stat-empty">{{ i18n.emptyRec }}</text>
-				</view>
-				<view class="stat-split"></view>
-				<view class="stat-cell" @click="onSearchMessages">
-					<view class="stat-head">
-						<text class="stat-title">{{ i18n.history }}</text>
-						<text class="stat-mini">›</text>
-					</view>
-					<text class="stat-empty">{{ i18n.emptyRec }}</text>
-				</view>
 			</view>
-			<view class="quick-row">
-				<view class="quick-item" @click="goStats">
-					<image class="quick-ico" src="/static/login/q4.png" mode="aspectFit"></image>
-					<text class="quick-label">{{ i18n.analytics }}</text>
-				</view>
-				<view class="quick-item" @click="goRooms">
-					<image class="quick-ico" src="/static/login/q3.png" mode="aspectFit"></image>
-					<text class="quick-label">{{ i18n.chat }}</text>
-				</view>
-				<view class="quick-item" @click="onSoon">
-					<image class="quick-ico" src="/static/login/q2.png" mode="aspectFit"></image>
-					<text class="quick-label">{{ i18n.share }}</text>
-				</view>
-				<view class="quick-item" @click="onSoon">
-					<image class="quick-ico" src="/static/login/q1.png" mode="aspectFit"></image>
-					<text class="quick-label">{{ i18n.service }}</text>
-				</view>
-			</view>
-		</view>
 
 			<view class="func-card">
 				<text class="func-title">{{ i18n.center }}</text>
@@ -112,6 +77,12 @@
 				<view class="func-cell" @click="onInvite">
 					<image class="func-ico" src="/static/login/f3.png" mode="aspectFit"></image>
 					<text class="func-label">{{ i18n.invite }}</text>
+					<text class="func-arrow">›</text>
+				</view>
+				<view class="func-line"></view>
+				<view class="func-cell" @click="goStats">
+					<image class="func-ico" src="/static/login/q4.png" mode="aspectFit"></image>
+					<text class="func-label">{{ i18n.promoEarn }}</text>
 					<text class="func-arrow">›</text>
 				</view>
 			</view>
@@ -138,42 +109,15 @@
 
 		<view v-if="showInvite" class="invite-mask" @click="closeInvite">
 			<view class="invite-sheet" @click.stop="">
-				<view class="invite-tabs">
-					<view class="invite-tab" :class="inviteTab == 'reg' ? 'invite-tab-on' : ''" @click="inviteTab = 'reg'">
-						<text class="invite-tab-text" :class="inviteTab == 'reg' ? 'invite-tab-text-on' : ''">{{ t('invite.tabReg') }}</text>
-					</view>
-					<view class="invite-tab" :class="inviteTab == 'friend' ? 'invite-tab-on' : ''" @click="inviteTab = 'friend'">
-						<text class="invite-tab-text" :class="inviteTab == 'friend' ? 'invite-tab-text-on' : ''">{{ t('invite.tabFriend') }}</text>
-					</view>
-				</view>
-				<text class="invite-title">{{ inviteTab == 'reg' ? t('invite.title') : t('invite.friendTitle') }}</text>
-				<text class="invite-desc">{{ inviteTab == 'reg' ? t('invite.desc') : t('invite.friendDesc') }}</text>
-				<image class="invite-qr" :src="inviteTab == 'reg' ? inviteQr : friendQr" mode="aspectFit"></image>
-				<view v-if="inviteTab == 'reg'" class="code-pill" @click="copyInviteCode">
-					<text class="code-text">{{ t('invite.myCode') }} {{ inviteCodeDisplay }}</text>
+				<text class="invite-title">{{ t('invite.title') }}</text>
+				<text class="invite-desc">{{ t('invite.linkDesc') }}</text>
+				<view class="code-pill code-pill-link" @click="copyInviteLink">
+					<text class="code-text code-text-link">{{ inviteLinkDisplay }}</text>
 					<text class="code-copy">⧉</text>
 				</view>
-				<view v-else class="code-pill" @click="copyFriendLink">
-					<text class="code-text">{{ t('invite.myFriendId') }} {{ friendMxidShort }}</text>
-					<text class="code-copy">⧉</text>
-				</view>
-				<text class="invite-scan-tip">{{ t('invite.scanTip') }}</text>
-				<view class="invite-actions">
-					<view class="invite-action" @click="onScanFriend">
-						<text class="invite-action-text">{{ t('invite.scan') }}</text>
-					</view>
-					<view class="invite-action" @click="onGoAddFriend">
-						<text class="invite-action-text">{{ t('invite.searchUser') }}</text>
-					</view>
-				</view>
-				<view v-if="showCodeInput" class="code-input-wrap">
-					<input class="code-input" v-model="enterCode" :placeholder="t('invite.inputPh')" />
-					<view class="code-go" @click="applyFriendCode">
-						<text class="code-go-text">{{ t('invite.add') }}</text>
-					</view>
-				</view>
-				<view class="invite-btn" @click="onEnterCode">
-					<text class="invite-btn-text">{{ showCodeInput ? t('invite.collapse') : t('invite.enterUser') }}</text>
+				<text class="invite-scan-tip">{{ t('invite.myCode') }} {{ inviteCodeDisplay }}</text>
+				<view class="invite-btn" @click="copyInviteLink">
+					<text class="invite-btn-text">{{ t('invite.copyLink') }}</text>
 				</view>
 			</view>
 		</view>
@@ -290,19 +234,16 @@
 		planPayPrice,
 		planPayPriceText,
 		isPlanDiscountActive,
-		findFriendByUsername,
 		sendWithdrawEmailCode,
 		billingWithdraw,
 		RolePlan
 	} from '@/common/platform.uts'
 	import { loadTpWalletAddress } from '@/common/tp-wallet.uts'
 	import { tpTransferUsdt, openTpUsdtTransfer, openTpDeeplinkNow, buildTpUsdtTransferUrl, waitBscTxConfirmed, isTpAppInstalled, isH5DesktopBrowser, isH5InAppBrowser, isH5InWalletDapp, h5DappTransferUsdt } from '@/common/tp-wallet.uts'
-	import { inviteRegisterQrUrl, friendAddQrUrl, matrixIdFromFriendCode } from '@/common/cms.uts'
-	import { toMatrixUserId } from '@/common/config.uts'
-	import { openChat } from '@/common/app.uts'
-	import { scanAddFriendOrInvite } from '@/common/deeplink.uts'
+	import { inviteRegisterLink } from '@/common/cms.uts'
 	import { getLocaleLabel, openLanguagePage, t as __i18nT, tx } from '@/common/i18n.uts'
 	import { DEFAULT_AVATAR } from '@/common/avatar.uts'
+	import { updateActiveAccountAvatar } from '@/common/accounts.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
@@ -312,17 +253,11 @@
 
 	type ProfileI18n = {
 		balance: string
-		fav: string
-		history: string
-		emptyRec: string
-		analytics: string
-		chat: string
-		share: string
-		service: string
 		center: string
 		myPublish: string
 		follow: string
 		invite: string
+		promoEarn: string
 		withdraw: string
 		withdrawTitle: string
 		withdrawDesc: string
@@ -345,17 +280,11 @@
 	function buildProfileI18n(): ProfileI18n {
 		return {
 			balance: t('profile.balance'),
-			fav: t('profile.fav'),
-			history: t('profile.history'),
-			emptyRec: t('profile.emptyRec'),
-			analytics: t('profile.analytics'),
-			chat: t('profile.chat'),
-			share: t('profile.share'),
-			service: t('profile.service'),
 			center: t('profile.center'),
 			myPublish: t('profile.myPublish'),
 			follow: t('profile.follow'),
 			invite: t('profile.invite'),
+			promoEarn: t('profile.promoEarn'),
 			withdraw: t('profile.withdraw'),
 			withdrawTitle: t('profile.withdrawTitle'),
 			withdrawDesc: t('profile.withdrawDesc'),
@@ -470,10 +399,6 @@
 	})
 	const avatarUrl = ref<string>(DEFAULT_AVATAR)
 	const showInvite = ref<boolean>(false)
-	/** reg=邀请注册码 friend=加好友码；扫码按链接类型区分行为 */
-	const inviteTab = ref<string>('reg')
-	const showCodeInput = ref<boolean>(false)
-	const enterCode = ref<string>('')
 	const showPlans = ref<boolean>(false)
 	const plansLoading = ref<boolean>(false)
 	const paying = ref<boolean>(false)
@@ -496,27 +421,8 @@
 		if (myInviteCode.value.length > 0) return myInviteCode.value
 		return accountName.value as string
 	})
-	const inviteQr = computed((): string => inviteRegisterQrUrl(inviteCodeDisplay.value as string))
-	const friendMxid = computed((): string => {
-		const id = (userId.value as string).trim()
-		if (id.length == 0) return ''
-		if (id.indexOf('@') == 0) return id
-		return toMatrixUserId(id)
-	})
-	const friendMxidShort = computed((): string => {
-		const id = friendMxid.value as string
-		if (id.length == 0) return ''
-		if (id.indexOf('@') == 0) {
-			const colon = id.indexOf(':')
-			if (colon > 1) return id.substring(1, colon)
-			return id.substring(1)
-		}
-		return id
-	})
-	const friendQr = computed((): string => {
-		const id = friendMxid.value as string
-		if (id.length == 0) return ''
-		return friendAddQrUrl(id)
+	const inviteLinkDisplay = computed((): string => {
+		return inviteRegisterLink(inviteCodeDisplay.value as string)
 	})
 	let offSync: (() => void) | null = null
 
@@ -554,6 +460,7 @@
 			}
 			if (me.avatar.length > 0 && me.avatar.indexOf('http') == 0) {
 				avatarUrl.value = me.avatar
+				updateActiveAccountAvatar(me.avatar)
 			}
 		} catch (e) {
 			console.warn('拉取余额失败', e)
@@ -585,7 +492,10 @@
 				if (token.length > 0 && url.indexOf('access_token=') < 0) {
 					url = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'access_token=' + encodeURIComponent(token)
 				}
-				if (url.length > 0) avatarUrl.value = url
+				if (url.length > 0) {
+					avatarUrl.value = url
+					updateActiveAccountAvatar(url)
+				}
 			}
 		} catch (e) {
 			console.warn('拉取 profile 失败', e)
@@ -616,10 +526,6 @@
 			clearInterval(t as number)
 		}
 	})
-
-	function onSoon() {
-		uni.showToast({ title: t('common.soon'), icon: 'none' })
-	}
 
 	function onLang(): void {
 		openLanguagePage()
@@ -1243,9 +1149,6 @@
 	function goContacts() {
 		uni.redirectTo({ url: '/pages/contacts/contacts' })
 	}
-	function onSearchMessages() {
-		uni.navigateTo({ url: '/pages/search/search' })
-	}
 	function onDiscover() {
 		uni.redirectTo({ url: '/pages/discover/discover' })
 	}
@@ -1256,94 +1159,30 @@
 		uni.navigateTo({ url: '/pages/settings/settings' })
 	}
 	function onInvite() {
-		const id = userId.value as string
-		if (id.length == 0) {
-			uni.showToast({ title: t('invite.noAccount'), icon: 'none' })
-			return
-		}
-		showCodeInput.value = false
-		enterCode.value = ''
-		showInvite.value = true
-	}
-
-	function closeInvite(): void {
-		showInvite.value = false
-		inviteTab.value = 'reg'
-		showCodeInput.value = false
-	}
-
-	function copyFriendLink(): void {
-		const id = friendMxid.value as string
-		if (id.length == 0) {
-			uni.showToast({ title: t('invite.noAccount'), icon: 'none' })
-			return
-		}
-		const link = 'itiklink://friend?u=' + encodeURIComponent(id)
-		uni.setClipboardData({
-			data: link,
-			success: () => {
-				uni.showToast({ title: t('invite.friendCopied'), icon: 'none' })
-			}
-		})
-	}
-
-	function copyInviteCode(): void {
 		const code = inviteCodeDisplay.value as string
 		if (code.length == 0) {
 			uni.showToast({ title: t('invite.noCode'), icon: 'none' })
 			return
 		}
-		uni.setClipboardData({
-			data: code,
-			success: () => {
-				uni.showToast({ title: t('invite.copied'), icon: 'none' })
-			}
-		})
+		showInvite.value = true
 	}
 
-	function onEnterCode(): void {
-		showCodeInput.value = !showCodeInput.value
-	}
-
-	function onScanFriend(): void {
+	function closeInvite(): void {
 		showInvite.value = false
-		scanAddFriendOrInvite()
 	}
 
-	function onGoAddFriend(): void {
-		showInvite.value = false
-		uni.navigateTo({ url: '/pages/contacts/add' })
-	}
-
-	async function applyFriendCode(): Promise<void> {
-		const code = enterCode.value.trim()
-		if (code.length == 0) {
-			uni.showToast({ title: t('invite.needUser'), icon: 'none' })
+	function copyInviteLink(): void {
+		const link = inviteLinkDisplay.value as string
+		if (link.length == 0) {
+			uni.showToast({ title: t('invite.noCode'), icon: 'none' })
 			return
 		}
-		const matrix = getMatrix()
-		if (matrix == null) return
-		uni.showLoading({ title: t('invite.searching'), mask: true })
-		try {
-			let target = ''
-			if (code.indexOf('@') == 0) {
-				target = code
-			} else {
-				const found = await findFriendByUsername(code)
-				if (found.length > 0 && found[0].imUser.length > 0) {
-					target = found[0].imUser
-				} else {
-					target = matrixIdFromFriendCode(code)
-				}
+		uni.setClipboardData({
+			data: link,
+			success: () => {
+				uni.showToast({ title: t('invite.linkCopied'), icon: 'none' })
 			}
-			const rid = await matrix.startDM(target)
-			uni.hideLoading()
-			showInvite.value = false
-			openChat(rid)
-		} catch (e) {
-			uni.hideLoading()
-			uni.showToast({ title: t('invite.notFound'), icon: 'none' })
-		}
+		})
 	}
 </script>
 
@@ -1769,10 +1608,22 @@
 		padding: 22rpx 24rpx;
 		margin-bottom: 20rpx;
 	}
+	.code-pill-link {
+		border-radius: 24rpx;
+		padding: 20rpx 24rpx;
+		align-items: flex-start;
+	}
 	.code-text {
 		font-size: 28rpx;
 		color: #2f6ff2;
 		font-weight: 600;
+	}
+	.code-text-link {
+		flex: 1;
+		font-size: 24rpx;
+		line-height: 36rpx;
+		lines: 3;
+		text-overflow: ellipsis;
 	}
 	.code-copy {
 		font-size: 28rpx;

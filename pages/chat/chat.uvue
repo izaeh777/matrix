@@ -21,41 +21,6 @@
 				</view>
 			</view>
 
-			<view
-				v-if="stripSlots.length > 0"
-				class="member-strip-wrap"
-				@touchstart.stop="onStripTouchStart"
-				@touchmove.stop="onStripTouchMove"
-				@touchend.stop="onStripTouchEnd"
-				@touchcancel.stop="onStripTouchEnd"
-				@mousedown="onStripMouseDown"
-				@mousemove="onStripMouseMove"
-				@mouseup="onStripMouseUp"
-				@mouseleave="onStripMouseUp"
-			>
-				<view class="member-strip-row" :style="stripTrackStyle">
-					<view
-						v-for="(slot, si) in stripSlots"
-						:key="slot.key"
-						class="member-chip"
-						:class="slot.focused ? 'member-chip-focus' : ''"
-					>
-						<view class="member-ava-wrap">
-							<image
-								class="member-ava"
-								:src="stripAvaSrc(slot)"
-								mode="aspectFill"
-								@error="onStripAvaError(slot)"
-							></image>
-							<view v-if="slot.unread && !slot.focused" class="member-dot"></view>
-						</view>
-					</view>
-				</view>
-			</view>
-			<!-- 效果图：头像落入中间下凹弧 -->
-			<view class="header-wave-wrap">
-				<image class="header-wave-img" src="/static/chat/header-wave.png" mode="scaleToFill"></image>
-			</view>
 		</view>
 
 		<view v-if="roomEncrypted" class="encrypt-banner">
@@ -3708,14 +3673,14 @@
 	.header-wave-wrap {
 		position: relative;
 		width: 100%;
-		height: 100rpx;
-		margin-top: -44rpx;
+		height: 56rpx;
+		margin-top: -8rpx;
 		z-index: 1;
 		overflow: visible;
 	}
 	.header-wave-img {
 		width: 100%;
-		height: 100rpx;
+		height: 56rpx;
 	}
 	/* #ifdef H5 */
 	.chat-page ::-webkit-scrollbar {
@@ -3735,22 +3700,23 @@
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
-		padding: 40rpx 20rpx 0 20rpx;
+		padding: 12rpx 20rpx;
 		background-color: #ffffff;
 		width: 100%;
 		height: 88rpx;
+		z-index: 3;
 	}
 
 	.topbar-center {
 		position: absolute;
 		left: 100rpx;
 		right: 100rpx;
-		top: 40rpx;
+		top: 0;
 		bottom: 0;
 		align-items: center;
 		justify-content: center;
 		overflow: hidden;
-		z-index: 1;
+		z-index: 3;
 	}
 
 	.topbar-title {

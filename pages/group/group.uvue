@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<view class="group-page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -14,7 +14,7 @@
 			<view class="card">
 				<view class="member-grid">
 					<view
-						v-for="m in members"
+						v-for="m in displayMembers"
 						:key="m.user_id"
 						class="member-cell"
 						@click="onMemberTap(m)"
@@ -120,6 +120,21 @@
 			return t('group.info')
 		}
 		return t('group.info')
+	})
+
+	/** 两人会话/群：头像区不展示自己 */
+	const displayMembers = computed((): Array<RoomMember> => {
+		const list = members.value
+		if (list.length != 2) return list
+		const matrix = getMatrix()
+		if (matrix == null) return list
+		const me = matrix.userId
+		if (me.length == 0) return list
+		const out: Array<RoomMember> = []
+		for (let i = 0; i < list.length; i++) {
+			if (list[i].user_id != me) out.push(list[i])
+		}
+		return out
 	})
 
 	const topicText = computed((): string => {

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<view class="home-page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -6,12 +6,11 @@
 		<view class="home-top">
 			<image class="brand-logo" src="/static/login/logo.png" mode="aspectFit"></image>
 			<view class="user-pill">
-				<view class="pill-user" @click="goProfile">
+				<view class="pill-user">
 					<image class="pill-avatar" :src="avatarUrl" mode="aspectFill"></image>
 					<text class="pill-name">{{ shortName }}</text>
-					<text class="pill-caret">▾</text>
 				</view>
-				<view class="pill-bell" @click="goNotify">
+				<view class="pill-bell">
 					<image class="bell-img" src="/static/login/k1.png" mode="aspectFit"></image>
 				</view>
 			</view>

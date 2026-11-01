@@ -6,6 +6,7 @@
 	import { handleLaunchDeepLink } from '@/common/deeplink.uts'
 	import { checkAppUpdate } from '@/common/app-update.uts'
 	import { registerAccountPersistence, rememberActiveAccount } from '@/common/accounts.uts'
+	import { bindMsgSound, rebindMsgSound } from '@/common/msg-sound.uts'
 	import { t } from '@/common/i18n.uts'
 
 	// #ifdef APP-ANDROID || APP-HARMONY
@@ -38,6 +39,7 @@
 			matrix.startSync()
 		}
 		try { rememberActiveAccount() } catch (e0) {}
+		try { bindMsgSound() } catch (e1) {}
 		maybeTpSchema()
 		maybeAppDeepLink()
 		// #ifdef APP
@@ -52,6 +54,7 @@
 		bindCallToMatrix()
 		const m = getMatrix()
 		if (m != null) m.startSync()
+		try { rebindMsgSound() } catch (e2) {}
 		maybeTpSchema()
 		maybeAppDeepLink()
 	})

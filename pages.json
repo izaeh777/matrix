@@ -179,7 +179,7 @@
 		{
 			"path": "pages/stats/stats",
 			"style": {
-				"navigationBarTitleText": "Stats",
+				"navigationBarTitleText": "Promo earnings",
 				"navigationStyle": "custom",
 				"backgroundColor": "#F5F6F8",
 				"backgroundColorContent": "#F5F6F8"

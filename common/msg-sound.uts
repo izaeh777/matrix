@@ -1,0 +1,142 @@
+/**
+ * 新消息提示音：他人发来、且当前不在该聊天页时播放。
+ */
+import { getMatrix, MatrixEvent } from './matrix.uts'
+
+const SOUND_SRC = '/static/sound/msg.wav'
+const MIN_INTERVAL_MS = 700
+
+let lastPlayAt: number = 0
+let bound: boolean = false
+let syncReady: boolean = false
+let offTimeline: (() => void) | null = null
+let offSync: (() => void) | null = null
+
+function currentChatRoomId(): string {
+	try {
+		const pages = getCurrentPages()
+		if (pages.length > 0) {
+			const top = pages[pages.length - 1]
+			let route = ''
+			try { route = '' + top.route } catch (e0) { route = '' }
+			if (route.indexOf('pages/chat/chat') >= 0) {
+				try {
+					const opts = top.options as UTSJSONObject
+					let rid = ''
+					try {
+						const v = opts['roomId']
+						if (v != null) rid = ('' + v).trim()
+					} catch (e1) {}
+					if (rid.length == 0) {
+						try {
+							const s = opts.getString('roomId')
+							if (s != null) rid = s.trim()
+						} catch (e2) {}
+					}
+					if (rid.length > 0) {
+						try { return decodeURIComponent(rid) } catch (e3) { return rid }
+					}
+				} catch (e4) {}
+				try {
+					const raw = uni.getStorageSync('last_chat_room')
+					if (raw != null) {
+						const s = ('' + raw).trim()
+						if (s.length > 0) return s
+					}
+				} catch (e5) {}
+			}
+		}
+	} catch (e) {}
+	return ''
+}
+
+function isReplaceEdit(ev: MatrixEvent): boolean {
+	try {
+		const c = ev.content
+		if (c == null) return false
+		let rel: UTSJSONObject | null = null
+		try {
+			const v = c['m.relates_to']
+			if (v != null) rel = v as UTSJSONObject
+		} catch (e0) {
+			rel = null
+		}
+		if (rel == null) return false
+		let rt = ''
+		try {
+			const v2 = rel['rel_type']
+			if (v2 != null) rt = '' + v2
+		} catch (e1) {}
+		return rt == 'm.replace'
+	} catch (e) {
+		return false
+	}
+}
+
+export function playMsgSound(): void {
+	const now = Date.now()
+	if (now - lastPlayAt < MIN_INTERVAL_MS) return
+	lastPlayAt = now
+	try {
+		const a = uni.createInnerAudioContext()
+		try { a.obeyMuteSwitch = false } catch (e0) {}
+		try { a.volume = 1 } catch (e1) {}
+		a.autoplay = true
+		a.src = SOUND_SRC
+		a.onEnded(() => {
+			try { a.destroy() } catch (e2) {}
+		})
+		a.onError((_err) => {
+			try { a.destroy() } catch (e3) {}
+		})
+	} catch (e) {
+		console.warn('playMsgSound fail', e)
+	}
+}
+
+function onIncoming(ev: MatrixEvent, roomId: string): void {
+	if (!syncReady) return
+	if (roomId.length == 0) return
+	if (ev.type != 'm.room.message' && ev.type != 'm.room.encrypted') return
+	if (isReplaceEdit(ev)) return
+	const matrix = getMatrix()
+	if (matrix == null) return
+	const sender = ev.sender
+	if (sender == null || sender.length == 0) return
+	if (sender == matrix.userId) return
+	try {
+		if (matrix.isRoomMuted(roomId)) return
+	} catch (e0) {}
+	const viewing = currentChatRoomId()
+	if (viewing.length > 0 && viewing == roomId) return
+	playMsgSound()
+}
+
+/** App 启动 / 登录后绑定；可重复调用（幂等） */
+export function bindMsgSound(): void {
+	const matrix = getMatrix()
+	if (matrix == null) return
+	if (bound) return
+	bound = true
+	offSync = matrix.onSync((state: string, _err: string) => {
+		if (state == 'PREPARED' || state == 'SYNCING') syncReady = true
+	})
+	offTimeline = matrix.onTimeline((ev: MatrixEvent, roomId: string) => {
+		onIncoming(ev, roomId)
+	})
+}
+
+/** 切换账号后重新绑定 */
+export function rebindMsgSound(): void {
+	if (offTimeline != null) {
+		try { offTimeline() } catch (e0) {}
+		offTimeline = null
+	}
+	if (offSync != null) {
+		try { offSync() } catch (e1) {}
+		offSync = null
+	}
+	bound = false
+	syncReady = false
+	bindMsgSound()
+}

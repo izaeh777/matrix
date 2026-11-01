@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<view class="rooms-page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -15,73 +15,14 @@
 				<view class="filter-pill" :class="{ 'filter-on': filterTab == 'all' }" @click="filterTab = 'all'">
 					<text class="filter-text" :class="{ 'filter-text-on': filterTab == 'all' }">{{ i18n.filterAll }}</text>
 				</view>
-				<view class="filter-pill" :class="{ 'filter-on': filterTab == 'recent' }" @click="filterTab = 'recent'">
-					<text class="filter-text" :class="{ 'filter-text-on': filterTab == 'recent' }">{{ i18n.filterRecent }}</text>
+				<view class="filter-pill" :class="{ 'filter-on': filterTab == 'talk' }" @click="filterTab = 'talk'">
+					<text class="filter-text" :class="{ 'filter-text-on': filterTab == 'talk' }">{{ i18n.filterTalk }}</text>
 				</view>
-				<view class="filter-pill" :class="{ 'filter-on': filterTab == 'unread' }" @click="filterTab = 'unread'">
-					<text class="filter-text" :class="{ 'filter-text-on': filterTab == 'unread' }">{{ i18n.filterUnread }}</text>
-				</view>
-			</view>
-		</view>
-
-		<!-- #ifdef H5 -->
-		<view v-if="stripRooms.length > 0" class="strip-h5">
-			<view class="strip-row" :style="{ width: stripWidth }">
-				<view
-					v-for="room in stripRooms"
-					:key="'s-' + room.room_id"
-					class="strip-item"
-					@click="onOpenRoom(room.room_id)"
-				>
-					<view class="strip-ava-wrap">
-						<view v-if="roomShowGrid(room)" class="group-ava-grid group-ava-grid-sm" :class="'gava-n' + roomGridCount(room)">
-							<image
-								v-for="(src, gi) in roomGridSrcs(room)"
-								:key="'sg-' + room.room_id + '-' + gi"
-								class="group-ava-cell"
-								:src="src"
-								mode="aspectFill"
-							></image>
-						</view>
-						<image v-else class="strip-ava" :src="roomAvatarSrc(room)" mode="aspectFill"></image>
-						<view v-if="roomHasUnread(room)" class="strip-badge">
-							<text class="strip-badge-text">{{ roomUnreadText(room) }}</text>
-						</view>
-					</view>
-					<text class="strip-name">{{ roomTitleShort(room) }}</text>
+				<view class="filter-pill" :class="{ 'filter-on': filterTab == 'room' }" @click="filterTab = 'room'">
+					<text class="filter-text" :class="{ 'filter-text-on': filterTab == 'room' }">{{ i18n.filterRoom }}</text>
 				</view>
 			</view>
 		</view>
-		<!-- #endif -->
-		<!-- #ifndef H5 -->
-		<scroll-view v-if="stripRooms.length > 0" class="strip-scroll" direction="horizontal" :show-scrollbar="false" :rebound="false">
-			<view class="strip-row" :style="{ width: stripWidth }">
-				<view
-					v-for="room in stripRooms"
-					:key="'s-' + room.room_id"
-					class="strip-item"
-					@click="onOpenRoom(room.room_id)"
-				>
-					<view class="strip-ava-wrap">
-						<view v-if="roomShowGrid(room)" class="group-ava-grid group-ava-grid-sm" :class="'gava-n' + roomGridCount(room)">
-							<image
-								v-for="(src, gi) in roomGridSrcs(room)"
-								:key="'sg2-' + room.room_id + '-' + gi"
-								class="group-ava-cell"
-								:src="src"
-								mode="aspectFill"
-							></image>
-						</view>
-						<image v-else class="strip-ava" :src="roomAvatarSrc(room)" mode="aspectFill"></image>
-						<view v-if="roomHasUnread(room)" class="strip-badge">
-							<text class="strip-badge-text">{{ roomUnreadText(room) }}</text>
-						</view>
-					</view>
-					<text class="strip-name">{{ roomTitleShort(room) }}</text>
-				</view>
-			</view>
-		</scroll-view>
-		<!-- #endif -->
 
 		<view v-if="incomingCall" class="incoming-call-bar">
 			<view class="incoming-call-info">
@@ -245,8 +186,8 @@
 	type RoomsI18n = {
 		title: string
 		filterAll: string
-		filterRecent: string
-		filterUnread: string
+		filterTalk: string
+		filterRoom: string
 		reject: string
 		accept: string
 		answer: string
@@ -274,8 +215,8 @@
 	const i18n = ref<RoomsI18n>({
 		title: t('chat.title'),
 		filterAll: t('chat.filterAll'),
-		filterRecent: t('chat.filterRecent'),
-		filterUnread: t('chat.filterUnread'),
+		filterTalk: t('chat.filterTalk'),
+		filterRoom: t('chat.filterRoom'),
 		reject: t('chat.reject'),
 		accept: t('chat.accept'),
 		answer: t('chat.answer'),
@@ -331,23 +272,23 @@
 	const filteredRooms = computed((): Array<MatrixRoom> => {
 		const list = rooms.value
 		const tab = filterTab.value
-		if (tab == 'unread') {
+		if (tab == 'talk') {
+			// 洽谈：单聊
 			const out: Array<MatrixRoom> = []
 			for (let i = 0; i < list.length; i++) {
-				if (roomHasUnread(list[i])) out.push(list[i])
+				if (!roomIsGroup(list[i])) out.push(list[i])
 			}
 			return out
 		}
-		if (tab == 'recent') {
+		if (tab == 'room') {
+			// 洽谈室：群聊
 			const out: Array<MatrixRoom> = []
-			const now = Date.now()
 			for (let i = 0; i < list.length; i++) {
-				const ts = list[i].last_message_ts
-				if (ts != null && ts > 0 && (now - ts) < 7 * 86400000) out.push(list[i])
+				if (roomIsGroup(list[i])) out.push(list[i])
 			}
-			if (out.length > 0) return out
-			return list
+			return out
 		}
+		// 全部
 		return list
 	})
 
@@ -1000,8 +941,8 @@
 		i18n.value = {
 			title: t('chat.title'),
 			filterAll: t('chat.filterAll'),
-			filterRecent: t('chat.filterRecent'),
-			filterUnread: t('chat.filterUnread'),
+			filterTalk: t('chat.filterTalk'),
+			filterRoom: t('chat.filterRoom'),
 			reject: t('chat.reject'),
 			accept: t('chat.accept'),
 			answer: t('chat.answer'),

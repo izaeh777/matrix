@@ -629,6 +629,13 @@ export function inviteQrUrl(userId: string): string {
 	return friendAddQrUrl(userId)
 }
 
+/** 邀请注册链接：带 invite 参数，打开注册页并预填邀请码 */
+export function inviteRegisterLink(inviteCode: string): string {
+	const code = inviteCode.trim()
+	if (code.length == 0) return ''
+	return CMS_HOST + '/#/pages/login/login-mail?mode=register&invite=' + encodeURIComponent(code)
+}
+
 /** 邀请注册二维码：扫码后带 invite_code 进登录/注册 */
 export function inviteRegisterQrUrl(inviteCode: string): string {
 	const code = inviteCode.trim()

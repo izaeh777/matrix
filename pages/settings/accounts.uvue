@@ -19,7 +19,12 @@
 				@click="onTapAccount(idx)"
 				@longpress="onLongRemove(idx)"
 			>
-				<image class="row-avatar" :src="avatarOf(item)" mode="aspectFill"></image>
+				<image
+					class="row-avatar"
+					:src="avatarSrc(item)"
+					mode="aspectFill"
+					@error="onAvatarError(item)"
+				></image>
 				<view class="row-main">
 					<text class="row-title">{{ titleOf(item) }}</text>
 					<text v-if="subOf(item).length > 0" class="row-sub">{{ subOf(item) }}</text>
@@ -53,6 +58,7 @@
 		currentAccountId,
 		accountTitle,
 		accountSub,
+		accountAvatarSrc,
 		switchToAccount,
 		prepareAddAccount,
 		removeAccountById,
@@ -68,6 +74,7 @@
 	const rows = ref<Array<AccountSlot>>([] as Array<AccountSlot>)
 	const currentId = ref<string>('')
 	const busy = ref<boolean>(false)
+	const avaFailed = ref<Map<string, boolean>>(new Map<string, boolean>())
 	let switching = false
 
 	function refreshLabels(): void {
@@ -80,6 +87,7 @@
 
 	function reload(): void {
 		rememberActiveAccount()
+		avaFailed.value = new Map<string, boolean>()
 		rows.value = loadAccountSlots()
 		currentId.value = currentAccountId()
 	}
@@ -92,9 +100,20 @@
 		return accountSub(item)
 	}
 
-	function avatarOf(item: AccountSlot): string {
-		if (item.avatar_url.length > 0) return item.avatar_url
-		return defaultAvatar(item.id)
+	function avatarSrc(item: AccountSlot): string {
+		if (avaFailed.value.get(item.id) == true) return defaultAvatar(item.id)
+		return accountAvatarSrc(item)
+	}
+
+	function onAvatarError(item: AccountSlot): void {
+		if (item.id.length == 0) return
+		if (avaFailed.value.get(item.id) == true) return
+		const next = new Map<string, boolean>()
+		avaFailed.value.forEach((v, k) => {
+			next.set(k, v)
+		})
+		next.set(item.id, true)
+		avaFailed.value = next
 	}
 
 	function onBack(): void {
