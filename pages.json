@@ -184,6 +184,24 @@
 				"backgroundColor": "#F5F6F8",
 				"backgroundColorContent": "#F5F6F8"
 			}
+		},
+		{
+			"path": "pages/profile/team",
+			"style": {
+				"navigationBarTitleText": "My team",
+				"navigationStyle": "custom",
+				"backgroundColor": "#F5F6F8",
+				"backgroundColorContent": "#F5F6F8"
+			}
+		},
+		{
+			"path": "pages/profile/following",
+			"style": {
+				"navigationBarTitleText": "Following",
+				"navigationStyle": "custom",
+				"backgroundColor": "#F5F6F8",
+				"backgroundColorContent": "#F5F6F8"
+			}
 		}
 	],
 	"globalStyle": {

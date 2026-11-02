@@ -1,0 +1,217 @@
+<template>
+	<view class="follow-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">{{ pageTitle }}</text>
+			<view class="topbar-right"></view>
+		</view>
+
+		<scroll-view class="body" direction="vertical" :show-scrollbar="false" :rebound="false">
+			<view v-if="loading" class="state-row">
+				<text class="state-text">{{ loadingText }}</text>
+			</view>
+			<view v-else-if="rows.length == 0" class="state-row">
+				<text class="state-text">{{ emptyText }}</text>
+			</view>
+			<view v-else class="list-card">
+				<view
+					v-for="(item, idx) in rows"
+					:key="item.target_id + '-' + idx"
+					class="item-row"
+				>
+					<view class="item-main" @click="onTapItem(item)">
+						<text class="item-title">{{ item.title }}</text>
+						<text v-if="item.subtitle.length > 0" class="item-sub">{{ item.subtitle }}</text>
+					</view>
+					<view class="unfollow-btn" @click="onUnfollow(item, idx)">
+						<text class="unfollow-text">{{ unfollowText }}</text>
+					</view>
+				</view>
+			</view>
+			<view class="scroll-pad"></view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref } from 'vue'
+	import { t as __i18nT } from '@/common/i18n.uts'
+	import {
+		fetchFollowing,
+		unfollowRelation,
+		RelationItem
+	} from '@/common/platform.uts'
+	import { openArchiveDetail } from '@/common/cms.uts'
+
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+	const pageTitle = ref<string>(t('follow.title'))
+	const loadingText = ref<string>(t('common.loading'))
+	const emptyText = ref<string>(t('follow.empty'))
+	const unfollowText = ref<string>(t('follow.unfollow'))
+	const loading = ref<boolean>(false)
+	const busy = ref<boolean>(false)
+	const rows = ref<Array<RelationItem>>([] as Array<RelationItem>)
+
+	function goBack(): void {
+		uni.navigateBack({})
+	}
+
+	function refreshLabels(): void {
+		pageTitle.value = t('follow.title')
+		loadingText.value = t('common.loading')
+		emptyText.value = t('follow.empty')
+		unfollowText.value = t('follow.unfollow')
+	}
+
+	async function loadList(): Promise<void> {
+		loading.value = true
+		try {
+			rows.value = await fetchFollowing('project')
+		} catch (e) {
+			rows.value = [] as Array<RelationItem>
+			let msg = ''
+			try { msg = ('' + e).trim() } catch (e0) { msg = '' }
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? msg : t('follow.loadFail'), icon: 'none' })
+		}
+		loading.value = false
+	}
+
+	function onTapItem(item: RelationItem): void {
+		const id = parseInt(item.target_id)
+		if (id == id && id > 0) openArchiveDetail(id)
+	}
+
+	async function onUnfollow(item: RelationItem, idx: number): Promise<void> {
+		if (busy.value) return
+		busy.value = true
+		try {
+			await unfollowRelation('project', item.target_id)
+			const next: Array<RelationItem> = [] as Array<RelationItem>
+			for (let i = 0; i < rows.value.length; i++) {
+				if (i != idx) next.push(rows.value[i])
+			}
+			rows.value = next
+			uni.showToast({ title: t('follow.unfollowed'), icon: 'none' })
+		} catch (e) {
+			let msg = ''
+			try { msg = ('' + e).trim() } catch (e0) { msg = '' }
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? msg : t('follow.unfollowFail'), icon: 'none' })
+		}
+		busy.value = false
+	}
+
+	onShow(() => {
+		refreshLabels()
+		loadList()
+	})
+</script>
+
+<style>
+	.follow-page {
+		flex: 1;
+		background-color: #f5f6f8;
+		flex-direction: column;
+	}
+	.status-bar-holder {
+		height: var(--status-bar-height);
+		background-color: #ffffff;
+	}
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		height: 88rpx;
+		padding: 0 16rpx;
+		background-color: #ffffff;
+		border-bottom-width: 1rpx;
+		border-bottom-style: solid;
+		border-bottom-color: #f0f0f0;
+	}
+	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.back-text {
+		font-size: 48rpx;
+		color: #222222;
+		line-height: 48rpx;
+	}
+	.topbar-title {
+		flex: 1;
+		text-align: center;
+		font-size: 34rpx;
+		font-weight: 600;
+		color: #111111;
+	}
+	.topbar-right {
+		width: 72rpx;
+	}
+	.body {
+		flex: 1;
+		padding: 24rpx;
+	}
+	.state-row {
+		padding: 80rpx 24rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.state-text {
+		font-size: 28rpx;
+		color: #9ca3af;
+	}
+	.list-card {
+		background-color: #ffffff;
+		border-radius: 24rpx;
+		overflow: hidden;
+	}
+	.item-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 28rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-style: solid;
+		border-bottom-color: #f3f4f6;
+	}
+	.item-main {
+		flex: 1;
+		flex-direction: column;
+		padding-right: 16rpx;
+	}
+	.item-title {
+		font-size: 30rpx;
+		color: #111111;
+		font-weight: 500;
+	}
+	.item-sub {
+		margin-top: 8rpx;
+		font-size: 24rpx;
+		color: #9ca3af;
+	}
+	.unfollow-btn {
+		padding: 12rpx 22rpx;
+		border-radius: 28rpx;
+		border-width: 1rpx;
+		border-style: solid;
+		border-color: #d1d5db;
+		background-color: #ffffff;
+	}
+	.unfollow-text {
+		font-size: 24rpx;
+		color: #6b7280;
+	}
+	.scroll-pad {
+		height: 40rpx;
+	}
+</style>

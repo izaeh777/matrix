@@ -1,0 +1,199 @@
+<template>
+	<view class="team-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">{{ pageTitle }}</text>
+			<view class="topbar-right"></view>
+		</view>
+
+		<scroll-view class="body" direction="vertical" :show-scrollbar="false" :rebound="false">
+			<view v-if="loading" class="state-row">
+				<text class="state-text">{{ loadingText }}</text>
+			</view>
+			<view v-else-if="rows.length == 0" class="state-row">
+				<text class="state-text">{{ emptyText }}</text>
+			</view>
+			<view v-else class="list-card">
+				<view class="head-row">
+					<text class="head-nick">{{ nickHead }}</text>
+					<text class="head-level">{{ levelHead }}</text>
+				</view>
+				<view
+					v-for="(item, idx) in rows"
+					:key="'t' + idx"
+					class="item-row"
+				>
+					<text class="item-nick">{{ item.nickname }}</text>
+					<text class="item-level">{{ levelOf(item) }}</text>
+				</view>
+			</view>
+			<view class="scroll-pad"></view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref } from 'vue'
+	import { t as __i18nT, tx } from '@/common/i18n.uts'
+	import { fetchMyFriends, MyFriItem } from '@/common/platform.uts'
+
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+	const pageTitle = ref<string>(t('team.title'))
+	const nickHead = ref<string>(t('team.nick'))
+	const levelHead = ref<string>(t('team.level'))
+	const loadingText = ref<string>(t('common.loading'))
+	const emptyText = ref<string>(t('team.empty'))
+	const loading = ref<boolean>(false)
+	const rows = ref<Array<MyFriItem>>([] as Array<MyFriItem>)
+
+	function levelOf(item: MyFriItem): string {
+		return tx(item.group_name)
+	}
+
+	function goBack(): void {
+		uni.navigateBack({})
+	}
+
+	function refreshLabels(): void {
+		pageTitle.value = t('team.title')
+		nickHead.value = t('team.nick')
+		levelHead.value = t('team.level')
+		loadingText.value = t('common.loading')
+		emptyText.value = t('team.empty')
+	}
+
+	async function loadList(): Promise<void> {
+		loading.value = true
+		try {
+			rows.value = await fetchMyFriends()
+		} catch (e) {
+			rows.value = [] as Array<MyFriItem>
+			let msg = ''
+			try { msg = ('' + e).trim() } catch (e0) { msg = '' }
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? msg : t('team.loadFail'), icon: 'none' })
+		}
+		loading.value = false
+	}
+
+	onShow(() => {
+		refreshLabels()
+		loadList()
+	})
+</script>
+
+<style>
+	.team-page {
+		flex: 1;
+		background-color: #f5f6f8;
+		flex-direction: column;
+	}
+	.status-bar-holder {
+		height: var(--status-bar-height);
+		background-color: #ffffff;
+	}
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		height: 88rpx;
+		padding: 0 16rpx;
+		background-color: #ffffff;
+		border-bottom-width: 1rpx;
+		border-bottom-style: solid;
+		border-bottom-color: #f0f0f0;
+	}
+	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.back-text {
+		font-size: 48rpx;
+		color: #222222;
+		line-height: 48rpx;
+	}
+	.topbar-title {
+		flex: 1;
+		text-align: center;
+		font-size: 34rpx;
+		font-weight: 600;
+		color: #111111;
+	}
+	.topbar-right {
+		width: 72rpx;
+	}
+	.body {
+		flex: 1;
+		padding: 24rpx;
+	}
+	.state-row {
+		padding: 80rpx 24rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.state-text {
+		font-size: 28rpx;
+		color: #9ca3af;
+	}
+	.list-card {
+		background-color: #ffffff;
+		border-radius: 24rpx;
+		overflow: hidden;
+	}
+	.head-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 24rpx 28rpx;
+		background-color: #f8fafc;
+		border-bottom-width: 1rpx;
+		border-bottom-style: solid;
+		border-bottom-color: #eef2f7;
+	}
+	.head-nick {
+		flex: 1;
+		font-size: 26rpx;
+		color: #6b7280;
+		font-weight: 600;
+	}
+	.head-level {
+		width: 220rpx;
+		text-align: right;
+		font-size: 26rpx;
+		color: #6b7280;
+		font-weight: 600;
+	}
+	.item-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 28rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-style: solid;
+		border-bottom-color: #f3f4f6;
+	}
+	.item-nick {
+		flex: 1;
+		font-size: 30rpx;
+		color: #111111;
+		font-weight: 500;
+	}
+	.item-level {
+		width: 220rpx;
+		text-align: right;
+		font-size: 28rpx;
+		color: #1861c8;
+		font-weight: 600;
+	}
+	.scroll-pad {
+		height: 40rpx;
+	}
+</style>

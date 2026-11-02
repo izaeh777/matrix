@@ -59,7 +59,7 @@
 			</view>
 		</scroll-view>
 
-		<view class="wx-tabbar">
+		<view class="wx-tabbar" :style="tabbarPadStyle">
 			<view class="wx-tab" @click="goHome">
 				<image class="wx-tab-icon" src="/static/login/s11.png" mode="aspectFit"></image>
 			</view>
@@ -90,6 +90,8 @@
 		CmsArchiveItem
 	} from '@/common/cms.uts'
 	import { t, tx } from '@/common/i18n.uts'
+	import { tabbarPadBottomStyle } from '@/common/app.uts'
+	const tabbarPadStyle = tabbarPadBottomStyle()
 
 	type NotifyI18n = {
 		t1a: string

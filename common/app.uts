@@ -102,3 +102,22 @@ export function openGroupPick(mode: string, roomId: string = ''): void {
 	if (roomId.length > 0) url += '&roomId=' + encodeURIComponent(roomId)
 	uni.navigateTo({ url: url })
 }
+
+/** iOS/Android 底部安全区高度（px） */
+export function safeBottomInsetPx(): number {
+	try {
+		const sys = uni.getSystemInfoSync()
+		const inset = sys.safeAreaInsets
+		if (inset != null && inset.bottom > 0) return Math.floor(inset.bottom)
+	} catch (e) {}
+	return 0
+}
+
+/**
+ * 自定义底部 tabbar 的 padding-bottom 内联样式。
+ * 原 24rpx≈12px 视觉间距 + 安全区，避免 iPhone Home Indicator 裁切图标。
+ */
+export function tabbarPadBottomStyle(): string {
+	const pad = 12 + safeBottomInsetPx()
+	return 'padding-bottom:' + pad + 'px;'
+}

@@ -122,7 +122,7 @@
 			</view>
 		</scroll-view>
 
-		<view class="wx-tabbar">
+		<view class="wx-tabbar" :style="tabbarPadStyle">
 			<view class="wx-tab" @click="onHome">
 				<image class="wx-tab-icon" src="/static/login/s11.png" mode="aspectFit"></image>
 			</view>
@@ -178,10 +178,11 @@
 	import { ref, onMounted, onUnmounted, computed } from 'vue'
 	import { getMatrix, MatrixRoom, MatrixEvent, errText, InvitedRoomInfo, CreateRoomOpts, roomIsGroup, sortRoomList, localPartOf } from '@/common/matrix.uts'
 	import { loadSession, SessionInfo, loadRoomList, saveRoomList, loadRoomChat } from '@/common/storage.uts'
-	import { openChat, bootstrapMatrix, openGroupPick, hasPlatformLogin, openMatrixLogin } from '@/common/app.uts'
+	import { openChat, bootstrapMatrix, openGroupPick, hasPlatformLogin, openMatrixLogin, tabbarPadBottomStyle } from '@/common/app.uts'
 	import { getCallManager, CallSnapshot, h5TapRunAnswer, unlockH5CallMedia } from '@/common/call.uts'
 	import { t } from '@/common/i18n.uts'
 	import { defaultAvatar, DEFAULT_AVATAR } from '@/common/avatar.uts'
+	const tabbarPadStyle = tabbarPadBottomStyle()
 
 	type RoomsI18n = {
 		title: string

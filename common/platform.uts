@@ -602,6 +602,8 @@ export type PlatformMe = {
 	team_name: string
 	/** 我的邀请码（新用户注册时填写此码绑定推荐关系） */
 	invite_code: string
+	/** 推荐人：0 / 空 = 尚未绑定 */
+	inviter_id: string
 }
 
 /** 待绑定的推荐人邀请码（扫码/DeepLink 落地后写入，登录注册时透传） */
@@ -943,11 +945,18 @@ function parsePlatformMe(data: UTSJSONObject): PlatformMe {
 	if (avatar.length == 0) avatar = pickStr(user, 'headimg')
 	if (avatar.length == 0) avatar = pickStr(user, 'head_img')
 	const sub = subscriptionFromMeData(data)
-	let vipLabel = formatVipLabel(sub)
-	// 直接再读一次 lv_vip_name，避免嵌套解析漏掉
-	if (vipLabel == '普通用户') {
-		const direct = pickStrAny(user, ['lv_vip_name', 'lvVipName', 'vip_name', 'level_name'])
-		if (direct.length > 0) vipLabel = direct
+	// 用户级别展示优先用 me.group_name
+	let vipLabel = pickStrAny(user, ['group_name', 'groupName'])
+	if (vipLabel.length == 0) {
+		vipLabel = pickStrAny(data, ['group_name', 'groupName'])
+	}
+	if (vipLabel.length == 0) {
+		vipLabel = formatVipLabel(sub)
+		// 直接再读一次 lv_vip_name，避免嵌套解析漏掉
+		if (vipLabel == '普通用户') {
+			const direct = pickStrAny(user, ['lv_vip_name', 'lvVipName', 'vip_name', 'level_name'])
+			if (direct.length > 0) vipLabel = direct
+		}
 	}
 	const teamName = pickStrAny(user, ['lv_team_name', 'lvTeamName', 'team_name', 'teamName'])
 	const username = pickStr(user, 'username')
@@ -962,6 +971,18 @@ function parsePlatformMe(data: UTSJSONObject): PlatformMe {
 	}
 	// 多数后台用 username 作为邀请码
 	if (inviteCode.length == 0) inviteCode = username
+	let inviterId = pickStrAny(user, [
+		'inviter_id', 'inviterId', 'parent_id', 'parentId',
+		'referrer_id', 'referrerId', 'invite_uid', 'pid'
+	])
+	if (inviterId.length == 0) {
+		const n = pickNumAny(user, ['inviter_id', 'inviterId', 'parent_id', 'parentId', 'pid'])
+		if (n > 0) inviterId = '' + n
+		else if (n == 0) inviterId = '0'
+	}
+	if (inviterId.length == 0) {
+		inviterId = pickStrAny(data, ['inviter_id', 'inviterId'])
+	}
 	const me: PlatformMe = {
 		money: money,
 		nickname: nickname,
@@ -971,9 +992,21 @@ function parsePlatformMe(data: UTSJSONObject): PlatformMe {
 		vip_label: vipLabel,
 		vip_period: formatVipPeriod(sub),
 		team_name: teamName,
-		invite_code: inviteCode
+		invite_code: inviteCode,
+		inviter_id: inviterId
 	}
 	return me
+}
+
+/** 是否尚未绑定推荐人（inviter_id 为 0 / 空） */
+export function hasNoInviter(me: PlatformMe | null): boolean {
+	if (me == null) return true
+	const id = me.inviter_id.trim()
+	if (id.length == 0) return true
+	if (id == '0' || id == 'null' || id == 'undefined') return true
+	const n = parseFloat(id)
+	if (n == 0) return true
+	return false
 }
 
 function applyMeToLocalSession(me: PlatformMe): void {
@@ -1200,7 +1233,7 @@ export async function fetchPlatformMe(): Promise<PlatformMe> {
 		}
 	} catch (eWa) {}
 	let me = parsePlatformMe(data)
-	// 等级已从 user.lv_vip_name 取到；再拉订阅补有效期 / EXPIRED 文案
+	// 有效期仍可从订阅补全；级别以 group_name 为准，不再用订阅名覆盖
 	if (me.vip_period.indexOf('暂无') >= 0) {
 		try {
 			const billRoot = await httpGet('/api/v1/billing/subscription', true)
@@ -1215,9 +1248,6 @@ export async function fetchPlatformMe(): Promise<PlatformMe> {
 					me.vip_period = formatVipPeriod(sub)
 				} else if (status == 'EXPIRED' || status == 'CANCELLED') {
 					me.vip_period = '订阅已过期'
-				}
-				if (me.vip_label == '普通用户' && sub.plan_name.length > 0) {
-					me.vip_label = formatVipLabel(sub)
 				}
 			}
 		} catch (eSub) {
@@ -1826,13 +1856,14 @@ export async function fetchPlatformSubscription(): Promise<PlatformSubscription>
  * 传空字符串表示不改该字段。
  * 注意：部分端（App/H5）对 PUT body 支持差，优先用 POST + _method=PUT（服务端已验证可用）。
  */
-export async function updatePlatformProfile(nickname: string, avatar: string): Promise<PlatformMe> {
+export async function updatePlatformProfile(nickname: string, avatar: string, inviterId: string = ''): Promise<PlatformMe> {
 	if (platformToken().length == 0) {
 		throw new Error('请先登录平台账号后再改资料')
 	}
 	const nick = nickname.trim()
 	const av = avatar.trim()
-	if (nick.length == 0 && av.length == 0) {
+	const inv = inviterId.trim()
+	if (nick.length == 0 && av.length == 0 && inv.length == 0) {
 		throw new Error('请填写要修改的内容')
 	}
 	const form: UTSJSONObject = {}
@@ -1842,12 +1873,14 @@ export async function updatePlatformProfile(nickname: string, avatar: string): P
 		form['avatar'] = av
 		form['avatar_url'] = av
 	}
+	if (inv.length > 0) form['inviter_id'] = inv
 	const jsonBody: UTSJSONObject = {}
 	if (nick.length > 0) jsonBody['nickname'] = nick
 	if (av.length > 0) {
 		jsonBody['avatar'] = av
 		jsonBody['avatar_url'] = av
 	}
+	if (inv.length > 0) jsonBody['inviter_id'] = inv
 
 	let root: UTSJSONObject | null = null
 	let lastMsg = ''
@@ -1891,6 +1924,7 @@ export async function updatePlatformProfile(nickname: string, avatar: string): P
 				putForm['avatar'] = av
 				putForm['avatar_url'] = av
 			}
+			if (inv.length > 0) putForm['inviter_id'] = inv
 			const r3 = await httpPutForm('/api/v1/users/me', putForm, true)
 			console.log('[platform] update profile via PUT form', pickNum(r3, 'code'), pickStr(r3, 'msg'))
 			if (pickNum(r3, 'code') == 1) {
@@ -1914,9 +1948,262 @@ export async function updatePlatformProfile(nickname: string, avatar: string): P
 	} else {
 		if (nick.length > 0 && me.nickname.length == 0) me.nickname = nick
 		if (av.length > 0 && me.avatar.length == 0) me.avatar = av
+		if (inv.length > 0 && hasNoInviter(me)) me.inviter_id = inv
 		applyMeToLocalSession(me)
 	}
 	return me
+}
+
+/** 绑定推荐人：只传 inviter_id = 推荐码 */
+export async function bindPlatformInviter(inviteCode: string): Promise<PlatformMe> {
+	const code = inviteCode.trim()
+	if (code.length == 0) throw new Error('请输入推荐码')
+	return await updatePlatformProfile('', '', code)
+}
+
+/** 直推好友（我的团队） */
+export type MyFriItem = {
+	nickname: string
+	group_name: string
+	user_id: string
+}
+
+function parseMyFriItem(obj: UTSJSONObject): MyFriItem {
+	let nickname = pickStrAny(obj, ['nickname', 'nick_name', 'name', 'username', 'user_name'])
+	if (nickname.length == 0) {
+		const u = pickObj(obj, 'user')
+		if (u != null) {
+			nickname = pickStrAny(u!, ['nickname', 'nick_name', 'name', 'username'])
+		}
+	}
+	let groupName = pickStrAny(obj, [
+		'group_name', 'groupName', 'lv_vip_name', 'vip_name', 'level_name',
+		'role_name', 'role', 'level', 'grade_name'
+	])
+	if (groupName.length == 0) {
+		const u2 = pickObj(obj, 'user')
+		if (u2 != null) {
+			groupName = pickStrAny(u2!, ['group_name', 'groupName', 'lv_vip_name', 'vip_name', 'level_name'])
+		}
+	}
+	let userId = pickStrAny(obj, ['user_id', 'uid', 'id'])
+	if (userId.length == 0) {
+		const n = pickNumAny(obj, ['user_id', 'uid', 'id'])
+		if (n > 0) userId = '' + n
+	}
+	const item: MyFriItem = {
+		nickname: nickname,
+		group_name: groupName,
+		user_id: userId
+	}
+	return item
+}
+
+function collectMyFriArray(raw: any | null): Array<UTSJSONObject> {
+	const out: Array<UTSJSONObject> = []
+	if (raw == null) return out
+	try {
+		const arr = raw as Array<UTSJSONObject>
+		for (let i = 0; i < arr.length; i++) {
+			if (arr[i] != null) out.push(arr[i])
+		}
+		if (out.length > 0) return out
+	} catch (e0) {}
+	return out
+}
+
+/** GET /api/v1/users/my-fri 直推列表，无需额外参数 */
+export async function fetchMyFriends(): Promise<Array<MyFriItem>> {
+	const root = await httpGet('/api/v1/users/my-fri', true)
+	logJson('[platform] users/my-fri raw', root)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '获取团队失败')
+	}
+	const list: Array<MyFriItem> = []
+	let rows: Array<UTSJSONObject> = []
+	// data 可能直接是数组
+	try {
+		rows = collectMyFriArray(root['data'])
+	} catch (e0) {}
+	const data = pickObj(root, 'data')
+	if (rows.length == 0 && data != null) {
+		rows = collectMyFriArray(data!['list'])
+		if (rows.length == 0) rows = collectMyFriArray(data!['friends'])
+		if (rows.length == 0) rows = collectMyFriArray(data!['items'])
+		if (rows.length == 0) rows = collectMyFriArray(data!['data'])
+		if (rows.length == 0) rows = collectMyFriArray(data as any)
+		// data 为 { "id": {...} } 对象字典
+		if (rows.length == 0) {
+			const keys = dataObjectKeys(data!)
+			for (let ki = 0; ki < keys.length; ki++) {
+				const row = data![keys[ki]] as UTSJSONObject
+				if (row != null) rows.push(row)
+			}
+		}
+	}
+	for (let i = 0; i < rows.length; i++) {
+		const one = parseMyFriItem(rows[i])
+		if (one.nickname.length == 0 && one.user_id.length == 0) continue
+		if (one.nickname.length == 0) one.nickname = one.user_id
+		if (one.group_name.length == 0) one.group_name = '普通用户'
+		list.push(one)
+	}
+	console.log('[platform] users/my-fri count=', list.length)
+	return list
+}
+
+/** 关系：关注目标（user / project） */
+export type RelationItem = {
+	target_type: string
+	target_id: string
+	title: string
+	avatar: string
+	subtitle: string
+}
+
+function collectRelationRows(root: UTSJSONObject): Array<UTSJSONObject> {
+	let rows: Array<UTSJSONObject> = []
+	try {
+		rows = collectMyFriArray(root['data'])
+	} catch (e0) {}
+	const data = pickObj(root, 'data')
+	if (rows.length == 0 && data != null) {
+		rows = collectMyFriArray(data!['list'])
+		if (rows.length == 0) rows = collectMyFriArray(data!['items'])
+		if (rows.length == 0) rows = collectMyFriArray(data!['rows'])
+		if (rows.length == 0) rows = collectMyFriArray(data!['following'])
+		if (rows.length == 0) rows = collectMyFriArray(data!['followers'])
+		if (rows.length == 0) rows = collectMyFriArray(data!['data'])
+		if (rows.length == 0) rows = collectMyFriArray(data as any)
+		if (rows.length == 0) {
+			const keys = dataObjectKeys(data!)
+			for (let ki = 0; ki < keys.length; ki++) {
+				const row = data![keys[ki]] as UTSJSONObject
+				if (row != null) rows.push(row)
+			}
+		}
+	}
+	return rows
+}
+
+function parseRelationItem(obj: UTSJSONObject, fallbackType: string): RelationItem | null {
+	let targetType = pickStrAny(obj, ['target_type', 'targetType', 'type'])
+	if (targetType.length == 0) targetType = fallbackType
+	targetType = targetType.trim().toLowerCase()
+	let targetId = pickStrAny(obj, ['target_id', 'targetId', 'id', 'user_id', 'uid', 'project_id'])
+	if (targetId.length == 0) {
+		const n = pickNumAny(obj, ['target_id', 'targetId', 'id', 'user_id', 'uid', 'project_id'])
+		if (n > 0) targetId = '' + n
+	}
+	let title = pickStrAny(obj, ['nickname', 'nick_name', 'username', 'name', 'title', 'project_name'])
+	if (title.length == 0) {
+		const u = pickObj(obj, 'user')
+		if (u != null) {
+			title = pickStrAny(u!, ['nickname', 'nick_name', 'username', 'name'])
+			if (targetId.length == 0) {
+				targetId = pickStrAny(u!, ['id', 'user_id', 'uid'])
+				if (targetId.length == 0) {
+					const n2 = pickNumAny(u!, ['id', 'user_id', 'uid'])
+					if (n2 > 0) targetId = '' + n2
+				}
+			}
+			if (targetType.length == 0) targetType = 'user'
+		}
+		const p = pickObj(obj, 'project')
+		if (title.length == 0 && p != null) {
+			title = pickStrAny(p!, ['title', 'name', 'project_name'])
+			if (targetId.length == 0) {
+				targetId = pickStrAny(p!, ['id', 'project_id'])
+				if (targetId.length == 0) {
+					const n3 = pickNumAny(p!, ['id', 'project_id'])
+					if (n3 > 0) targetId = '' + n3
+				}
+			}
+			if (targetType.length == 0) targetType = 'project'
+		}
+	}
+	if (targetId.length == 0) return null
+	if (targetType.length == 0) targetType = 'user'
+	if (title.length == 0) title = targetId
+	const avatar = pickStrAny(obj, ['avatar', 'avatar_url', 'image', 'cover', 'logo'])
+	const subtitle = pickStrAny(obj, ['group_name', 'intro', 'description', 'bio', 'email', 'username'])
+	const item: RelationItem = {
+		target_type: targetType,
+		target_id: targetId,
+		title: title,
+		avatar: avatar,
+		subtitle: subtitle
+	}
+	return item
+}
+
+function parseRelationList(root: UTSJSONObject, fallbackType: string): Array<RelationItem> {
+	const rows = collectRelationRows(root)
+	const list: Array<RelationItem> = []
+	for (let i = 0; i < rows.length; i++) {
+		const one = parseRelationItem(rows[i], fallbackType)
+		if (one != null) list.push(one)
+	}
+	return list
+}
+
+/** POST /api/v1/relations/follow  关注（幂等） target_type=user|project */
+export async function followRelation(targetType: string, targetId: string): Promise<void> {
+	const typ = targetType.trim().toLowerCase()
+	const id = targetId.trim()
+	if (typ.length == 0 || id.length == 0) throw new Error('参数无效')
+	const fields: UTSJSONObject = {
+		target_type: typ,
+		target_id: id
+	}
+	const root = await httpPostForm('/api/v1/relations/follow', fields, true)
+	assertOk(root, '关注失败')
+}
+
+/** POST /api/v1/relations/unfollow  取消关注 */
+export async function unfollowRelation(targetType: string, targetId: string): Promise<void> {
+	const typ = targetType.trim().toLowerCase()
+	const id = targetId.trim()
+	if (typ.length == 0 || id.length == 0) throw new Error('参数无效')
+	const fields: UTSJSONObject = {
+		target_type: typ,
+		target_id: id
+	}
+	const root = await httpPostForm('/api/v1/relations/unfollow', fields, true)
+	assertOk(root, '取消关注失败')
+}
+
+/** GET /api/v1/relations/following  我关注的；targetType 可选 user|project */
+export async function fetchFollowing(targetType: string = ''): Promise<Array<RelationItem>> {
+	let path = '/api/v1/relations/following'
+	const typ = targetType.trim().toLowerCase()
+	if (typ.length > 0) path = path + '?target_type=' + encodeURIComponent(typ)
+	const root = await httpGet(path, true)
+	logJson('[platform] relations/following raw', root)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '获取关注失败')
+	}
+	const list = parseRelationList(root, typ)
+	console.log('[platform] relations/following count=', list.length)
+	return list
+}
+
+/** GET /api/v1/relations/followers  关注我的 */
+export async function fetchFollowers(): Promise<Array<RelationItem>> {
+	const root = await httpGet('/api/v1/relations/followers', true)
+	logJson('[platform] relations/followers raw', root)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '获取粉丝失败')
+	}
+	const list = parseRelationList(root, 'user')
+	console.log('[platform] relations/followers count=', list.length)
+	return list
 }
 
 export type WalletChallenge = {

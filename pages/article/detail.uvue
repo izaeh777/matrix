@@ -8,7 +8,15 @@
 				<text class="back-text">‹</text>
 			</view>
 			<text class="topbar-title">{{ t('article.title') }}</text>
-			<view class="topbar-right"></view>
+			<view
+				v-if="hasDetail"
+				class="follow-btn"
+				:class="followed ? 'follow-btn-on' : ''"
+				@click="onToggleFollow"
+			>
+				<text class="follow-btn-text" :class="followed ? 'follow-btn-text-on' : ''">{{ followBtnText }}</text>
+			</view>
+			<view v-else class="topbar-right"></view>
 		</view>
 
 		<scroll-view class="body" direction="vertical" :show-scrollbar="false" :rebound="false">
@@ -81,6 +89,12 @@
 		openCmsLink,
 		CmsArchiveDetail
 	} from '@/common/cms.uts'
+	import {
+		loadPlatformSession,
+		followRelation,
+		unfollowRelation,
+		fetchFollowing
+	} from '@/common/platform.uts'
 
 	function t(key: string): string {
 		return __i18nT(key)
@@ -90,6 +104,12 @@
 	const errorText = ref<string>('')
 	const detail = ref<CmsArchiveDetail | null>(null)
 	const articleId = ref<number>(0)
+	const followed = ref<boolean>(false)
+	const followBusy = ref<boolean>(false)
+
+	const followBtnText = computed((): string => {
+		return followed.value ? t('follow.following') : t('follow.doFollow')
+	})
 
 	const hasDetail = computed((): boolean => {
 		return detail.value != null
@@ -167,6 +187,53 @@
 		openCmsLink(d.outlink)
 	}
 
+	async function refreshFollowState(projectId: number): Promise<void> {
+		followed.value = false
+		if (projectId <= 0) return
+		if (loadPlatformSession() == null) return
+		try {
+			const list = await fetchFollowing('project')
+			const idStr = '' + projectId
+			for (let i = 0; i < list.length; i++) {
+				if (list[i].target_id == idStr || list[i].target_id == ('' + projectId)) {
+					followed.value = true
+					return
+				}
+			}
+		} catch (e) {
+			console.warn('刷新关注状态失败', e)
+		}
+	}
+
+	async function onToggleFollow(): Promise<void> {
+		const id = articleId.value
+		if (id <= 0 || followBusy.value) return
+		if (loadPlatformSession() == null) {
+			uni.showToast({ title: t('profile.loginFirst'), icon: 'none' })
+			return
+		}
+		followBusy.value = true
+		const idStr = '' + id
+		try {
+			if (followed.value) {
+				await unfollowRelation('project', idStr)
+				followed.value = false
+				uni.showToast({ title: t('follow.unfollowed'), icon: 'none' })
+			} else {
+				await followRelation('project', idStr)
+				followed.value = true
+				uni.showToast({ title: t('follow.followOk'), icon: 'none' })
+			}
+		} catch (e) {
+			let msg = ''
+			try { msg = ('' + e).trim() } catch (e0) { msg = '' }
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			const fallback = followed.value ? t('follow.unfollowFail') : t('follow.followFail')
+			uni.showToast({ title: msg.length > 0 ? msg : fallback, icon: 'none' })
+		}
+		followBusy.value = false
+	}
+
 	async function loadDetail(): Promise<void> {
 		const id = articleId.value
 		if (id <= 0) {
@@ -176,8 +243,10 @@
 		}
 		loading.value = true
 		errorText.value = ''
+		followed.value = false
 		try {
 			detail.value = await fetchArchiveDetail(id)
+			refreshFollowState(id)
 		} catch (e) {
 			detail.value = null
 			errorText.value = t('article.loadFail')
@@ -248,6 +317,25 @@
 	}
 	.topbar-right {
 		width: 72rpx;
+	}
+	.follow-btn {
+		min-width: 120rpx;
+		padding: 10rpx 22rpx;
+		border-radius: 28rpx;
+		background-color: #1861c8;
+		align-items: center;
+		justify-content: center;
+	}
+	.follow-btn-on {
+		background-color: #eef2f7;
+	}
+	.follow-btn-text {
+		font-size: 24rpx;
+		color: #ffffff;
+		font-weight: 600;
+	}
+	.follow-btn-text-on {
+		color: #6b7280;
 	}
 	.body {
 		flex: 1;

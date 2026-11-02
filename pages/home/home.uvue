@@ -132,7 +132,7 @@
 			</view>
 		</scroll-view>
 
-		<view class="wx-tabbar">
+		<view class="wx-tabbar" :style="tabbarPadStyle">
 			<view class="wx-tab wx-tab-on">
 				<image class="wx-tab-icon" src="/static/login/s1.png" mode="aspectFit"></image>
 			</view>
@@ -174,9 +174,11 @@
 	import { tryConsumePendingFriend } from '@/common/deeplink.uts'
 	import { t as __i18nT, tx } from '@/common/i18n.uts'
 	import { DEFAULT_AVATAR } from '@/common/avatar.uts'
+	import { tabbarPadBottomStyle } from '@/common/app.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
+	const tabbarPadStyle = tabbarPadBottomStyle()
 
 
 

@@ -68,7 +68,7 @@
 					<text class="func-arrow">›</text>
 				</view>
 				<view class="func-line"></view>
-				<view class="func-cell" @click="goContacts">
+				<view class="func-cell" @click="goFollowing">
 					<image class="func-ico" src="/static/login/f2.png" mode="aspectFit"></image>
 					<text class="func-label">{{ i18n.follow }}</text>
 					<text class="func-arrow">›</text>
@@ -85,11 +85,17 @@
 					<text class="func-label">{{ i18n.promoEarn }}</text>
 					<text class="func-arrow">›</text>
 				</view>
+				<view class="func-line"></view>
+				<view class="func-cell" @click="goTeam">
+					<image class="func-ico" src="/static/login/tuandui.png" mode="aspectFit"></image>
+					<text class="func-label">{{ i18n.myTeam }}</text>
+					<text class="func-arrow">›</text>
+				</view>
 			</view>
 			<view class="profile-scroll-pad"></view>
 		</scroll-view>
 
-		<view class="wx-tabbar">
+		<view class="wx-tabbar" :style="tabbarPadStyle">
 			<view class="wx-tab" @click="goHome">
 				<image class="wx-tab-icon" src="/static/login/s11.png" mode="aspectFit"></image>
 			</view>
@@ -118,6 +124,22 @@
 				<text class="invite-scan-tip">{{ t('invite.myCode') }} {{ inviteCodeDisplay }}</text>
 				<view class="invite-btn" @click="copyInviteLink">
 					<text class="invite-btn-text">{{ t('invite.copyLink') }}</text>
+				</view>
+				<view v-if="canBindInviter" class="inviter-bind-box">
+					<text class="inviter-bind-title">{{ t('invite.bindTitle') }}</text>
+					<text class="inviter-bind-desc">{{ t('invite.bindDesc') }}</text>
+					<view class="inviter-bind-row">
+						<input
+							class="inviter-bind-input"
+							type="text"
+							v-model="bindInviterCode"
+							:placeholder="t('invite.bindPh')"
+							placeholder-class="inviter-bind-ph"
+						/>
+						<view class="inviter-bind-btn" :class="bindInviterSubmitting ? 'invite-btn-disabled' : ''" @click="onBindInviter">
+							<text class="inviter-bind-btn-text">{{ bindInviterSubmitting ? t('invite.binding') : t('invite.bindGo') }}</text>
+						</view>
+					</view>
 				</view>
 			</view>
 		</view>
@@ -236,6 +258,8 @@
 		isPlanDiscountActive,
 		sendWithdrawEmailCode,
 		billingWithdraw,
+		bindPlatformInviter,
+		hasNoInviter,
 		RolePlan
 	} from '@/common/platform.uts'
 	import { loadTpWalletAddress } from '@/common/tp-wallet.uts'
@@ -244,9 +268,11 @@
 	import { getLocaleLabel, openLanguagePage, t as __i18nT, tx } from '@/common/i18n.uts'
 	import { DEFAULT_AVATAR } from '@/common/avatar.uts'
 	import { updateActiveAccountAvatar } from '@/common/accounts.uts'
+	import { tabbarPadBottomStyle } from '@/common/app.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
+	const tabbarPadStyle = tabbarPadBottomStyle()
 
 
 
@@ -258,6 +284,7 @@
 		follow: string
 		invite: string
 		promoEarn: string
+		myTeam: string
 		withdraw: string
 		withdrawTitle: string
 		withdrawDesc: string
@@ -285,6 +312,7 @@
 			follow: t('profile.follow'),
 			invite: t('profile.invite'),
 			promoEarn: t('profile.promoEarn'),
+			myTeam: t('profile.myTeam'),
 			withdraw: t('profile.withdraw'),
 			withdrawTitle: t('profile.withdrawTitle'),
 			withdrawDesc: t('profile.withdrawDesc'),
@@ -417,6 +445,17 @@
 	const h5PaySyncing = ref<boolean>(false)
 	const h5PayPolling = ref<boolean>(false)
 	const myInviteCode = ref<string>('')
+	const myInviterId = ref<string>('0')
+	const bindInviterCode = ref<string>('')
+	const bindInviterSubmitting = ref<boolean>(false)
+	const canBindInviter = computed((): boolean => {
+		const id = myInviterId.value.trim()
+		if (id.length == 0) return true
+		if (id == '0' || id == 'null' || id == 'undefined') return true
+		const n = parseFloat(id)
+		if (n == 0) return true
+		return false
+	})
 	const inviteCodeDisplay = computed((): string => {
 		if (myInviteCode.value.length > 0) return myInviteCode.value
 		return accountName.value as string
@@ -449,8 +488,9 @@
 			teamName.value = me.team_name
 			if (me.invite_code.length > 0) myInviteCode.value = me.invite_code
 			else if (me.username.length > 0) myInviteCode.value = me.username
+			myInviterId.value = me.inviter_id.length > 0 ? me.inviter_id : '0'
 			// vip_label 已在 fetchPlatformMe 内缓存，供首页/发现页判断发布入口
-			console.log('[profile] vip=', me.vip_label, me.vip_period, 'team=', me.team_name, 'invite=', me.invite_code)
+			console.log('[profile] vip=', me.vip_label, me.vip_period, 'team=', me.team_name, 'invite=', me.invite_code, 'inviter=', me.inviter_id)
 			// 同步昵称到本地 session，资料页立刻刷新
 			const p = loadPlatformSession()
 			if (p != null && me.nickname.length > 0) {
@@ -1139,6 +1179,9 @@
 	function goStats() {
 		uni.navigateTo({ url: '/pages/stats/stats' })
 	}
+	function goTeam() {
+		uni.navigateTo({ url: '/pages/profile/team' })
+	}
 
 	function goHome() {
 		uni.redirectTo({ url: '/pages/home/home' })
@@ -1146,8 +1189,8 @@
 	function goRooms() {
 		uni.redirectTo({ url: '/pages/rooms/rooms' })
 	}
-	function goContacts() {
-		uni.redirectTo({ url: '/pages/contacts/contacts' })
+	function goFollowing() {
+		uni.navigateTo({ url: '/pages/profile/following' })
 	}
 	function onDiscover() {
 		uni.redirectTo({ url: '/pages/discover/discover' })
@@ -1164,11 +1207,13 @@
 			uni.showToast({ title: t('invite.noCode'), icon: 'none' })
 			return
 		}
+		bindInviterCode.value = ''
 		showInvite.value = true
 	}
 
 	function closeInvite(): void {
 		showInvite.value = false
+		bindInviterCode.value = ''
 	}
 
 	function copyInviteLink(): void {
@@ -1183,6 +1228,42 @@
 				uni.showToast({ title: t('invite.linkCopied'), icon: 'none' })
 			}
 		})
+	}
+
+	async function onBindInviter(): Promise<void> {
+		if (bindInviterSubmitting.value) return
+		if (!canBindInviter.value) return
+		const code = bindInviterCode.value.trim()
+		if (code.length == 0) {
+			uni.showToast({ title: t('invite.bindNeed'), icon: 'none' })
+			return
+		}
+		bindInviterSubmitting.value = true
+		uni.showLoading({ title: t('invite.binding'), mask: true })
+		try {
+			const me = await bindPlatformInviter(code)
+			uni.hideLoading()
+			myInviterId.value = me.inviter_id.length > 0 ? me.inviter_id : code
+			if (hasNoInviter(me)) {
+				// 接口可能不回写 inviter_id，再拉一次
+				try {
+					const again = await fetchPlatformMe()
+					myInviterId.value = again.inviter_id.length > 0 ? again.inviter_id : myInviterId.value
+					if (again.invite_code.length > 0) myInviteCode.value = again.invite_code
+				} catch (e2) {}
+			}
+			// 绑定已成功：即使回包仍是 0，也先隐藏入口
+			if (canBindInviter.value) myInviterId.value = code
+			bindInviterCode.value = ''
+			uni.showToast({ title: t('invite.bindOk'), icon: 'success' })
+		} catch (e) {
+			uni.hideLoading()
+			let msg = ''
+			try { msg = ('' + e).trim() } catch (e0) { msg = '' }
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? msg : t('invite.bindFail'), icon: 'none' })
+		}
+		bindInviterSubmitting.value = false
 	}
 </script>
 
@@ -1671,6 +1752,55 @@
 	}
 	.invite-btn-disabled {
 		opacity: 0.55;
+	}
+	.inviter-bind-box {
+		width: 100%;
+		margin-top: 28rpx;
+		padding-top: 28rpx;
+		border-top-width: 1rpx;
+		border-top-style: solid;
+		border-top-color: #eef2f7;
+	}
+	.inviter-bind-title {
+		font-size: 30rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+		margin-bottom: 10rpx;
+	}
+	.inviter-bind-desc {
+		font-size: 24rpx;
+		color: #6b7280;
+		line-height: 34rpx;
+		margin-bottom: 20rpx;
+	}
+	.inviter-bind-row {
+		width: 100%;
+		flex-direction: row;
+		align-items: center;
+	}
+	.inviter-bind-input {
+		flex: 1;
+		background-color: #f3f6fb;
+		border-radius: 16rpx;
+		padding: 18rpx 20rpx;
+		font-size: 28rpx;
+		color: #111111;
+	}
+	.inviter-bind-ph {
+		color: #9ca3af;
+	}
+	.inviter-bind-btn {
+		margin-left: 12rpx;
+		background-color: #1861c8;
+		border-radius: 16rpx;
+		padding: 18rpx 24rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.inviter-bind-btn-text {
+		font-size: 26rpx;
+		color: #ffffff;
+		font-weight: 600;
 	}
 	.plan-sheet {
 		background-color: #ffffff;
