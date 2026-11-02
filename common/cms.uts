@@ -164,9 +164,26 @@ function logCmsHeaders(method: string, url: string, header: UTSJSONObject): void
 	}
 }
 
-function httpGetJson(path: string): Promise<UTSJSONObject> {
+function attachPlatformToken(header: UTSJSONObject): void {
+	try {
+		const raw = uni.getStorageSync('platform_session_v1')
+		if (raw == null) return
+		const text = ('' + raw).trim()
+		if (text.length == 0 || text.charAt(0) != '{') return
+		const obj = JSON.parse(text) as UTSJSONObject
+		let tok = ''
+		try {
+			const v = obj['token']
+			if (v != null) tok = '' + v
+		} catch (e0) {}
+		if (tok.length > 0 && tok != 'null') header['token'] = tok
+	} catch (e1) {}
+}
+
+function httpGetJson(path: string, withAuth: boolean = false): Promise<UTSJSONObject> {
 	const url = cmsHttpBase() + path
 	const header = cmsLangHeader()
+	if (withAuth) attachPlatformToken(header)
 	logCmsHeaders('GET', url, header)
 	return new Promise((resolve, reject) => {
 		uni.request({
@@ -349,6 +366,34 @@ export async function fetchChannelArchives(channelId: number, keyword: string = 
  * GET /api/cms/archives/detail?id=
  * 接口一般只返回摘要 description，无独立 HTML 正文时用 description 作为正文
  */
+/**
+ * 我发布的内容
+ * GET /api/cms/user/archives  operationId=user_archives（需登录 token）
+ */
+export async function fetchMyArchives(): Promise<Array<CmsArchiveItem>> {
+	const root = await httpGetJson('/api/cms/user/archives', true)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : t('cms.myPublishFail'))
+	}
+	let rows: Array<UTSJSONObject> = []
+	try {
+		rows = parseList(root['data'])
+	} catch (e0) {}
+	const data = root['data'] as UTSJSONObject
+	if (rows.length == 0 && data != null) {
+		rows = listFromData(data, 'list')
+		if (rows.length == 0) rows = listFromData(data, 'archives')
+		if (rows.length == 0) rows = listFromData(data, 'items')
+		if (rows.length == 0) rows = listFromData(data, 'data')
+		if (rows.length == 0) rows = parseList(data as any)
+	}
+	const out = parseArchiveRows(rows)
+	console.log('[cms] user/archives count=', out.length)
+	return out
+}
+
 export async function fetchArchiveDetail(id: number): Promise<CmsArchiveDetail> {
 	if (id <= 0) throw new Error(t('cms.needId'))
 	const root = await httpGetJson('/api/cms/archives/detail?id=' + id)
@@ -504,21 +549,7 @@ function httpPostForm(path: string, fields: UTSJSONObject): Promise<UTSJSONObjec
 	const url = cmsHttpBase() + path
 	const header = cmsLangHeader()
 	header['Content-Type'] = 'application/x-www-form-urlencoded'
-	try {
-		const raw = uni.getStorageSync('platform_session_v1')
-		if (raw != null) {
-			const text = ('' + raw).trim()
-			if (text.length > 0 && text.charAt(0) == '{') {
-				const obj = JSON.parse(text) as UTSJSONObject
-				let t = ''
-				try {
-					const v = obj['token']
-					if (v != null) t = '' + v
-				} catch (e0) {}
-				if (t.length > 0 && t != 'null') header['token'] = t
-			}
-		}
-	} catch (e1) {}
+	attachPlatformToken(header)
 	logCmsHeaders('POST-FORM', url, header)
 	return new Promise((resolve, reject) => {
 		uni.request({

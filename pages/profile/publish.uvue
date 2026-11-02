@@ -1,0 +1,242 @@
+<template>
+	<view class="publish-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">{{ pageTitle }}</text>
+			<view class="topbar-right"></view>
+		</view>
+
+		<scroll-view class="body" direction="vertical" :show-scrollbar="false" :rebound="false">
+			<view v-if="loading" class="state-row">
+				<text class="state-text">{{ loadingText }}</text>
+			</view>
+			<view v-else-if="rows.length == 0" class="state-row">
+				<text class="state-text">{{ emptyText }}</text>
+			</view>
+			<view v-else class="list-card">
+				<view
+					v-for="(item, idx) in rows"
+					:key="'p' + item.id + '-' + idx"
+					class="item-row"
+					@click="onOpen(item)"
+				>
+					<image
+						v-if="coverOf(item).length > 0"
+						class="item-cover"
+						:src="coverOf(item)"
+						mode="aspectFill"
+					></image>
+					<view v-else class="item-cover item-cover-fallback"></view>
+					<view class="item-main">
+						<text class="item-title">{{ item.title }}</text>
+						<text v-if="item.description.length > 0" class="item-desc">{{ item.description }}</text>
+						<view class="item-meta">
+							<text class="meta-text">{{ t('article.views') }} {{ item.views }}</text>
+							<text class="meta-text">{{ t('article.likes') }} {{ item.likes }}</text>
+							<text class="meta-time">{{ timeOf(item) }}</text>
+						</view>
+					</view>
+					<text class="item-arrow">›</text>
+				</view>
+			</view>
+			<view class="scroll-pad"></view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref } from 'vue'
+	import { t as __i18nT } from '@/common/i18n.uts'
+	import {
+		fetchMyArchives,
+		cmsAssetUrl,
+		formatPublishAgo,
+		openArchiveDetail,
+		CmsArchiveItem
+	} from '@/common/cms.uts'
+	import { loadPlatformSession } from '@/common/platform.uts'
+
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+	const pageTitle = ref<string>(t('publish.title'))
+	const loadingText = ref<string>(t('common.loading'))
+	const emptyText = ref<string>(t('publish.empty'))
+	const loading = ref<boolean>(false)
+	const rows = ref<Array<CmsArchiveItem>>([] as Array<CmsArchiveItem>)
+
+	function coverOf(item: CmsArchiveItem): string {
+		return cmsAssetUrl(item.image)
+	}
+
+	function timeOf(item: CmsArchiveItem): string {
+		return formatPublishAgo(item.publishtime)
+	}
+
+	function goBack(): void {
+		uni.navigateBack({})
+	}
+
+	function onOpen(item: CmsArchiveItem): void {
+		if (item.id > 0) openArchiveDetail(item.id)
+	}
+
+	function refreshLabels(): void {
+		pageTitle.value = t('publish.title')
+		loadingText.value = t('common.loading')
+		emptyText.value = t('publish.empty')
+	}
+
+	async function loadList(): Promise<void> {
+		if (loadPlatformSession() == null) {
+			rows.value = [] as Array<CmsArchiveItem>
+			uni.showToast({ title: t('profile.loginFirst'), icon: 'none' })
+			return
+		}
+		loading.value = true
+		try {
+			rows.value = await fetchMyArchives()
+		} catch (e) {
+			rows.value = [] as Array<CmsArchiveItem>
+			let msg = ''
+			try { msg = ('' + e).trim() } catch (e0) { msg = '' }
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? msg : t('publish.loadFail'), icon: 'none' })
+		}
+		loading.value = false
+	}
+
+	onShow(() => {
+		refreshLabels()
+		loadList()
+	})
+</script>
+
+<style>
+	.publish-page {
+		flex: 1;
+		background-color: #f5f6f8;
+		flex-direction: column;
+	}
+	.status-bar-holder {
+		height: var(--status-bar-height);
+		background-color: #ffffff;
+	}
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		height: 88rpx;
+		padding: 0 16rpx;
+		background-color: #ffffff;
+		border-bottom-width: 1rpx;
+		border-bottom-style: solid;
+		border-bottom-color: #f0f0f0;
+	}
+	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.back-text {
+		font-size: 48rpx;
+		color: #222222;
+		line-height: 48rpx;
+	}
+	.topbar-title {
+		flex: 1;
+		text-align: center;
+		font-size: 34rpx;
+		font-weight: 600;
+		color: #111111;
+	}
+	.topbar-right {
+		width: 72rpx;
+	}
+	.body {
+		flex: 1;
+		padding: 24rpx;
+	}
+	.state-row {
+		padding: 80rpx 24rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.state-text {
+		font-size: 28rpx;
+		color: #9ca3af;
+	}
+	.list-card {
+		background-color: #ffffff;
+		border-radius: 24rpx;
+		overflow: hidden;
+	}
+	.item-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 24rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-style: solid;
+		border-bottom-color: #f3f4f6;
+	}
+	.item-cover {
+		width: 120rpx;
+		height: 120rpx;
+		border-radius: 16rpx;
+		background-color: #e8eef8;
+		margin-right: 20rpx;
+		flex-shrink: 0;
+	}
+	.item-cover-fallback {
+		background-color: #eef2f7;
+	}
+	.item-main {
+		flex: 1;
+		flex-direction: column;
+		padding-right: 8rpx;
+	}
+	.item-title {
+		font-size: 30rpx;
+		color: #111111;
+		font-weight: 600;
+		lines: 2;
+		text-overflow: ellipsis;
+	}
+	.item-desc {
+		margin-top: 8rpx;
+		font-size: 24rpx;
+		color: #9ca3af;
+		lines: 1;
+		text-overflow: ellipsis;
+	}
+	.item-meta {
+		flex-direction: row;
+		align-items: center;
+		margin-top: 10rpx;
+		flex-wrap: wrap;
+	}
+	.meta-text {
+		font-size: 22rpx;
+		color: #9ca3af;
+		margin-right: 16rpx;
+	}
+	.meta-time {
+		font-size: 22rpx;
+		color: #9ca3af;
+	}
+	.item-arrow {
+		font-size: 36rpx;
+		color: #c4c9d4;
+		padding-left: 8rpx;
+	}
+	.scroll-pad {
+		height: 40rpx;
+	}
+</style>

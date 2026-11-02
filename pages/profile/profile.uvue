@@ -62,7 +62,7 @@
 
 			<view class="func-card">
 				<text class="func-title">{{ i18n.center }}</text>
-				<view class="func-cell" @click="onDiscover">
+				<view class="func-cell" @click="goMyPublish">
 					<image class="func-ico" src="/static/login/f1.png" mode="aspectFit"></image>
 					<text class="func-label">{{ i18n.myPublish }}</text>
 					<text class="func-arrow">›</text>
@@ -1191,6 +1191,9 @@
 	}
 	function goFollowing() {
 		uni.navigateTo({ url: '/pages/profile/following' })
+	}
+	function goMyPublish() {
+		uni.navigateTo({ url: '/pages/profile/publish' })
 	}
 	function onDiscover() {
 		uni.redirectTo({ url: '/pages/discover/discover' })

@@ -202,6 +202,15 @@
 				"backgroundColor": "#F5F6F8",
 				"backgroundColorContent": "#F5F6F8"
 			}
+		},
+		{
+			"path": "pages/profile/publish",
+			"style": {
+				"navigationBarTitleText": "My posts",
+				"navigationStyle": "custom",
+				"backgroundColor": "#F5F6F8",
+				"backgroundColorContent": "#F5F6F8"
+			}
 		}
 	],
 	"globalStyle": {
