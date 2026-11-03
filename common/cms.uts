@@ -50,6 +50,8 @@ export type CmsArchiveDetail = {
 	next_title: string
 	/** 发布者用户 ID，用于判断是否自己的项目 */
 	owner_id: string
+	/** 发布者 Matrix IM（owner.imUser），有则详情页可聊天 */
+	owner_im_user: string
 }
 
 export type CmsHomeData = {
@@ -603,7 +605,8 @@ export async function fetchArchiveDetail(id: number): Promise<CmsArchiveDetail> 
 		prev_title: prevTitle,
 		next_id: nextId,
 		next_title: nextTitle,
-		owner_id: ownerId
+		owner_id: ownerId,
+		owner_im_user: ''
 	}
 	return detail
 }
@@ -646,36 +649,68 @@ export async function fetchProjectDetail(id: number): Promise<CmsArchiveDetail> 
 	let image = pickStr(proj, 'cover')
 	if (image.length == 0) image = pickStr(proj, 'image')
 	if (image.length == 0) image = pickStr(proj, 'logo')
-	let channelName = pickStr(proj, 'category')
-	if (channelName.length == 0) {
-		const cat = data['category'] as UTSJSONObject
-		if (cat != null) channelName = pickStr(cat, 'name')
-	}
+	let channelName = ''
+	let cat = proj['category'] as UTSJSONObject
+	if (cat == null) cat = data['category'] as UTSJSONObject
+	if (cat != null) channelName = pickStr(cat, 'name')
+	if (channelName.length == 0) channelName = pickStr(proj, 'category')
 	let publishtime = pickNum(proj, 'start_time')
 	if (publishtime <= 0) publishtime = pickNum(proj, 'publishtime')
 	if (publishtime <= 0) publishtime = pickNum(proj, 'createtime')
+	if (publishtime <= 0) {
+		const ct = pickStr(proj, 'create_time')
+		if (ct.length >= 19) {
+			try {
+				const y = parseInt(ct.substring(0, 4))
+				const mo = parseInt(ct.substring(5, 7))
+				const d = parseInt(ct.substring(8, 10))
+				const h = parseInt(ct.substring(11, 13))
+				const mi = parseInt(ct.substring(14, 16))
+				const s = parseInt(ct.substring(17, 19))
+				if (y == y && mo == mo && d == d) {
+					const ms = new Date(y, mo - 1, d, h == h ? h : 0, mi == mi ? mi : 0, s == s ? s : 0).getTime()
+					if (ms == ms && ms > 0) publishtime = Math.floor(ms / 1000)
+				}
+			} catch (eCt) {}
+		}
+	}
 	const subtitle = pickStr(proj, 'subtitle')
 	const tags: Array<string> = []
-	if (subtitle.length > 0) tags.push(subtitle)
-	let ownerId = pickStr(proj, 'user_id')
-	if (ownerId.length == 0) ownerId = pickStr(proj, 'uid')
-	if (ownerId.length == 0) ownerId = pickStr(proj, 'member_id')
-	if (ownerId.length == 0) ownerId = pickStr(proj, 'author_id')
-	if (ownerId.length == 0) {
-		const n = pickNum(proj, 'user_id')
-		if (n > 0) ownerId = '' + n
+	const tagsRaw = pickStr(proj, 'tags')
+	if (tagsRaw.length > 0) {
+		const parts = tagsRaw.split(',')
+		for (let ti = 0; ti < parts.length; ti++) {
+			const tg = parts[ti].trim()
+			if (tg.length > 0) tags.push(tg)
+		}
 	}
+	if (tags.length == 0 && subtitle.length > 0) tags.push(subtitle)
+	let ownerId = pickStr(proj, 'owner_user_id')
 	if (ownerId.length == 0) {
-		const userObj = proj['user'] as UTSJSONObject
-		if (userObj != null) {
-			ownerId = pickStr(userObj, 'id')
-			if (ownerId.length == 0) ownerId = pickStr(userObj, 'user_id')
+		const nOwn = pickNum(proj, 'owner_user_id')
+		if (nOwn > 0) ownerId = '' + nOwn
+	}
+	if (ownerId.length == 0) ownerId = pickStr(proj, 'user_id')
+	if (ownerId.length == 0) ownerId = pickStr(proj, 'uid')
+	let author = pickStr(proj, 'audience')
+	let ownerIm = ''
+	const ownerObj = proj['owner'] as UTSJSONObject
+	if (ownerObj != null) {
+		if (ownerId.length == 0) {
+			ownerId = pickStr(ownerObj, 'id')
 			if (ownerId.length == 0) {
-				const n2 = pickNum(userObj, 'id')
+				const n2 = pickNum(ownerObj, 'id')
 				if (n2 > 0) ownerId = '' + n2
 			}
 		}
+		const nick = pickStr(ownerObj, 'nickname')
+		if (nick.length > 0) author = nick
+		ownerIm = pickStr(ownerObj, 'imUser')
+		if (ownerIm.length == 0) ownerIm = pickStr(ownerObj, 'im_user')
+		if (ownerIm.length == 0) ownerIm = pickStr(ownerObj, 'matrix_user_id')
 	}
+	let likes = pickNum(proj, 'likes')
+	if (likes <= 0) likes = pickNum(proj, 'follows')
 	const detail: CmsArchiveDetail = {
 		id: pickNum(proj, 'id'),
 		channel_id: pickNum(proj, 'category_id'),
@@ -685,9 +720,9 @@ export async function fetchProjectDetail(id: number): Promise<CmsArchiveDetail> 
 		description: description,
 		content: content,
 		tags: tags,
-		author: pickStr(proj, 'audience'),
+		author: author,
 		views: pickNum(proj, 'views'),
-		likes: pickNum(proj, 'likes'),
+		likes: likes,
 		comments: pickNum(proj, 'comments'),
 		publishtime: publishtime,
 		outlink: pickStr(proj, 'outlink'),
@@ -695,7 +730,8 @@ export async function fetchProjectDetail(id: number): Promise<CmsArchiveDetail> 
 		prev_title: '',
 		next_id: 0,
 		next_title: '',
-		owner_id: ownerId
+		owner_id: ownerId,
+		owner_im_user: ownerIm
 	}
 	return detail
 }

@@ -46,7 +46,7 @@
 		unfollowRelation,
 		RelationItem
 	} from '@/common/platform.uts'
-	import { openArchiveDetail } from '@/common/cms.uts'
+	import { openProjectDetail } from '@/common/cms.uts'
 
 	function t(key: string): string {
 		return __i18nT(key)
@@ -87,7 +87,7 @@
 
 	function onTapItem(item: RelationItem): void {
 		const id = parseInt(item.target_id)
-		if (id == id && id > 0) openArchiveDetail(id)
+		if (id == id && id > 0) openProjectDetail(id)
 	}
 
 	async function onUnfollow(item: RelationItem, idx: number): Promise<void> {

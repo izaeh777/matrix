@@ -78,7 +78,7 @@
 					v-for="item in hot"
 					:key="item.id"
 					class="project-card"
-					@click="onArchive(item)"
+					@click="onHotProject(item)"
 				>
 					<view class="project-cover-wrap">
 						<image
@@ -98,33 +98,6 @@
 						</view>
 					</view>
 					<text class="project-desc">{{ item.description }}</text>
-				</view>
-			</view>
-
-			<view v-if="friendLinks.length > 0" class="section">
-				<view class="section-head">
-					<text class="section-title">{{ i18n.friends }}</text>
-				</view>
-				<view class="friend-card">
-					<view class="friend-grid">
-						<view
-							v-for="link in friendLinks"
-							:key="link.id"
-							class="friend-item"
-							@click="onFriendLink(link)"
-						>
-							<image
-								v-if="friendImage(link).length > 0"
-								class="friend-logo"
-								:src="friendImage(link)"
-								mode="aspectFit"
-							></image>
-							<view v-else class="friend-logo-fallback">
-								<text class="friend-logo-text">{{ friendInitial(link) }}</text>
-							</view>
-							<text class="friend-name">{{ link.title }}</text>
-						</view>
-					</view>
 				</view>
 			</view>
 
@@ -164,12 +137,12 @@
 	import { getMatrix } from '@/common/matrix.uts'
 	import {
 		fetchCmsHome,
-		fetchFriendLinks,
+		fetchProjects,
 		cmsAssetUrl,
-		openCmsLink,
+		cmsHttpBase,
 		openArchiveDetail,
-		CmsArchiveItem,
-		CmsFriendLink
+		openProjectDetail,
+		CmsArchiveItem
 	} from '@/common/cms.uts'
 	import { tryConsumePendingFriend } from '@/common/deeplink.uts'
 	import { t as __i18nT, tx } from '@/common/i18n.uts'
@@ -196,7 +169,6 @@
 		hot: string
 		viewMore: string
 		emptyProject: string
-		friends: string
 	}
 
 	const session = loadSession()
@@ -204,7 +176,6 @@
 	const avatarUrl = ref<string>(DEFAULT_AVATAR)
 	const latest = ref<Array<CmsArchiveItem>>([])
 	const hot = ref<Array<CmsArchiveItem>>([])
-	const friendLinks = ref<Array<CmsFriendLink>>([])
 	const canPublish = ref<boolean>(canPublishProject(loadCachedVipLabel()))
 	const i18n = ref<HomeI18n>({
 		banner1: t('home.banner1'),
@@ -218,8 +189,7 @@
 		emptyNews: t('home.emptyNews'),
 		hot: t('home.hot'),
 		viewMore: t('home.viewMore'),
-		emptyProject: t('home.emptyProject'),
-		friends: t('home.friends')
+		emptyProject: t('home.emptyProject')
 	} as HomeI18n)
 
 	const shortName = computed((): string => {
@@ -275,7 +245,26 @@
 	}
 
 	function coverOf(item: CmsArchiveItem): string {
-		return cmsAssetUrl(item.image)
+		const img = item.image
+		if (img.length == 0) return ''
+		if (img.indexOf('blob:') == 0) return ''
+		if (img.indexOf('/assets/') == 0) return cmsHttpBase() + img
+		return cmsAssetUrl(img)
+	}
+
+	function sortByViewsDesc(list: Array<CmsArchiveItem>): Array<CmsArchiveItem> {
+		const out: Array<CmsArchiveItem> = []
+		for (let i = 0; i < list.length; i++) out.push(list[i])
+		for (let i = 0; i < out.length; i++) {
+			for (let j = i + 1; j < out.length; j++) {
+				if (out[j].views > out[i].views) {
+					const tmp = out[i]
+					out[i] = out[j]
+					out[j] = tmp
+				}
+			}
+		}
+		return out
 	}
 
 	function shortDesc(item: CmsArchiveItem): string {
@@ -290,22 +279,12 @@
 		return t('home.online')
 	}
 
-	function friendImage(link: CmsFriendLink): string {
-		return cmsAssetUrl(link.image)
-	}
-
-	function friendInitial(link: CmsFriendLink): string {
-		const title = link.title
-		if (title.length == 0) return t('home.chain')
-		return title.substring(0, 1)
-	}
-
-	function onFriendLink(link: CmsFriendLink): void {
-		openCmsLink(link.website)
-	}
-
 	function onArchive(item: CmsArchiveItem): void {
 		openArchiveDetail(item.id)
+	}
+
+	function onHotProject(item: CmsArchiveItem): void {
+		openProjectDetail(item.id)
 	}
 
 	function onSoon(): void {
@@ -348,14 +327,18 @@
 		try {
 			const home = await fetchCmsHome()
 			latest.value = home.latest.slice(0, 5)
-			hot.value = home.hot.slice(0, 6)
 		} catch (e) {
-			console.warn('加载首页失败', e)
+			console.warn('加载首页资讯失败', e)
 		}
 		try {
-			friendLinks.value = await fetchFriendLinks()
-		} catch (e2) {
-			console.warn('加载友链失败', e2)
+			const projects = await fetchProjects(0, '')
+			const ranked = sortByViewsDesc(projects)
+			const top: Array<CmsArchiveItem> = []
+			const n = ranked.length < 6 ? ranked.length : 6
+			for (let i = 0; i < n; i++) top.push(ranked[i])
+			hot.value = top
+		} catch (eHot) {
+			console.warn('加载热门项目失败', eHot)
 		}
 	}
 
@@ -378,8 +361,7 @@
 			emptyNews: t('home.emptyNews'),
 			hot: t('home.hot'),
 			viewMore: t('home.viewMore'),
-			emptyProject: t('home.emptyProject'),
-			friends: t('home.friends')
+			emptyProject: t('home.emptyProject')
 		} as HomeI18n
 		tryConsumePendingFriend()
 		refreshPublishGate()
@@ -676,51 +658,6 @@
 		color: #6b7280;
 		padding: 20rpx 24rpx 24rpx;
 		lines: 2;
-		text-overflow: ellipsis;
-	}
-	.friend-card {
-		background-color: #ffffff;
-		border-radius: 20rpx;
-		border-width: 1rpx;
-		border-color: #eef2f7;
-		border-style: solid;
-		padding: 12rpx 8rpx 8rpx;
-	}
-	.friend-grid {
-		flex-direction: row;
-		flex-wrap: wrap;
-	}
-	.friend-item {
-		width: 25%;
-		align-items: center;
-		padding: 16rpx 8rpx 20rpx;
-	}
-	.friend-logo {
-		width: 120rpx;
-		height: 48rpx;
-		margin-bottom: 10rpx;
-		background-color: #f3f6fb;
-		border-radius: 8rpx;
-	}
-	.friend-logo-fallback {
-		width: 88rpx;
-		height: 88rpx;
-		border-radius: 20rpx;
-		background-color: #dbe7f8;
-		align-items: center;
-		justify-content: center;
-		margin-bottom: 10rpx;
-	}
-	.friend-logo-text {
-		font-size: 32rpx;
-		color: #2f6ff2;
-		font-weight: 700;
-	}
-	.friend-name {
-		font-size: 22rpx;
-		color: #4b5563;
-		text-align: center;
-		lines: 1;
 		text-overflow: ellipsis;
 	}
 	.empty-tip {
