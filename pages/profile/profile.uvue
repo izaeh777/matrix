@@ -63,31 +63,26 @@
 			<view class="func-card">
 				<text class="func-title">{{ i18n.center }}</text>
 				<view class="func-cell" @click="goMyPublish">
-					<image class="func-ico" src="/static/login/f1.png" mode="aspectFit"></image>
 					<text class="func-label">{{ i18n.myPublish }}</text>
 					<text class="func-arrow">›</text>
 				</view>
 				<view class="func-line"></view>
 				<view class="func-cell" @click="goFollowing">
-					<image class="func-ico" src="/static/login/f2.png" mode="aspectFit"></image>
 					<text class="func-label">{{ i18n.follow }}</text>
 					<text class="func-arrow">›</text>
 				</view>
 				<view class="func-line"></view>
 				<view class="func-cell" @click="onInvite">
-					<image class="func-ico" src="/static/login/f3.png" mode="aspectFit"></image>
 					<text class="func-label">{{ i18n.invite }}</text>
 					<text class="func-arrow">›</text>
 				</view>
 				<view class="func-line"></view>
 				<view class="func-cell" @click="goStats">
-					<image class="func-ico" src="/static/login/q4.png" mode="aspectFit"></image>
 					<text class="func-label">{{ i18n.promoEarn }}</text>
 					<text class="func-arrow">›</text>
 				</view>
 				<view class="func-line"></view>
 				<view class="func-cell" @click="goTeam">
-					<image class="func-ico" src="/static/login/tuandui.png" mode="aspectFit"></image>
 					<text class="func-label">{{ i18n.myTeam }}</text>
 					<text class="func-arrow">›</text>
 				</view>
@@ -117,13 +112,17 @@
 			<view class="invite-sheet" @click.stop="">
 				<text class="invite-title">{{ t('invite.title') }}</text>
 				<text class="invite-desc">{{ t('invite.linkDesc') }}</text>
-				<view class="code-pill code-pill-link" @click="copyInviteLink">
+				<view class="code-pill code-pill-link">
 					<text class="code-text code-text-link">{{ inviteLinkDisplay }}</text>
-					<text class="code-copy">⧉</text>
 				</view>
 				<text class="invite-scan-tip">{{ t('invite.myCode') }} {{ inviteCodeDisplay }}</text>
-				<view class="invite-btn" @click="copyInviteLink">
-					<text class="invite-btn-text">{{ t('invite.copyLink') }}</text>
+				<view class="invite-copy-row">
+					<view class="invite-btn invite-btn-half invite-btn-half-l" @click="copyInviteLink">
+						<text class="invite-btn-text">{{ t('invite.copyLink') }}</text>
+					</view>
+					<view class="invite-btn invite-btn-half invite-btn-half-r" @click="copyInviteCode">
+						<text class="invite-btn-text">{{ t('invite.copyCode') }}</text>
+					</view>
 				</view>
 				<view v-if="canBindInviter" class="inviter-bind-box">
 					<text class="inviter-bind-title">{{ t('invite.bindTitle') }}</text>
@@ -1233,6 +1232,20 @@
 		})
 	}
 
+	function copyInviteCode(): void {
+		const code = inviteCodeDisplay.value as string
+		if (code.length == 0) {
+			uni.showToast({ title: t('invite.noCode'), icon: 'none' })
+			return
+		}
+		uni.setClipboardData({
+			data: code,
+			success: () => {
+				uni.showToast({ title: t('invite.codeCopied'), icon: 'none' })
+			}
+		})
+	}
+
 	async function onBindInviter(): Promise<void> {
 		if (bindInviterSubmitting.value) return
 		if (!canBindInviter.value) return
@@ -1542,11 +1555,6 @@
 		align-items: center;
 		padding: 28rpx 24rpx;
 	}
-	.func-ico {
-		width: 36rpx;
-		height: 36rpx;
-		margin-right: 16rpx;
-	}
 	.func-label {
 		flex: 1;
 		font-size: 30rpx;
@@ -1559,7 +1567,8 @@
 	.func-line {
 		height: 1rpx;
 		background-color: #f0f0f0;
-		margin-left: 88rpx;
+		margin-left: 24rpx;
+		margin-right: 24rpx;
 	}
 	.wx-tabbar {
 		flex-direction: row;
@@ -1709,10 +1718,26 @@
 		lines: 3;
 		text-overflow: ellipsis;
 	}
-	.code-copy {
-		font-size: 28rpx;
-		color: #2f6ff2;
+	.invite-copy-row {
+		width: 100%;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+	.invite-btn-half {
+		flex: 1;
+		width: auto;
+		height: 96rpx;
+		border-radius: 48rpx;
+	}
+	.invite-btn-half-l {
+		margin-right: 12rpx;
+	}
+	.invite-btn-half-r {
 		margin-left: 12rpx;
+	}
+	.invite-btn-half .invite-btn-text {
+		font-size: 28rpx;
 	}
 	.code-input-wrap {
 		width: 100%;
