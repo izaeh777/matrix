@@ -585,26 +585,40 @@ function httpPostForm(path: string, fields: UTSJSONObject): Promise<UTSJSONObjec
 export type CmsProjectDraft = {
 	name: string
 	category: string
-	intro: string
+	/** 对应接口 summary（原 intro） */
+	summary: string
 	logo: string
+	logoFullurl: string
 	cover: string
-	highlight: string
+	coverFullurl: string
+	/** 对应接口 subtitle（原 highlight） */
+	subtitle: string
 	audience: string
-	detail: string
+	/** 对应接口 content（原 description/detail） */
+	content: string
 	material: string
+	materialFullurl: string
+	video: string
+	videoFullurl: string
+	/** 项目启动时间，Unix 时间戳（秒） */
+	start_time: number
 }
 
 export async function createCmsProject(draft: CmsProjectDraft): Promise<number> {
+	const summary = draft.summary
+	const content = draft.content.length > 0 ? draft.content : summary
 	const fields: UTSJSONObject = {
 		name: draft.name,
 		category: draft.category,
-		intro: draft.intro,
-		description: draft.detail.length > 0 ? draft.detail : draft.intro,
-		highlight: draft.highlight,
+		summary: summary,
+		content: content,
+		subtitle: draft.subtitle,
 		audience: draft.audience,
 		logo: draft.logo,
 		cover: draft.cover,
-		material: draft.material
+		material: draft.material,
+		video: draft.video,
+		start_time: draft.start_time > 0 ? ('' + draft.start_time) : ''
 	}
 	const root = await httpPostForm('/api/v1/projects', fields)
 	const code = pickNum(root, 'code')

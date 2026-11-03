@@ -53,9 +53,17 @@
 
 					<text class="label"><text class="req">*</text>{{ i18n.intro }}</text>
 					<view class="area-wrap">
-						<textarea class="area" v-model="intro" maxlength="300" :placeholder="i18n.introPh"></textarea>
-						<text class="counter">{{ intro.length }}/300</text>
+						<textarea class="area" v-model="summary" maxlength="300" :placeholder="i18n.introPh"></textarea>
+						<text class="counter">{{ summary.length }}/300</text>
 					</view>
+
+					<text class="label"><text class="req">*</text>{{ i18n.startTime }}</text>
+					<picker mode="date" :value="startDateStr" @change="onStartDateChange">
+						<view class="select">
+							<text class="select-text" :class="{ 'ph': startDateStr.length == 0 }">{{ startDateStr.length > 0 ? startDateStr : i18n.startTimePh }}</text>
+							<text class="select-caret">▾</text>
+						</view>
+					</picker>
 
 					<text class="label"><text class="req">*</text>{{ i18n.logo }}</text>
 					<view class="upload-row">
@@ -84,15 +92,15 @@
 
 				<view v-if="step == 2" class="form">
 					<text class="label"><text class="req">*</text>{{ i18n.highlight }}</text>
-					<input class="input" v-model="highlight" :placeholder="i18n.highlightPh" />
+					<input class="input" v-model="subtitle" :placeholder="i18n.highlightPh" />
 
 					<text class="label"><text class="req">*</text>{{ i18n.audience }}</text>
 					<input class="input" v-model="audience" :placeholder="i18n.audiencePh" />
 
 					<text class="label"><text class="req">*</text>{{ i18n.detail }}</text>
 					<view class="area-wrap">
-						<textarea class="area" v-model="detail" maxlength="300" :placeholder="i18n.detailPh"></textarea>
-						<text class="counter">{{ detail.length }}/300</text>
+						<textarea class="area" v-model="content" maxlength="300" :placeholder="i18n.detailPh"></textarea>
+						<text class="counter">{{ content.length }}/300</text>
 					</view>
 				</view>
 
@@ -108,10 +116,21 @@
 						</view>
 						<text class="upload-hint">{{ i18n.uploadHint }}</text>
 					</view>
+					<text class="label">{{ i18n.video }}</text>
+					<view class="upload-row">
+						<view class="upload-box" @click="pickVideo">
+							<image v-if="videoFullurl.length > 0" class="upload-img" :src="videoFullurl" mode="aspectFill"></image>
+							<view v-else class="upload-empty">
+								<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
+								<text class="upload-txt">{{ i18n.uploadVideo }}</text>
+							</view>
+						</view>
+						<text class="upload-hint">{{ i18n.videoHint }}</text>
+					</view>
 					<text class="label">{{ i18n.coverPreview }}</text>
 					<view class="upload-row">
 						<view class="upload-box" @click="pickImage('cover')">
-							<image v-if="cover.length > 0" class="upload-img" :src="cover" mode="aspectFill"></image>
+							<image v-if="coverFullurl.length > 0" class="upload-img" :src="coverFullurl" mode="aspectFill"></image>
 							<view v-else class="upload-empty">
 								<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
 								<text class="upload-txt">{{ i18n.uploadCover }}</text>
@@ -126,8 +145,10 @@
 					<view class="review-card">
 						<text class="review-line">{{ i18n.reviewName }}{{ name }}</text>
 						<text class="review-line">{{ i18n.reviewCat }}{{ catText(category) }}</text>
-						<text class="review-line">{{ i18n.reviewIntro }}{{ intro }}</text>
-						<text class="review-line">{{ i18n.reviewHighlight }}{{ highlight }}</text>
+						<text class="review-line">{{ i18n.reviewIntro }}{{ summary }}</text>
+						<text class="review-line">{{ i18n.reviewHighlight }}{{ subtitle }}</text>
+						<text v-if="startDateStr.length > 0" class="review-line">{{ i18n.startTime }}：{{ startDateStr }}</text>
+						<text v-if="video.length > 0" class="review-line">{{ i18n.video }}：{{ i18n.videoReady }}</text>
 					</view>
 				</view>
 				<view class="scroll-pad"></view>
@@ -164,7 +185,7 @@
 	} from '@/common/platform.uts'
 	import { t, tx } from '@/common/i18n.uts'
 
-	const DRAFT_KEY = 'cms_project_draft_v1'
+	const DRAFT_KEY = 'cms_project_draft_v2'
 	const CATS: Array<string> = ['Web3', '金融', '直播', 'DeFi', '项目', '其他']
 
 	type PubI18n = {
@@ -180,6 +201,8 @@
 		categoryPh: string
 		intro: string
 		introPh: string
+		startTime: string
+		startTimePh: string
 		logo: string
 		uploadLogo: string
 		uploadHint: string
@@ -194,6 +217,10 @@
 		detailPh: string
 		material: string
 		uploadMaterial: string
+		video: string
+		uploadVideo: string
+		videoHint: string
+		videoReady: string
 		coverPreview: string
 		reviewTitle: string
 		reviewName: string
@@ -207,59 +234,117 @@
 		visitorBlock: string
 	}
 
+	function buildPubI18n(): PubI18n {
+		return {
+			title: t('pub.title'),
+			draft: t('pub.draft'),
+			step1: t('pub.step1'),
+			step2: t('pub.step2'),
+			step3: t('pub.step3'),
+			step4: t('pub.step4'),
+			name: t('pub.name'),
+			namePh: t('pub.namePh'),
+			category: t('pub.category'),
+			categoryPh: t('pub.categoryPh'),
+			intro: t('pub.intro'),
+			introPh: t('pub.introPh'),
+			startTime: t('pub.startTime'),
+			startTimePh: t('pub.startTimePh'),
+			logo: t('pub.logo'),
+			uploadLogo: t('pub.uploadLogo'),
+			uploadHint: t('pub.uploadHint'),
+			cover: t('pub.cover'),
+			uploadCover: t('pub.uploadCover'),
+			coverHint: t('pub.coverHint'),
+			highlight: t('pub.highlight'),
+			highlightPh: t('pub.highlightPh'),
+			audience: t('pub.audience'),
+			audiencePh: t('pub.audiencePh'),
+			detail: t('pub.detail'),
+			detailPh: t('pub.detailPh'),
+			material: t('pub.material'),
+			uploadMaterial: t('pub.uploadMaterial'),
+			video: t('pub.video'),
+			uploadVideo: t('pub.uploadVideo'),
+			videoHint: t('pub.videoHint'),
+			videoReady: t('pub.videoReady'),
+			coverPreview: t('pub.coverPreview'),
+			reviewTitle: t('pub.reviewTitle'),
+			reviewName: t('pub.reviewName'),
+			reviewCat: t('pub.reviewCat'),
+			reviewIntro: t('pub.reviewIntro'),
+			reviewHighlight: t('pub.reviewHighlight'),
+			next: t('pub.next'),
+			prev: t('pub.prev'),
+			submit: t('pub.submit'),
+			submitting: t('pub.submitting'),
+			visitorBlock: t('pub.visitorBlock')
+		} as PubI18n
+	}
+
 	const step = ref<number>(1)
 	const name = ref<string>('')
 	const category = ref<string>('')
-	const intro = ref<string>('')
+	const summary = ref<string>('')
+	const startDateStr = ref<string>('')
+	const startTime = ref<number>(0)
 	const logo = ref<string>('')
 	const logoFullurl = ref<string>('')
 	const cover = ref<string>('')
 	const coverFullurl = ref<string>('')
-	const highlight = ref<string>('')
+	const subtitle = ref<string>('')
 	const audience = ref<string>('')
-	const detail = ref<string>('')
+	const content = ref<string>('')
 	const material = ref<string>('')
 	const materialFullurl = ref<string>('')
+	const video = ref<string>('')
+	const videoFullurl = ref<string>('')
 	const submitting = ref<boolean>(false)
-	const i18n = ref<PubI18n>({
-		title: t('pub.title'),
-		draft: t('pub.draft'),
-		step1: t('pub.step1'),
-		step2: t('pub.step2'),
-		step3: t('pub.step3'),
-		step4: t('pub.step4'),
-		name: t('pub.name'),
-		namePh: t('pub.namePh'),
-		category: t('pub.category'),
-		categoryPh: t('pub.categoryPh'),
-		intro: t('pub.intro'),
-		introPh: t('pub.introPh'),
-		logo: t('pub.logo'),
-		uploadLogo: t('pub.uploadLogo'),
-		uploadHint: t('pub.uploadHint'),
-		cover: t('pub.cover'),
-		uploadCover: t('pub.uploadCover'),
-		coverHint: t('pub.coverHint'),
-		highlight: t('pub.highlight'),
-		highlightPh: t('pub.highlightPh'),
-		audience: t('pub.audience'),
-		audiencePh: t('pub.audiencePh'),
-		detail: t('pub.detail'),
-		detailPh: t('pub.detailPh'),
-		material: t('pub.material'),
-		uploadMaterial: t('pub.uploadMaterial'),
-		coverPreview: t('pub.coverPreview'),
-		reviewTitle: t('pub.reviewTitle'),
-		reviewName: t('pub.reviewName'),
-		reviewCat: t('pub.reviewCat'),
-		reviewIntro: t('pub.reviewIntro'),
-		reviewHighlight: t('pub.reviewHighlight'),
-		next: t('pub.next'),
-		prev: t('pub.prev'),
-		submit: t('pub.submit'),
-		submitting: t('pub.submitting'),
-		visitorBlock: t('pub.visitorBlock')
-	} as PubI18n)
+	const i18n = ref<PubI18n>(buildPubI18n())
+
+	function pickStrObj(obj: UTSJSONObject, key: string): string {
+		try {
+			const v = obj[key]
+			if (v != null) return '' + v
+		} catch (e0) {}
+		return ''
+	}
+
+	function dateToUnix(dateStr: string): number {
+		const parts = dateStr.split('-')
+		if (parts.length < 3) return 0
+		const y = parseInt(parts[0])
+		const m = parseInt(parts[1])
+		const d = parseInt(parts[2])
+		if (y != y || m != m || d != d) return 0
+		const ts = new Date(y, m - 1, d).getTime()
+		if (ts != ts || ts <= 0) return 0
+		return Math.floor(ts / 1000)
+	}
+
+	function unixToDateStr(ts: number): string {
+		if (ts <= 0) return ''
+		const d = new Date(ts * 1000)
+		const y = d.getFullYear()
+		const m = d.getMonth() + 1
+		const day = d.getDate()
+		const ms = m < 10 ? ('0' + m) : ('' + m)
+		const ds = day < 10 ? ('0' + day) : ('' + day)
+		return '' + y + '-' + ms + '-' + ds
+	}
+
+	type StartDateDetail = {
+		value: string
+	}
+	type StartDateChangeEvent = {
+		detail: StartDateDetail
+	}
+	function onStartDateChange(e: StartDateChangeEvent): void {
+		let v = ''
+		try { v = ('' + e.detail.value).trim() } catch (e0) { v = '' }
+		startDateStr.value = v
+		startTime.value = dateToUnix(v)
+	}
 
 	function loadDraft(): void {
 		try {
@@ -268,38 +353,56 @@
 			const text = ('' + raw).trim()
 			if (text.length == 0 || text.charAt(0) != '{') return
 			const obj = JSON.parse(text) as UTSJSONObject
-			name.value = obj['name'] != null ? '' + obj['name'] : ''
-			category.value = obj['category'] != null ? '' + obj['category'] : ''
-			intro.value = obj['intro'] != null ? '' + obj['intro'] : ''
-			logo.value = obj['logo'] != null ? '' + obj['logo'] : ''
-			logoFullurl.value = obj['logoFullurl'] != null ? '' + obj['logoFullurl'] : ''
-			cover.value = obj['cover'] != null ? '' + obj['cover'] : ''
-			coverFullurl.value = obj['coverFullurl'] != null ? '' + obj['coverFullurl'] : ''
-			highlight.value = obj['highlight'] != null ? '' + obj['highlight'] : ''
-			audience.value = obj['audience'] != null ? '' + obj['audience'] : ''
-			detail.value = obj['detail'] != null ? '' + obj['detail'] : ''
-			material.value = obj['material'] != null ? '' + obj['material'] : ''
-			materialFullurl.value = obj['materialFullurl'] != null ? '' + obj['materialFullurl'] : ''
+			name.value = pickStrObj(obj, 'name')
+			category.value = pickStrObj(obj, 'category')
+			summary.value = pickStrObj(obj, 'summary')
+			if (summary.value.length == 0) summary.value = pickStrObj(obj, 'intro')
+			logo.value = pickStrObj(obj, 'logo')
+			logoFullurl.value = pickStrObj(obj, 'logoFullurl')
+			cover.value = pickStrObj(obj, 'cover')
+			coverFullurl.value = pickStrObj(obj, 'coverFullurl')
+			subtitle.value = pickStrObj(obj, 'subtitle')
+			if (subtitle.value.length == 0) subtitle.value = pickStrObj(obj, 'highlight')
+			audience.value = pickStrObj(obj, 'audience')
+			content.value = pickStrObj(obj, 'content')
+			if (content.value.length == 0) content.value = pickStrObj(obj, 'detail')
+			material.value = pickStrObj(obj, 'material')
+			materialFullurl.value = pickStrObj(obj, 'materialFullurl')
+			video.value = pickStrObj(obj, 'video')
+			videoFullurl.value = pickStrObj(obj, 'videoFullurl')
+			let st = 0
+			try {
+				const n = parseInt(pickStrObj(obj, 'start_time'))
+				if (n == n && n > 0) st = n
+			} catch (e1) {}
+			startTime.value = st
+			startDateStr.value = unixToDateStr(st)
 		} catch (e) {}
 	}
 
-	function saveDraft(): void {
-		const draft: CmsProjectDraft = {
+	function buildDraft(): CmsProjectDraft {
+		return {
 			name: name.value,
 			category: category.value,
-			intro: intro.value,
+			summary: summary.value,
 			logo: logo.value,
 			logoFullurl: logoFullurl.value,
 			cover: cover.value,
 			coverFullurl: coverFullurl.value,
-			highlight: highlight.value,
+			subtitle: subtitle.value,
 			audience: audience.value,
-			detail: detail.value,
+			content: content.value,
 			material: material.value,
-			materialFullurl: materialFullurl.value
-		}
+			materialFullurl: materialFullurl.value,
+			video: video.value,
+			videoFullurl: videoFullurl.value,
+			start_time: startTime.value
+		} as CmsProjectDraft
+	}
+
+	function saveDraft(): void {
 		try {
-			uni.setStorageSync(DRAFT_KEY, JSON.stringify(draft))
+			uni.setStorageSync(DRAFT_KEY, JSON.stringify(buildDraft()))
 			uni.showToast({ title: i18n.value.draft, icon: 'none' })
 		} catch (e) {
 			uni.showToast({ title: 'save failed', icon: 'none' })
@@ -325,6 +428,43 @@
 		})
 	}
 
+	async function uploadPickedFile(path: string, kind: string): Promise<void> {
+		uni.showLoading({
+			title: kind == 'video' ? t('pub.uploadingVideo') : t('pub.uploadingImage'),
+			mask: true
+		})
+		try {
+			const data = await uploadPlatformImage(path)
+			const fileUrl = '' + data['url']
+			const fileFull = '' + data['fullurl']
+			if (fileUrl.length == 0) {
+				throw new Error(t('pub.uploadNoUrl'))
+			}
+			if (kind == 'logo') {
+				logo.value = fileUrl
+				logoFullurl.value = fileFull
+			} else if (kind == 'cover') {
+				cover.value = fileUrl
+				coverFullurl.value = fileFull
+			} else if (kind == 'material') {
+				material.value = fileUrl
+				materialFullurl.value = fileFull
+			} else if (kind == 'video') {
+				video.value = fileUrl
+				videoFullurl.value = fileFull.length > 0 ? fileFull : fileUrl
+			}
+			uni.showToast({ title: t('pub.uploadOk'), icon: 'success' })
+		} catch (e) {
+			let msg = t('pub.uploadFail')
+			try {
+				if (e instanceof Error && e.message.length > 0) msg = e.message
+			} catch (e1) {}
+			uni.showToast({ title: msg, icon: 'none' })
+		} finally {
+			uni.hideLoading()
+		}
+	}
+
 	async function pickImage(kind: string): Promise<void> {
 		uni.chooseImage({
 			count: 1,
@@ -333,45 +473,20 @@
 			success: async (res) => {
 				const paths = res.tempFilePaths
 				if (paths == null || paths.length == 0) return
-				const path = '' + paths[0]
-				// 开始上传
-				uni.showLoading({
-					title: '图片上传中...',
-					mask: true
-				})
-				try {
-					// 调用统一图片上传接口
-					const data = await uploadPlatformImage(path)
-					// 使用后端返回的图片相对路径
-					const imageUrl = '' + data['url']
-					const imageFullurl = '' + data['fullurl']
-					if (imageUrl.length == 0) {
-						throw new Error('服务器未返回图片地址')
-					}
-					// 更新对应图片
-					if (kind == 'logo') {
-						logo.value = imageUrl
-						logoFullurl.value = imageFullurl
-					} else if (kind == 'cover') {
-						cover.value = imageUrl
-						coverFullurl.value = imageFullurl
-					} else if (kind == 'material') {
-						material.value = imageUrl
-						materialFullurl.value = imageFullurl
-					}
-					uni.showToast({
-						title: '上传成功',
-						icon: 'success'
-					})
-				} catch (e) {
-					const msg = e instanceof Error ? e.message : '图片上传失败'
-					uni.showToast({
-						title: msg,
-						icon: 'none'
-					})
-				} finally {
-					uni.hideLoading()
-				}
+				await uploadPickedFile('' + paths[0], kind)
+			}
+		})
+	}
+
+	function pickVideo(): void {
+		uni.chooseVideo({
+			sourceType: ['album', 'camera'],
+			compressed: true,
+			success: async (res) => {
+				let path = ''
+				try { path = ('' + res.tempFilePath).trim() } catch (e0) { path = '' }
+				if (path.length == 0) return
+				await uploadPickedFile(path, 'video')
 			}
 		})
 	}
@@ -386,45 +501,7 @@
 	})
 
 	onShow(() => {
-		i18n.value = {
-			title: t('pub.title'),
-			draft: t('pub.draft'),
-			step1: t('pub.step1'),
-			step2: t('pub.step2'),
-			step3: t('pub.step3'),
-			step4: t('pub.step4'),
-			name: t('pub.name'),
-			namePh: t('pub.namePh'),
-			category: t('pub.category'),
-			categoryPh: t('pub.categoryPh'),
-			intro: t('pub.intro'),
-			introPh: t('pub.introPh'),
-			logo: t('pub.logo'),
-			uploadLogo: t('pub.uploadLogo'),
-			uploadHint: t('pub.uploadHint'),
-			cover: t('pub.cover'),
-			uploadCover: t('pub.uploadCover'),
-			coverHint: t('pub.coverHint'),
-			highlight: t('pub.highlight'),
-			highlightPh: t('pub.highlightPh'),
-			audience: t('pub.audience'),
-			audiencePh: t('pub.audiencePh'),
-			detail: t('pub.detail'),
-			detailPh: t('pub.detailPh'),
-			material: t('pub.material'),
-			uploadMaterial: t('pub.uploadMaterial'),
-			coverPreview: t('pub.coverPreview'),
-			reviewTitle: t('pub.reviewTitle'),
-			reviewName: t('pub.reviewName'),
-			reviewCat: t('pub.reviewCat'),
-			reviewIntro: t('pub.reviewIntro'),
-			reviewHighlight: t('pub.reviewHighlight'),
-			next: t('pub.next'),
-			prev: t('pub.prev'),
-			submit: t('pub.submit'),
-			submitting: t('pub.submitting'),
-			visitorBlock: t('pub.visitorBlock')
-		} as PubI18n
+		i18n.value = buildPubI18n()
 	})
 
 	function onBack(): void {
@@ -449,8 +526,12 @@
 				uni.showToast({ title: i18n.value.categoryPh, icon: 'none' })
 				return
 			}
-			if (intro.value.trim().length < 20) {
+			if (summary.value.trim().length < 20) {
 				uni.showToast({ title: i18n.value.introPh, icon: 'none' })
+				return
+			}
+			if (startTime.value <= 0) {
+				uni.showToast({ title: i18n.value.startTimePh, icon: 'none' })
 				return
 			}
 			if (logo.value.length == 0 || cover.value.length == 0) {
@@ -459,7 +540,7 @@
 			}
 		}
 		if (step.value == 2) {
-			if (highlight.value.trim().length < 5) {
+			if (subtitle.value.trim().length < 5) {
 				uni.showToast({ title: i18n.value.highlightPh, icon: 'none' })
 				return
 			}
@@ -467,7 +548,7 @@
 				uni.showToast({ title: i18n.value.audiencePh, icon: 'none' })
 				return
 			}
-			if (detail.value.trim().length < 20) {
+			if (content.value.trim().length < 20) {
 				uni.showToast({ title: i18n.value.detailPh, icon: 'none' })
 				return
 			}
@@ -490,20 +571,12 @@
 			}
 		}
 		submitting.value = true
-		const draft: CmsProjectDraft = {
-			name: name.value.trim(),
-			category: category.value,
-			intro: intro.value.trim(),
-			logo: logo.value,
-			logoFullurl: logoFullurl.value,
-			cover: cover.value,
-			coverFullurl: coverFullurl.value,
-			highlight: highlight.value.trim(),
-			audience: audience.value.trim(),
-			detail: detail.value.trim(),
-			material: material.value,
-			materialFullurl: materialFullurl.value
-		}
+		const draft = buildDraft()
+		draft.name = name.value.trim()
+		draft.summary = summary.value.trim()
+		draft.subtitle = subtitle.value.trim()
+		draft.audience = audience.value.trim()
+		draft.content = content.value.trim()
 		try {
 			const id = await createCmsProject(draft)
 			try {
