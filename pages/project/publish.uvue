@@ -60,7 +60,7 @@
 					<text class="label"><text class="req">*</text>{{ i18n.logo }}</text>
 					<view class="upload-row">
 						<view class="upload-box" @click="pickImage('logo')">
-							<image v-if="logo.length > 0" class="upload-img" :src="logo" mode="aspectFill"></image>
+							<image v-if="logoFullurl.length > 0" class="upload-img" :src="logoFullurl" mode="aspectFill"></image>
 							<view v-else class="upload-empty">
 								<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
 								<text class="upload-txt">{{ i18n.uploadLogo }}</text>
@@ -72,7 +72,7 @@
 					<text class="label"><text class="req">*</text>{{ i18n.cover }}</text>
 					<view class="upload-row">
 						<view class="upload-box" @click="pickImage('cover')">
-							<image v-if="cover.length > 0" class="upload-img" :src="cover" mode="aspectFill"></image>
+							<image v-if="coverFullurl.length > 0" class="upload-img" :src="coverFullurl" mode="aspectFill"></image>
 							<view v-else class="upload-empty">
 								<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
 								<text class="upload-txt">{{ i18n.uploadCover }}</text>
@@ -100,7 +100,7 @@
 					<text class="label">{{ i18n.material }}</text>
 					<view class="upload-row">
 						<view class="upload-box" @click="pickImage('material')">
-							<image v-if="material.length > 0" class="upload-img" :src="material" mode="aspectFill"></image>
+							<image v-if="materialFullurl.length > 0" class="upload-img" :src="materialFullurl" mode="aspectFill"></image>
 							<view v-else class="upload-empty">
 								<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
 								<text class="upload-txt">{{ i18n.uploadMaterial }}</text>
@@ -159,7 +159,8 @@
 	import {
 		fetchPlatformMe,
 		canPublishProject,
-		loadCachedVipLabel
+		loadCachedVipLabel,
+		uploadPlatformImage
 	} from '@/common/platform.uts'
 	import { t, tx } from '@/common/i18n.uts'
 
@@ -211,11 +212,14 @@
 	const category = ref<string>('')
 	const intro = ref<string>('')
 	const logo = ref<string>('')
+	const logoFullurl = ref<string>('')
 	const cover = ref<string>('')
+	const coverFullurl = ref<string>('')
 	const highlight = ref<string>('')
 	const audience = ref<string>('')
 	const detail = ref<string>('')
 	const material = ref<string>('')
+	const materialFullurl = ref<string>('')
 	const submitting = ref<boolean>(false)
 	const i18n = ref<PubI18n>({
 		title: t('pub.title'),
@@ -268,11 +272,14 @@
 			category.value = obj['category'] != null ? '' + obj['category'] : ''
 			intro.value = obj['intro'] != null ? '' + obj['intro'] : ''
 			logo.value = obj['logo'] != null ? '' + obj['logo'] : ''
+			logoFullurl.value = obj['logoFullurl'] != null ? '' + obj['logoFullurl'] : ''
 			cover.value = obj['cover'] != null ? '' + obj['cover'] : ''
+			coverFullurl.value = obj['coverFullurl'] != null ? '' + obj['coverFullurl'] : ''
 			highlight.value = obj['highlight'] != null ? '' + obj['highlight'] : ''
 			audience.value = obj['audience'] != null ? '' + obj['audience'] : ''
 			detail.value = obj['detail'] != null ? '' + obj['detail'] : ''
 			material.value = obj['material'] != null ? '' + obj['material'] : ''
+			materialFullurl.value = obj['materialFullurl'] != null ? '' + obj['materialFullurl'] : ''
 		} catch (e) {}
 	}
 
@@ -282,11 +289,14 @@
 			category: category.value,
 			intro: intro.value,
 			logo: logo.value,
+			logoFullurl: logoFullurl.value,
 			cover: cover.value,
+			coverFullurl: coverFullurl.value,
 			highlight: highlight.value,
 			audience: audience.value,
 			detail: detail.value,
-			material: material.value
+			material: material.value,
+			materialFullurl: materialFullurl.value
 		}
 		try {
 			uni.setStorageSync(DRAFT_KEY, JSON.stringify(draft))
@@ -315,18 +325,53 @@
 		})
 	}
 
-	function pickImage(kind: string): void {
+	async function pickImage(kind: string): Promise<void> {
 		uni.chooseImage({
 			count: 1,
 			sizeType: ['compressed'],
 			sourceType: ['album', 'camera'],
-			success: (res) => {
+			success: async (res) => {
 				const paths = res.tempFilePaths
 				if (paths == null || paths.length == 0) return
 				const path = '' + paths[0]
-				if (kind == 'logo') logo.value = path
-				else if (kind == 'cover') cover.value = path
-				else if (kind == 'material') material.value = path
+				// 开始上传
+				uni.showLoading({
+					title: '图片上传中...',
+					mask: true
+				})
+				try {
+					// 调用统一图片上传接口
+					const data = await uploadPlatformImage(path)
+					// 使用后端返回的图片相对路径
+					const imageUrl = '' + data['url']
+					const imageFullurl = '' + data['fullurl']
+					if (imageUrl.length == 0) {
+						throw new Error('服务器未返回图片地址')
+					}
+					// 更新对应图片
+					if (kind == 'logo') {
+						logo.value = imageUrl
+						logoFullurl.value = imageFullurl
+					} else if (kind == 'cover') {
+						cover.value = imageUrl
+						coverFullurl.value = imageFullurl
+					} else if (kind == 'material') {
+						material.value = imageUrl
+						materialFullurl.value = imageFullurl
+					}
+					uni.showToast({
+						title: '上传成功',
+						icon: 'success'
+					})
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : '图片上传失败'
+					uni.showToast({
+						title: msg,
+						icon: 'none'
+					})
+				} finally {
+					uni.hideLoading()
+				}
 			}
 		})
 	}
@@ -450,11 +495,14 @@
 			category: category.value,
 			intro: intro.value.trim(),
 			logo: logo.value,
+			logoFullurl: logoFullurl.value,
 			cover: cover.value,
+			coverFullurl: coverFullurl.value,
 			highlight: highlight.value.trim(),
 			audience: audience.value.trim(),
 			detail: detail.value.trim(),
-			material: material.value
+			material: material.value,
+			materialFullurl: materialFullurl.value
 		}
 		try {
 			const id = await createCmsProject(draft)

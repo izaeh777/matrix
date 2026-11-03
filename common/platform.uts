@@ -481,6 +481,67 @@ function parseSession(data: UTSJSONObject, emailFallback: string): PlatformSessi
 	return out
 }
 
+/**
+ * 上传平台图片
+ * POST /api/ajax/upload
+ *
+ * 参数：
+ * filePath：本地图片路径
+ *
+ * 请求字段：
+ * file：图片文件
+ *
+ * 返回：
+ * { url, fullurl, ... }
+ */
+export async function uploadPlatformImage(filePath: string): Promise<UTSJSONObject> {
+	if (filePath.trim().length == 0) {
+		throw new Error('请选择图片')
+	}
+
+	const token = platformToken()
+	if (token.length == 0) {
+		throw new Error('请先登录平台账号')
+	}
+
+	const url = apiBase() + '/api/ajax/upload'
+
+	const header: UTSJSONObject = withThinkLang({
+		'token': token
+	} as UTSJSONObject)
+
+	console.log('[upload] POST', url)
+
+	return new Promise((resolve, reject) => {
+		uni.uploadFile({
+			url: url,
+			filePath: filePath,
+			name: 'file',
+			header: header,
+			success: (res) => {
+				try {
+					if (res.statusCode < 200 || res.statusCode >= 300) {
+						reject(new Error('HTTP_' + res.statusCode))
+						return
+					}
+
+					const root = JSON.parse('' + res.data) as UTSJSONObject
+					const data = assertOk(root, '图片上传失败')
+
+					console.log('[upload] success', JSON.stringify(data))
+					resolve(data)
+				} catch (e) {
+					reject(e)
+				}
+			},
+			fail: (err) => {
+				console.error('[upload] fail', err.errMsg)
+				reject(new Error(err.errMsg))
+			}
+		})
+	})
+}
+
 /** 发送邮箱验证码 event=register|login|resetpwd|modify_pwd|withdraw… */
 export async function sendEmailCode(email: string, event: string): Promise<void> {
 	const fields: UTSJSONObject = {
