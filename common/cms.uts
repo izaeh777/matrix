@@ -5,7 +5,7 @@
  * 多语言头: think-lang
  */
 import { getThinkLang, t } from '@/common/i18n.uts'
-import { CMS_HOST, toMatrixUserId } from '@/common/config.uts'
+import { CMS_HOST, S3_HOST, toMatrixUserId } from '@/common/config.uts'
 
 export type CmsFriendLink = {
 	id: number
@@ -25,6 +25,8 @@ export type CmsArchiveItem = {
 	likes: number
 	comments: number
 	publishtime: number
+	/** 项目状态：draft/pending/normal/rejected/hidden/offline */
+	status: string
 }
 
 export type CmsArchiveDetail = {
@@ -46,6 +48,8 @@ export type CmsArchiveDetail = {
 	prev_title: string
 	next_id: number
 	next_title: string
+	/** 发布者用户 ID，用于判断是否自己的项目 */
+	owner_id: string
 }
 
 export type CmsHomeData = {
@@ -81,8 +85,7 @@ export function cmsAssetUrl(path: string): string {
 	if (path.length == 0) return ''
 	if (path.indexOf('http://') == 0 || path.indexOf('https://') == 0) return path
 	if (path.indexOf('//') == 0) return 'https:' + path
-	const base = cmsHttpBase()
-	const host = base.length > 0 ? base : CMS_HOST
+	const host = S3_HOST
 	if (path.charAt(0) == '/') return host + path
 	return host + '/' + path
 }
@@ -249,11 +252,24 @@ function parseArchiveRows(rows: Array<UTSJSONObject>): Array<CmsArchiveItem> {
 			views: pickNum(row, 'views'),
 			likes: pickNum(row, 'likes'),
 			comments: pickNum(row, 'comments'),
-			publishtime: pickNum(row, 'publishtime')
+			publishtime: pickNum(row, 'publishtime'),
+			status: pickStr(row, 'status')
 		}
 		out.push(item)
 	}
 	return out
+}
+
+/** 项目状态文案：draft/pending/normal/rejected/hidden/offline */
+export function projectStatusLabel(status: string): string {
+	const s = status.trim().toLowerCase()
+	if (s == 'draft') return t('publish.statusDraft')
+	if (s == 'pending') return t('publish.statusPending')
+	if (s == 'normal') return t('publish.statusNormal')
+	if (s == 'rejected') return t('publish.statusRejected')
+	if (s == 'hidden') return t('publish.statusHidden')
+	if (s == 'offline') return t('publish.statusOffline')
+	return status
 }
 
 function listFromData(data: UTSJSONObject | null, key: string): Array<UTSJSONObject> {
@@ -366,12 +382,102 @@ export async function fetchChannelArchives(channelId: number, keyword: string = 
  * GET /api/cms/archives/detail?id=
  * 接口一般只返回摘要 description，无独立 HTML 正文时用 description 作为正文
  */
+function parseMyProjectRows(rows: Array<UTSJSONObject>): Array<CmsArchiveItem> {
+	const out: Array<CmsArchiveItem> = []
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i]
+		let title = pickStr(row, 'title')
+		if (title.length == 0) title = pickStr(row, 'name')
+		if (title.length == 0) continue
+		let image = pickStr(row, 'image')
+		if (image.length == 0) image = pickStr(row, 'cover')
+		if (image.length == 0) image = pickStr(row, 'logo')
+		let description = pickStr(row, 'description')
+		if (description.length == 0) description = pickStr(row, 'summary')
+		if (description.length == 0) description = pickStr(row, 'content')
+		if (description.length == 0) description = pickStr(row, 'intro')
+		let publishtime = pickNum(row, 'publishtime')
+		if (publishtime <= 0) publishtime = pickNum(row, 'start_time')
+		if (publishtime <= 0) publishtime = pickNum(row, 'createtime')
+		if (publishtime <= 0) publishtime = pickNum(row, 'created_at')
+		if (publishtime <= 0) {
+			const ct = pickStr(row, 'create_time')
+			if (ct.length >= 19) {
+				try {
+					const y = parseInt(ct.substring(0, 4))
+					const mo = parseInt(ct.substring(5, 7))
+					const d = parseInt(ct.substring(8, 10))
+					const h = parseInt(ct.substring(11, 13))
+					const mi = parseInt(ct.substring(14, 16))
+					const s = parseInt(ct.substring(17, 19))
+					if (y == y && mo == mo && d == d) {
+						const ms = new Date(y, mo - 1, d, h == h ? h : 0, mi == mi ? mi : 0, s == s ? s : 0).getTime()
+						if (ms == ms && ms > 0) publishtime = Math.floor(ms / 1000)
+					}
+				} catch (eCt) {}
+			}
+		}
+		let status = pickStr(row, 'status')
+		if (status.length == 0) status = pickStr(row, 'state')
+		status = status.trim().toLowerCase()
+		let channelId = pickNum(row, 'channel_id')
+		if (channelId <= 0) channelId = pickNum(row, 'category_id')
+		let likes = pickNum(row, 'likes')
+		if (likes <= 0) likes = pickNum(row, 'follows')
+		const item: CmsArchiveItem = {
+			id: pickNum(row, 'id'),
+			channel_id: channelId,
+			title: title,
+			image: image,
+			description: description,
+			views: pickNum(row, 'views'),
+			likes: likes,
+			comments: pickNum(row, 'comments'),
+			publishtime: publishtime,
+			status: status
+		}
+		out.push(item)
+	}
+	return out
+}
+
 /**
- * 我发布的内容
- * GET /api/cms/user/archives  operationId=user_archives（需登录 token）
+ * 项目列表（发现页等）
+ * GET /api/v1/projects?category_id=&keyword=
+ */
+export async function fetchProjects(categoryId: number = 0, keyword: string = ''): Promise<Array<CmsArchiveItem>> {
+	let path = '/api/v1/projects'
+	const qs: Array<string> = []
+	if (categoryId > 0) qs.push('category_id=' + categoryId)
+	const kw = keyword.trim()
+	if (kw.length > 0) qs.push('keyword=' + encodeURIComponent(kw))
+	if (qs.length > 0) path += '?' + qs.join('&')
+	const root = await httpGetJson(path)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : t('cms.contentFail'))
+	}
+	let rows: Array<UTSJSONObject> = []
+	try {
+		rows = parseList(root['data'])
+	} catch (e0) {}
+	const data = root['data'] as UTSJSONObject
+	if (rows.length == 0 && data != null) {
+		rows = listFromData(data, 'list')
+		if (rows.length == 0) rows = listFromData(data, 'projects')
+		if (rows.length == 0) rows = listFromData(data, 'items')
+		if (rows.length == 0) rows = parseList(data as any)
+	}
+	return parseMyProjectRows(rows)
+}
+
+/**
+ * 我发布的项目
+ * GET /api/v1/projects/my（需登录 token）
  */
 export async function fetchMyArchives(): Promise<Array<CmsArchiveItem>> {
-	const root = await httpGetJson('/api/cms/user/archives', true)
+	const root = await httpGetJson('/api/v1/projects/my', true)
 	const code = pickNum(root, 'code')
 	if (code != 1) {
 		const msg = pickStr(root, 'msg')
@@ -384,13 +490,13 @@ export async function fetchMyArchives(): Promise<Array<CmsArchiveItem>> {
 	const data = root['data'] as UTSJSONObject
 	if (rows.length == 0 && data != null) {
 		rows = listFromData(data, 'list')
-		if (rows.length == 0) rows = listFromData(data, 'archives')
+		if (rows.length == 0) rows = listFromData(data, 'projects')
 		if (rows.length == 0) rows = listFromData(data, 'items')
 		if (rows.length == 0) rows = listFromData(data, 'data')
 		if (rows.length == 0) rows = parseList(data as any)
 	}
-	const out = parseArchiveRows(rows)
-	console.log('[cms] user/archives count=', out.length)
+	const out = parseMyProjectRows(rows)
+	console.log('[cms] projects/my count=', out.length)
 	return out
 }
 
@@ -459,6 +565,25 @@ export async function fetchArchiveDetail(id: number): Promise<CmsArchiveDetail> 
 		nextTitle = pickStr(next, 'title')
 	}
 
+	let ownerId = pickStr(archives, 'user_id')
+	if (ownerId.length == 0) ownerId = pickStr(archives, 'uid')
+	if (ownerId.length == 0) ownerId = pickStr(archives, 'member_id')
+	if (ownerId.length == 0) ownerId = pickStr(archives, 'author_id')
+	if (ownerId.length == 0) {
+		const n = pickNum(archives, 'user_id')
+		if (n > 0) ownerId = '' + n
+	}
+	if (ownerId.length == 0) {
+		const userObj = archives['user'] as UTSJSONObject
+		if (userObj != null) {
+			ownerId = pickStr(userObj, 'id')
+			if (ownerId.length == 0) ownerId = pickStr(userObj, 'user_id')
+			if (ownerId.length == 0) {
+				const n2 = pickNum(userObj, 'id')
+				if (n2 > 0) ownerId = '' + n2
+			}
+		}
+	}
 	const detail: CmsArchiveDetail = {
 		id: pickNum(archives, 'id'),
 		channel_id: pickNum(archives, 'channel_id'),
@@ -477,7 +602,8 @@ export async function fetchArchiveDetail(id: number): Promise<CmsArchiveDetail> 
 		prev_id: prevId,
 		prev_title: prevTitle,
 		next_id: nextId,
-		next_title: nextTitle
+		next_title: nextTitle,
+		owner_id: ownerId
 	}
 	return detail
 }
@@ -488,6 +614,190 @@ export function openArchiveDetail(id: number): void {
 		return
 	}
 	uni.navigateTo({ url: '/pages/article/detail?id=' + id })
+}
+
+/**
+ * 项目详情
+ * GET /api/v1/projects/detail?id=
+ * 映射为 CmsArchiveDetail，供详情页复用
+ */
+export async function fetchProjectDetail(id: number): Promise<CmsArchiveDetail> {
+	if (id <= 0) throw new Error(t('cms.needId'))
+	const root = await httpGetJson('/api/v1/projects/detail?id=' + id, true)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : t('cms.detailFail'))
+	}
+	const data = root['data'] as UTSJSONObject
+	if (data == null) throw new Error(t('cms.detailEmpty'))
+	let proj = data['project'] as UTSJSONObject
+	if (proj == null) proj = data['archives'] as UTSJSONObject
+	if (proj == null) proj = data
+	let title = pickStr(proj, 'title')
+	if (title.length == 0) title = pickStr(proj, 'name')
+	if (title.length == 0) throw new Error(t('cms.detailInvalid'))
+	let description = pickStr(proj, 'summary')
+	if (description.length == 0) description = pickStr(proj, 'description')
+	if (description.length == 0) description = pickStr(proj, 'intro')
+	let content = pickStr(proj, 'content')
+	if (content.length == 0) content = pickStr(proj, 'detail')
+	if (content.length == 0) content = description
+	let image = pickStr(proj, 'cover')
+	if (image.length == 0) image = pickStr(proj, 'image')
+	if (image.length == 0) image = pickStr(proj, 'logo')
+	let channelName = pickStr(proj, 'category')
+	if (channelName.length == 0) {
+		const cat = data['category'] as UTSJSONObject
+		if (cat != null) channelName = pickStr(cat, 'name')
+	}
+	let publishtime = pickNum(proj, 'start_time')
+	if (publishtime <= 0) publishtime = pickNum(proj, 'publishtime')
+	if (publishtime <= 0) publishtime = pickNum(proj, 'createtime')
+	const subtitle = pickStr(proj, 'subtitle')
+	const tags: Array<string> = []
+	if (subtitle.length > 0) tags.push(subtitle)
+	let ownerId = pickStr(proj, 'user_id')
+	if (ownerId.length == 0) ownerId = pickStr(proj, 'uid')
+	if (ownerId.length == 0) ownerId = pickStr(proj, 'member_id')
+	if (ownerId.length == 0) ownerId = pickStr(proj, 'author_id')
+	if (ownerId.length == 0) {
+		const n = pickNum(proj, 'user_id')
+		if (n > 0) ownerId = '' + n
+	}
+	if (ownerId.length == 0) {
+		const userObj = proj['user'] as UTSJSONObject
+		if (userObj != null) {
+			ownerId = pickStr(userObj, 'id')
+			if (ownerId.length == 0) ownerId = pickStr(userObj, 'user_id')
+			if (ownerId.length == 0) {
+				const n2 = pickNum(userObj, 'id')
+				if (n2 > 0) ownerId = '' + n2
+			}
+		}
+	}
+	const detail: CmsArchiveDetail = {
+		id: pickNum(proj, 'id'),
+		channel_id: pickNum(proj, 'category_id'),
+		channel_name: channelName,
+		title: title,
+		image: image,
+		description: description,
+		content: content,
+		tags: tags,
+		author: pickStr(proj, 'audience'),
+		views: pickNum(proj, 'views'),
+		likes: pickNum(proj, 'likes'),
+		comments: pickNum(proj, 'comments'),
+		publishtime: publishtime,
+		outlink: pickStr(proj, 'outlink'),
+		prev_id: 0,
+		prev_title: '',
+		next_id: 0,
+		next_title: '',
+		owner_id: ownerId
+	}
+	return detail
+}
+
+/** 打开项目详情（我的发布等） */
+export function openProjectDetail(id: number): void {
+	if (id <= 0) {
+		uni.showToast({ title: t('cms.newsInvalid'), icon: 'none' })
+		return
+	}
+	uni.navigateTo({ url: '/pages/article/detail?id=' + id + '&type=project' })
+}
+
+/** 打开项目编辑页 */
+export function openProjectEdit(id: number): void {
+	if (id <= 0) {
+		uni.showToast({ title: t('cms.newsInvalid'), icon: 'none' })
+		return
+	}
+	uni.navigateTo({ url: '/pages/project/publish?id=' + id })
+}
+
+/**
+ * 拉取项目用于编辑表单（不传 status）
+ * GET /api/v1/projects/detail?id=
+ */
+export async function fetchProjectEditDraft(id: number): Promise<CmsProjectDraft> {
+	if (id <= 0) throw new Error(t('cms.needId'))
+	const root = await httpGetJson('/api/v1/projects/detail?id=' + id, true)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : t('cms.detailFail'))
+	}
+	const data = root['data'] as UTSJSONObject
+	if (data == null) throw new Error(t('cms.detailEmpty'))
+	let proj = data['project'] as UTSJSONObject
+	if (proj == null) proj = data
+	let name = pickStr(proj, 'name')
+	if (name.length == 0) name = pickStr(proj, 'title')
+	let summary = pickStr(proj, 'summary')
+	if (summary.length == 0) summary = pickStr(proj, 'intro')
+	let content = pickStr(proj, 'content')
+	if (content.length == 0) content = pickStr(proj, 'description')
+	let subtitle = pickStr(proj, 'subtitle')
+	if (subtitle.length == 0) subtitle = pickStr(proj, 'highlight')
+	let category = pickStr(proj, 'category')
+	let categoryId = pickNum(proj, 'category_id')
+	if (categoryId <= 0) categoryId = pickNum(proj, 'channel_id')
+	const cat = data['category'] as UTSJSONObject
+	if (cat != null) {
+		if (category.length == 0) category = pickStr(cat, 'name')
+		if (categoryId <= 0) categoryId = pickNum(cat, 'id')
+	}
+	const logo = pickStr(proj, 'logo')
+	const cover = pickStr(proj, 'cover')
+	const material = pickStr(proj, 'material')
+	const video = pickStr(proj, 'video')
+	let startTime = pickNum(proj, 'start_time')
+	if (startTime <= 0) startTime = pickNum(proj, 'startTime')
+	const draft: CmsProjectDraft = {
+		name: name,
+		category: category,
+		category_id: categoryId,
+		summary: summary,
+		logo: logo,
+		logoFullurl: logo.length > 0 ? cmsAssetUrl(logo) : '',
+		cover: cover,
+		coverFullurl: cover.length > 0 ? cmsAssetUrl(cover) : '',
+		subtitle: subtitle,
+		audience: pickStr(proj, 'audience'),
+		content: content,
+		material: material,
+		materialFullurl: material.length > 0 ? cmsAssetUrl(material) : '',
+		video: video,
+		videoFullurl: video.length > 0 ? cmsAssetUrl(video) : '',
+		start_time: startTime
+	}
+	return draft
+}
+
+/** 编辑项目内容：传 id + 字段，不传 status */
+export async function updateCmsProjectContent(id: number, draft: CmsProjectDraft): Promise<void> {
+	if (id <= 0) throw new Error(t('cms.needId'))
+	const summary = draft.summary
+	const content = draft.content.length > 0 ? draft.content : summary
+	const fields: UTSJSONObject = {
+		id: id,
+		name: draft.name,
+		category_id: draft.category_id > 0 ? draft.category_id : 0,
+		category: draft.category,
+		summary: summary,
+		content: content,
+		subtitle: draft.subtitle,
+		audience: draft.audience,
+		logo: draft.logo,
+		cover: draft.cover,
+		material: draft.material,
+		video: draft.video,
+		start_time: draft.start_time > 0 ? ('' + draft.start_time) : ''
+	}
+	await updateCmsProject(fields)
 }
 
 /**
@@ -582,9 +892,55 @@ function httpPostForm(path: string, fields: UTSJSONObject): Promise<UTSJSONObjec
 	})
 }
 
+export type CmsProjectCategory = {
+	id: number
+	name: string
+	slug: string
+	icon: string
+	description: string
+}
+
+/**
+ * 项目分类列表
+ * GET /api/v1/projects/categories
+ */
+export async function fetchProjectCategories(): Promise<Array<CmsProjectCategory>> {
+	const root = await httpGetJson('/api/v1/projects/categories')
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : t('cms.categoriesFail'))
+	}
+	const data = root['data'] as UTSJSONObject
+	let rows = listFromData(data, 'list')
+	if (rows.length == 0) rows = listFromData(data, 'categories')
+	if (rows.length == 0 && data != null) rows = parseList(data as any)
+	const out: Array<CmsProjectCategory> = []
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i]
+		const id = pickNum(row, 'id')
+		const name = pickStr(row, 'name')
+		if (id <= 0 || name.length == 0) continue
+		const status = pickStr(row, 'status').trim().toLowerCase()
+		if (status.length > 0 && status != 'normal') continue
+		const item: CmsProjectCategory = {
+			id: id,
+			name: name,
+			slug: pickStr(row, 'slug'),
+			icon: pickStr(row, 'icon'),
+			description: pickStr(row, 'description')
+		}
+		out.push(item)
+	}
+	return out
+}
+
 export type CmsProjectDraft = {
 	name: string
+	/** 分类名称（展示用） */
 	category: string
+	/** 分类 ID（提交用 category_id） */
+	category_id: number
 	/** 对应接口 summary（原 intro） */
 	summary: string
 	logo: string
@@ -609,6 +965,7 @@ export async function createCmsProject(draft: CmsProjectDraft): Promise<number> 
 	const content = draft.content.length > 0 ? draft.content : summary
 	const fields: UTSJSONObject = {
 		name: draft.name,
+		category_id: draft.category_id > 0 ? draft.category_id : 0,
 		category: draft.category,
 		summary: summary,
 		content: content,
@@ -642,6 +999,41 @@ export async function submitCmsProject(id: number): Promise<void> {
 		const msg = pickStr(root, 'msg')
 		throw new Error(msg.length > 0 ? msg : t('cms.submitFail'))
 	}
+}
+
+/**
+ * 编辑项目 POST /api/v1/projects/update
+ * - 隐藏/删除：只传 id + status（hidden / offline）
+ * - 编辑内容：传 id 与其它字段，不要传 status
+ */
+export async function updateCmsProject(fields: UTSJSONObject): Promise<void> {
+	const idRaw = fields['id']
+	let id = 0
+	try {
+		if (idRaw != null) {
+			const n = parseInt('' + idRaw)
+			if (n == n) id = n
+		}
+	} catch (e0) {}
+	if (id <= 0) throw new Error(t('cms.needId'))
+	const root = await httpPostForm('/api/v1/projects/update', fields)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : t('cms.updateFail'))
+	}
+}
+
+/** 隐藏项目 status=hidden */
+export async function hideCmsProject(id: number): Promise<void> {
+	const fields: UTSJSONObject = { id: id, status: 'hidden' }
+	await updateCmsProject(fields)
+}
+
+/** 删除（下线）项目 status=offline */
+export async function offlineCmsProject(id: number): Promise<void> {
+	const fields: UTSJSONObject = { id: id, status: 'offline' }
+	await updateCmsProject(fields)
 }
 
 export function friendCodeOf(userId: string): string {

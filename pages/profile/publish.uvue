@@ -22,26 +22,49 @@
 				<view
 					v-for="(item, idx) in rows"
 					:key="'p' + item.id + '-' + idx"
-					class="item-row"
-					@click="onOpen(item)"
+					class="item-block"
 				>
-					<image
-						v-if="coverOf(item).length > 0"
-						class="item-cover"
-						:src="coverOf(item)"
-						mode="aspectFill"
-					></image>
-					<view v-else class="item-cover item-cover-fallback"></view>
-					<view class="item-main">
-						<text class="item-title">{{ item.title }}</text>
-						<text v-if="item.description.length > 0" class="item-desc">{{ item.description }}</text>
-						<view class="item-meta">
-							<text class="meta-text">{{ t('article.views') }} {{ item.views }}</text>
-							<text class="meta-text">{{ t('article.likes') }} {{ item.likes }}</text>
-							<text class="meta-time">{{ timeOf(item) }}</text>
+					<view class="item-row" @click="onOpen(item)">
+						<image
+							v-if="coverOf(item).length > 0"
+							class="item-cover"
+							:src="coverOf(item)"
+							mode="aspectFill"
+						></image>
+						<view v-else class="item-cover item-cover-fallback"></view>
+						<view class="item-main">
+							<view class="item-title-row">
+								<text class="item-title">{{ item.title }}</text>
+								<text
+									v-if="item.status.length > 0"
+									class="status-tag"
+									:class="'status-' + item.status"
+								>{{ statusOf(item) }}</text>
+							</view>
+							<text v-if="item.description.length > 0" class="item-desc">{{ item.description }}</text>
+							<view class="item-meta">
+								<text class="meta-text">{{ t('article.views') }} {{ item.views }}</text>
+								<text class="meta-text">{{ t('article.likes') }} {{ item.likes }}</text>
+								<text class="meta-time">{{ timeOf(item) }}</text>
+							</view>
+						</view>
+						<text class="item-arrow">›</text>
+					</view>
+					<view class="item-actions">
+						<view class="act-btn" @click.stop="onEdit(item)">
+							<text class="act-text">{{ t('publish.actEdit') }}</text>
+						</view>
+						<view
+							v-if="canHide(item)"
+							class="act-btn"
+							@click.stop="onHide(item, idx)"
+						>
+							<text class="act-text">{{ t('publish.actHide') }}</text>
+						</view>
+						<view class="act-btn act-danger" @click.stop="onDelete(item, idx)">
+							<text class="act-text act-text-danger">{{ t('publish.actDelete') }}</text>
 						</view>
 					</view>
-					<text class="item-arrow">›</text>
 				</view>
 			</view>
 			<view class="scroll-pad"></view>
@@ -56,7 +79,11 @@
 		fetchMyArchives,
 		cmsAssetUrl,
 		formatPublishAgo,
-		openArchiveDetail,
+		openProjectDetail,
+		projectStatusLabel,
+		hideCmsProject,
+		offlineCmsProject,
+		openProjectEdit,
 		CmsArchiveItem
 	} from '@/common/cms.uts'
 	import { loadPlatformSession } from '@/common/platform.uts'
@@ -69,6 +96,7 @@
 	const loadingText = ref<string>(t('common.loading'))
 	const emptyText = ref<string>(t('publish.empty'))
 	const loading = ref<boolean>(false)
+	const busy = ref<boolean>(false)
 	const rows = ref<Array<CmsArchiveItem>>([] as Array<CmsArchiveItem>)
 
 	function coverOf(item: CmsArchiveItem): string {
@@ -79,12 +107,85 @@
 		return formatPublishAgo(item.publishtime)
 	}
 
+	function statusOf(item: CmsArchiveItem): string {
+		return projectStatusLabel(item.status)
+	}
+
+	function canHide(item: CmsArchiveItem): boolean {
+		const s = item.status.trim().toLowerCase()
+		return s != 'hidden' && s != 'offline'
+	}
+
 	function goBack(): void {
 		uni.navigateBack({})
 	}
 
 	function onOpen(item: CmsArchiveItem): void {
-		if (item.id > 0) openArchiveDetail(item.id)
+		if (item.id > 0) openProjectDetail(item.id)
+	}
+
+	function onEdit(item: CmsArchiveItem): void {
+		if (item.id > 0) openProjectEdit(item.id)
+	}
+
+	function errMsg(e: any | null, fallback: string): string {
+		let msg = ''
+		try { msg = ('' + e).trim() } catch (e0) { msg = '' }
+		if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+		return msg.length > 0 ? msg : fallback
+	}
+
+	function removeAt(idx: number): void {
+		const next: Array<CmsArchiveItem> = [] as Array<CmsArchiveItem>
+		for (let i = 0; i < rows.value.length; i++) {
+			if (i != idx) next.push(rows.value[i])
+		}
+		rows.value = next
+	}
+
+	async function onHide(item: CmsArchiveItem, idx: number): Promise<void> {
+		if (busy.value || item.id <= 0) return
+		uni.showModal({
+			title: t('publish.actHide'),
+			content: t('publish.hideConfirm'),
+			success: async (res) => {
+				if (!res.confirm) return
+				busy.value = true
+				try {
+					await hideCmsProject(item.id)
+					item.status = 'hidden'
+					const copy: Array<CmsArchiveItem> = [] as Array<CmsArchiveItem>
+					for (let i = 0; i < rows.value.length; i++) {
+						copy.push(rows.value[i])
+					}
+					rows.value = copy
+					uni.showToast({ title: t('publish.hideOk'), icon: 'none' })
+				} catch (e) {
+					uni.showToast({ title: errMsg(e, t('publish.hideFail')), icon: 'none' })
+				}
+				busy.value = false
+			}
+		})
+	}
+
+	async function onDelete(item: CmsArchiveItem, idx: number): Promise<void> {
+		if (busy.value || item.id <= 0) return
+		uni.showModal({
+			title: t('publish.actDelete'),
+			content: t('publish.deleteConfirm'),
+			success: async (res) => {
+				if (!res.confirm) return
+				busy.value = true
+				try {
+					await offlineCmsProject(item.id)
+					removeAt(idx)
+					uni.showToast({ title: t('publish.deleteOk'), icon: 'none' })
+				} catch (e) {
+					uni.showToast({ title: errMsg(e, t('publish.deleteFail')), icon: 'none' })
+				}
+				busy.value = false
+			}
+		})
 	}
 
 	function refreshLabels(): void {
@@ -104,10 +205,7 @@
 			rows.value = await fetchMyArchives()
 		} catch (e) {
 			rows.value = [] as Array<CmsArchiveItem>
-			let msg = ''
-			try { msg = ('' + e).trim() } catch (e0) { msg = '' }
-			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
-			uni.showToast({ title: msg.length > 0 ? msg : t('publish.loadFail'), icon: 'none' })
+			uni.showToast({ title: errMsg(e, t('publish.loadFail')), icon: 'none' })
 		}
 		loading.value = false
 	}
@@ -178,13 +276,40 @@
 		border-radius: 24rpx;
 		overflow: hidden;
 	}
-	.item-row {
-		flex-direction: row;
-		align-items: center;
-		padding: 24rpx;
+	.item-block {
 		border-bottom-width: 1rpx;
 		border-bottom-style: solid;
 		border-bottom-color: #f3f4f6;
+		flex-direction: column;
+	}
+	.item-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 24rpx 24rpx 12rpx;
+	}
+	.item-actions {
+		flex-direction: row;
+		justify-content: flex-end;
+		padding: 0 24rpx 20rpx;
+	}
+	.act-btn {
+		padding: 10rpx 24rpx;
+		margin-left: 16rpx;
+		border-radius: 28rpx;
+		border-width: 1rpx;
+		border-style: solid;
+		border-color: #d1d5db;
+		background-color: #ffffff;
+	}
+	.act-danger {
+		border-color: #fecaca;
+	}
+	.act-text {
+		font-size: 24rpx;
+		color: #4b5563;
+	}
+	.act-text-danger {
+		color: #dc2626;
 	}
 	.item-cover {
 		width: 120rpx;
@@ -202,12 +327,51 @@
 		flex-direction: column;
 		padding-right: 8rpx;
 	}
+	.item-title-row {
+		flex-direction: row;
+		align-items: center;
+		flex-wrap: wrap;
+	}
 	.item-title {
+		flex: 1;
 		font-size: 30rpx;
 		color: #111111;
 		font-weight: 600;
 		lines: 2;
 		text-overflow: ellipsis;
+		margin-right: 12rpx;
+	}
+	.status-tag {
+		font-size: 20rpx;
+		padding: 4rpx 12rpx;
+		border-radius: 8rpx;
+		color: #6b7280;
+		background-color: #f3f4f6;
+		flex-shrink: 0;
+	}
+	.status-draft {
+		color: #6b7280;
+		background-color: #f3f4f6;
+	}
+	.status-pending {
+		color: #b45309;
+		background-color: #fff7ed;
+	}
+	.status-normal {
+		color: #15803d;
+		background-color: #ecfdf5;
+	}
+	.status-rejected {
+		color: #b91c1c;
+		background-color: #fef2f2;
+	}
+	.status-hidden {
+		color: #6d28d9;
+		background-color: #f5f3ff;
+	}
+	.status-offline {
+		color: #475569;
+		background-color: #f1f5f9;
 	}
 	.item-desc {
 		margin-top: 8rpx;

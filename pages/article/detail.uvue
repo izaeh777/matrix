@@ -9,7 +9,7 @@
 			</view>
 			<text class="topbar-title">{{ t('article.title') }}</text>
 			<view
-				v-if="hasDetail"
+				v-if="showFollowBtn"
 				class="follow-btn"
 				:class="followed ? 'follow-btn-on' : ''"
 				@click="onToggleFollow"
@@ -84,6 +84,8 @@
 	import { t as __i18nT } from '@/common/i18n.uts'
 	import {
 		fetchArchiveDetail,
+		fetchProjectDetail,
+		fetchMyArchives,
 		cmsAssetUrl,
 		formatPublishAgo,
 		openCmsLink,
@@ -104,8 +106,12 @@
 	const errorText = ref<string>('')
 	const detail = ref<CmsArchiveDetail | null>(null)
 	const articleId = ref<number>(0)
+	/** archive | project：我的发布走项目详情接口 */
+	const detailType = ref<string>('archive')
 	const followed = ref<boolean>(false)
 	const followBusy = ref<boolean>(false)
+	/** 是否当前登录用户自己发布的项目 */
+	const isOwnProject = ref<boolean>(false)
 
 	const followBtnText = computed((): string => {
 		return followed.value ? t('follow.following') : t('follow.doFollow')
@@ -114,6 +120,35 @@
 	const hasDetail = computed((): boolean => {
 		return detail.value != null
 	})
+	/** 自己发布的项目（无论从哪打开）不显示关注 */
+	const showFollowBtn = computed((): boolean => {
+		return hasDetail.value && !isOwnProject.value
+	})
+
+	function ownerMatchesMe(ownerId: string): boolean {
+		const s = loadPlatformSession()
+		if (s == null) return false
+		const me = s.user_id.trim()
+		if (me.length == 0) return false
+		const oid = ownerId.trim()
+		if (oid.length == 0) return false
+		return me == oid
+	}
+
+	async function resolveIsOwn(projectId: number, ownerId: string): Promise<boolean> {
+		if (ownerMatchesMe(ownerId)) return true
+		if (loadPlatformSession() == null) return false
+		// 详情未带回作者时，用「我的发布」列表兜底
+		try {
+			const mine = await fetchMyArchives()
+			for (let i = 0; i < mine.length; i++) {
+				if (mine[i].id == projectId) return true
+			}
+		} catch (e) {
+			console.warn('判断是否自己的项目失败', e)
+		}
+		return false
+	}
 	const titleText = computed((): string => {
 		const d = detail.value
 		return d != null ? d.title : ''
@@ -244,13 +279,26 @@
 		loading.value = true
 		errorText.value = ''
 		followed.value = false
+		isOwnProject.value = false
 		try {
-			detail.value = await fetchArchiveDetail(id)
-			refreshFollowState(id)
+			let d: CmsArchiveDetail
+			if (detailType.value == 'project') {
+				d = await fetchProjectDetail(id)
+			} else {
+				d = await fetchArchiveDetail(id)
+			}
+			detail.value = d
+			isOwnProject.value = await resolveIsOwn(id, d.owner_id)
+			if (!isOwnProject.value) {
+				refreshFollowState(id)
+			}
 		} catch (e) {
 			detail.value = null
-			errorText.value = t('article.loadFail')
-			console.warn('加载资讯详情失败', e)
+			let msg = ''
+			try { msg = ('' + e).trim() } catch (e0) { msg = '' }
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			errorText.value = msg.length > 0 ? msg : t('article.loadFail')
+			console.warn('加载详情失败', e)
 		}
 		loading.value = false
 	}
@@ -269,6 +317,12 @@
 				if (n == n && n > 0) articleId.value = n
 			}
 		} catch (e0) {}
+		try {
+			const typ = options['type']
+			if (typ != null && ('' + typ).trim() == 'project') {
+				detailType.value = 'project'
+			}
+		} catch (e1) {}
 		loadDetail()
 	})
 </script>

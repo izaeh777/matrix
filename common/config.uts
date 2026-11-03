@@ -4,6 +4,8 @@
  */
 export const API_HOST = 'https://m.itiklink.com'
 export const CMS_HOST = API_HOST
+/** 上传图片 /uploads/... 资源前缀（桶路径） */
+export const S3_HOST = 'https://s3.itiklink.com/itiklink'
 export const MATRIX_HOMESERVER = 'https://matrix.itiklink.com'
 /** MXID 域名部分，不含协议，如 @user:matrix.itiklink.com */
 export const MATRIX_SERVER_NAME = 'matrix.itiklink.com'

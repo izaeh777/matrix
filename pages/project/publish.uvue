@@ -5,8 +5,9 @@
 		<!-- #endif -->
 		<view class="nav">
 			<text class="nav-back" @click="onBack">‹</text>
-			<text class="nav-title">{{ i18n.title }}</text>
-			<text class="nav-draft" @click="saveDraft">{{ i18n.draft }}</text>
+			<text class="nav-title">{{ editId > 0 ? i18n.editTitle : i18n.title }}</text>
+			<text v-if="editId <= 0" class="nav-draft" @click="saveDraft">{{ i18n.draft }}</text>
+			<text v-else class="nav-draft"></text>
 		</view>
 
 		<view class="steps">
@@ -168,7 +169,7 @@
 				</view>
 			</view>
 			<view v-else class="btn-primary" @click="submit">
-				<text class="btn-primary-text">{{ submitting ? i18n.submitting : i18n.submit }}</text>
+				<text class="btn-primary-text">{{ submitting ? i18n.submitting : (editId > 0 ? i18n.saveUpdate : i18n.submit) }}</text>
 			</view>
 		</view>
 	</view>
@@ -176,20 +177,29 @@
 
 <script setup lang="uts">
 	import { ref } from 'vue'
-	import { createCmsProject, submitCmsProject, CmsProjectDraft } from '@/common/cms.uts'
+	import {
+		createCmsProject,
+		submitCmsProject,
+		fetchProjectEditDraft,
+		fetchProjectCategories,
+		updateCmsProjectContent,
+		CmsProjectDraft,
+		CmsProjectCategory
+	} from '@/common/cms.uts'
 	import {
 		fetchPlatformMe,
 		canPublishProject,
 		loadCachedVipLabel,
 		uploadPlatformImage
 	} from '@/common/platform.uts'
-	import { t, tx } from '@/common/i18n.uts'
+	import { t } from '@/common/i18n.uts'
 
-	const DRAFT_KEY = 'cms_project_draft_v2'
-	const CATS: Array<string> = ['Web3', '金融', '直播', 'DeFi', '项目', '其他']
+	const DRAFT_KEY = 'cms_project_draft_v3'
 
 	type PubI18n = {
 		title: string
+		editTitle: string
+		saveUpdate: string
 		draft: string
 		step1: string
 		step2: string
@@ -237,6 +247,8 @@
 	function buildPubI18n(): PubI18n {
 		return {
 			title: t('pub.title'),
+			editTitle: t('pub.editTitle'),
+			saveUpdate: t('pub.saveUpdate'),
 			draft: t('pub.draft'),
 			step1: t('pub.step1'),
 			step2: t('pub.step2'),
@@ -285,6 +297,8 @@
 	const step = ref<number>(1)
 	const name = ref<string>('')
 	const category = ref<string>('')
+	const categoryId = ref<number>(0)
+	const catList = ref<Array<CmsProjectCategory>>([] as Array<CmsProjectCategory>)
 	const summary = ref<string>('')
 	const startDateStr = ref<string>('')
 	const startTime = ref<number>(0)
@@ -300,7 +314,87 @@
 	const video = ref<string>('')
 	const videoFullurl = ref<string>('')
 	const submitting = ref<boolean>(false)
+	const editId = ref<number>(0)
 	const i18n = ref<PubI18n>(buildPubI18n())
+
+	function resolveCategoryId(nameOrId: string, idHint: number): number {
+		if (idHint > 0) {
+			for (let i = 0; i < catList.value.length; i++) {
+				if (catList.value[i].id == idHint) return idHint
+			}
+			return idHint
+		}
+		const n = nameOrId.trim()
+		if (n.length == 0) return 0
+		for (let i = 0; i < catList.value.length; i++) {
+			if (catList.value[i].name == n) return catList.value[i].id
+		}
+		return 0
+	}
+
+	function applyDraft(d: CmsProjectDraft): void {
+		name.value = d.name
+		category.value = d.category
+		categoryId.value = resolveCategoryId(d.category, d.category_id)
+		if (category.value.length == 0 && categoryId.value > 0) {
+			for (let i = 0; i < catList.value.length; i++) {
+				if (catList.value[i].id == categoryId.value) {
+					category.value = catList.value[i].name
+					break
+				}
+			}
+		}
+		summary.value = d.summary
+		logo.value = d.logo
+		logoFullurl.value = d.logoFullurl
+		cover.value = d.cover
+		coverFullurl.value = d.coverFullurl
+		subtitle.value = d.subtitle
+		audience.value = d.audience
+		content.value = d.content
+		material.value = d.material
+		materialFullurl.value = d.materialFullurl
+		video.value = d.video
+		videoFullurl.value = d.videoFullurl
+		startTime.value = d.start_time
+		startDateStr.value = unixToDateStr(d.start_time)
+	}
+
+	async function loadCategories(): Promise<void> {
+		try {
+			const rows = await fetchProjectCategories()
+			catList.value = rows
+			if (categoryId.value <= 0 && category.value.length > 0) {
+				categoryId.value = resolveCategoryId(category.value, 0)
+			}
+		} catch (e) {
+			let msg = t('cms.categoriesFail')
+			try {
+				if (e instanceof Error && e.message.length > 0) msg = e.message
+			} catch (e1) {}
+			uni.showToast({ title: msg, icon: 'none' })
+		}
+	}
+
+	async function loadForEdit(id: number): Promise<void> {
+		uni.showLoading({ title: t('common.loading'), mask: true })
+		try {
+			const d = await fetchProjectEditDraft(id)
+			applyDraft(d)
+			editId.value = id
+		} catch (e) {
+			let msg = t('cms.detailFail')
+			try {
+				if (e instanceof Error && e.message.length > 0) msg = e.message
+			} catch (e1) {}
+			uni.showToast({ title: msg, icon: 'none' })
+			setTimeout(() => {
+				uni.navigateBack({})
+			}, 800)
+		} finally {
+			uni.hideLoading()
+		}
+	}
 
 	function pickStrObj(obj: UTSJSONObject, key: string): string {
 		try {
@@ -355,6 +449,12 @@
 			const obj = JSON.parse(text) as UTSJSONObject
 			name.value = pickStrObj(obj, 'name')
 			category.value = pickStrObj(obj, 'category')
+			let cid = 0
+			try {
+				const n = parseInt(pickStrObj(obj, 'category_id'))
+				if (n == n && n > 0) cid = n
+			} catch (eCid) {}
+			categoryId.value = cid
 			summary.value = pickStrObj(obj, 'summary')
 			if (summary.value.length == 0) summary.value = pickStrObj(obj, 'intro')
 			logo.value = pickStrObj(obj, 'logo')
@@ -384,6 +484,7 @@
 		return {
 			name: name.value,
 			category: category.value,
+			category_id: categoryId.value,
 			summary: summary.value,
 			logo: logo.value,
 			logoFullurl: logoFullurl.value,
@@ -410,19 +511,28 @@
 	}
 
 	function catText(raw: string): string {
-		return tx(raw)
+		return raw
 	}
 
-	function pickCategory(): void {
+	async function pickCategory(): Promise<void> {
+		if (catList.value.length == 0) {
+			await loadCategories()
+		}
+		if (catList.value.length == 0) {
+			uni.showToast({ title: t('cms.categoriesFail'), icon: 'none' })
+			return
+		}
 		const labels: Array<string> = []
-		for (let i = 0; i < CATS.length; i++) {
-			labels.push(tx(CATS[i]))
+		for (let i = 0; i < catList.value.length; i++) {
+			labels.push(catList.value[i].name)
 		}
 		uni.showActionSheet({
 			itemList: labels,
 			success: (res) => {
-				if (res.tapIndex >= 0 && res.tapIndex < CATS.length) {
-					category.value = CATS[res.tapIndex]
+				if (res.tapIndex >= 0 && res.tapIndex < catList.value.length) {
+					const picked = catList.value[res.tapIndex]
+					category.value = picked.name
+					categoryId.value = picked.id
 				}
 			}
 		})
@@ -491,12 +601,27 @@
 		})
 	}
 
-	onLoad(() => {
+	onLoad((options: UTSJSONObject) => {
 		if (!canPublishProject(loadCachedVipLabel())) {
 			uni.showToast({ title: t('pub.visitorBlock'), icon: 'none' })
 			setTimeout(() => {
 				uni.navigateBack({})
 			}, 800)
+			return
+		}
+		let id = 0
+		try {
+			const raw = options['id']
+			if (raw != null) {
+				const n = parseInt('' + raw)
+				if (n == n && n > 0) id = n
+			}
+		} catch (e0) {}
+		loadCategories()
+		if (id > 0) {
+			loadForEdit(id)
+		} else {
+			loadDraft()
 		}
 	})
 
@@ -522,7 +647,7 @@
 				uni.showToast({ title: i18n.value.namePh, icon: 'none' })
 				return
 			}
-			if (category.value.length == 0) {
+			if (categoryId.value <= 0 || category.value.length == 0) {
 				uni.showToast({ title: i18n.value.categoryPh, icon: 'none' })
 				return
 			}
@@ -578,12 +703,17 @@
 		draft.audience = audience.value.trim()
 		draft.content = content.value.trim()
 		try {
-			const id = await createCmsProject(draft)
-			try {
-				await submitCmsProject(id)
-			} catch (e1) {}
-			try { uni.removeStorageSync(DRAFT_KEY) } catch (e2) {}
-			uni.showToast({ title: i18n.value.submit, icon: 'none' })
+			if (editId.value > 0) {
+				await updateCmsProjectContent(editId.value, draft)
+				uni.showToast({ title: i18n.value.saveUpdate, icon: 'none' })
+			} else {
+				const id = await createCmsProject(draft)
+				try {
+					await submitCmsProject(id)
+				} catch (e1) {}
+				try { uni.removeStorageSync(DRAFT_KEY) } catch (e2) {}
+				uni.showToast({ title: i18n.value.submit, icon: 'none' })
+			}
 			setTimeout(() => {
 				uni.navigateBack()
 			}, 600)
@@ -595,8 +725,6 @@
 		}
 		submitting.value = false
 	}
-
-	loadDraft()
 </script>
 
 <style>

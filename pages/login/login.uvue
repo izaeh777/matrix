@@ -23,7 +23,7 @@
 				<image class="mascot" src="/static/login/tiki.png" mode="aspectFit" />
 			</view>
 
-			<image class="slogan-img" src="/static/login/ls.png" mode="widthFix"></image>
+			<image class="slogan-img" :src="sloganImg" mode="widthFix"></image>
 
 			<view class="btn-primary" @click="goLogin">
 				<text class="btn-primary-text">{{ i18n.signIn }}</text>
@@ -59,7 +59,7 @@
 <script setup lang="uts">
 	import { ref } from 'vue'
 	import { savePendingInviteCode } from '@/common/platform.uts'
-	import { getLocaleLabel, openLanguagePage, t } from '@/common/i18n.uts'
+	import { getLocaleLabel, getLoginSloganImage, openLanguagePage, t } from '@/common/i18n.uts'
 
 	type LoginI18n = {
 		signIn: string
@@ -75,6 +75,7 @@
 	}
 	const i18n = ref<LoginI18n>(buildLoginI18n())
 	const langLabel = ref<string>(getLocaleLabel())
+	const sloganImg = ref<string>(getLoginSloganImage())
 
 	onLoad((opts: UTSJSONObject) => {
 		try {
@@ -107,6 +108,7 @@
 
 	onShow(() => {
 		langLabel.value = getLocaleLabel()
+		sloganImg.value = getLoginSloganImage()
 		i18n.value = buildLoginI18n()
 	})
 

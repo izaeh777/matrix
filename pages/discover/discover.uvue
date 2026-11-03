@@ -30,13 +30,13 @@
 			<view class="tabs-row">
 				<view
 					v-for="tab in tabs"
-					:key="tab"
+					:key="'c' + tab.id"
 					class="tab"
-					:class="{ 'tab-on': tab == activeTab }"
+					:class="{ 'tab-on': tab.id == activeTabId }"
 					@click="onTab(tab)"
 				>
-					<text class="tab-text" :class="{ 'tab-text-on': tab == activeTab }">{{ tabLabel(tab) }}</text>
-					<view v-if="tab == activeTab" class="tab-line"></view>
+					<text class="tab-text" :class="{ 'tab-text-on': tab.id == activeTabId }">{{ tabLabel(tab) }}</text>
+					<view v-if="tab.id == activeTabId" class="tab-line"></view>
 				</view>
 			</view>
 		</view>
@@ -46,13 +46,13 @@
 			<view class="tabs-row">
 				<view
 					v-for="tab in tabs"
-					:key="tab"
+					:key="'c' + tab.id"
 					class="tab"
-					:class="{ 'tab-on': tab == activeTab }"
+					:class="{ 'tab-on': tab.id == activeTabId }"
 					@click="onTab(tab)"
 				>
-					<text class="tab-text" :class="{ 'tab-text-on': tab == activeTab }">{{ tabLabel(tab) }}</text>
-					<view v-if="tab == activeTab" class="tab-line"></view>
+					<text class="tab-text" :class="{ 'tab-text-on': tab.id == activeTabId }">{{ tabLabel(tab) }}</text>
+					<view v-if="tab.id == activeTabId" class="tab-line"></view>
 				</view>
 			</view>
 		</scroll-view>
@@ -228,30 +228,35 @@
 <script setup lang="uts">
 	import { ref, onMounted } from 'vue'
 	import {
-		fetchCmsHome,
-		searchCmsArchives,
-		fetchChannelArchives,
+		fetchProjects,
+		fetchProjectCategories,
 		cmsAssetUrl,
-		openArchiveDetail,
-		CmsArchiveItem
+		cmsHttpBase,
+		openProjectDetail,
+		CmsArchiveItem,
+		CmsProjectCategory
 	} from '@/common/cms.uts'
 	import {
 		fetchPlatformMe,
 		canPublishProject,
 		loadCachedVipLabel
 	} from '@/common/platform.uts'
-	import { t as __i18nT, tx } from '@/common/i18n.uts'
+	import { t as __i18nT } from '@/common/i18n.uts'
 	import { tabbarPadBottomStyle } from '@/common/app.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
 	const tabbarPadStyle = tabbarPadBottomStyle()
 
+	type DiscoverTab = {
+		id: number
+		name: string
+	}
 
-
-
-	const tabs: Array<string> = ['全部', '金融', '直播', 'Web3', 'Defi', '项目']
-	const activeTab = ref<string>('全部')
+	const tabs = ref<Array<DiscoverTab>>([
+		{ id: 0, name: t('api.catAll') } as DiscoverTab
+	] as Array<DiscoverTab>)
+	const activeTabId = ref<number>(0)
 	const keyword = ref<string>('')
 	const searchFocused = ref<boolean>(false)
 	const loading = ref<boolean>(false)
@@ -267,7 +272,41 @@
 	const latestList = ref<Array<CmsArchiveItem>>([])
 
 	function coverOf(item: CmsArchiveItem): string {
-		return cmsAssetUrl(item.image)
+		const img = item.image
+		if (img.length == 0) return ''
+		if (img.indexOf('blob:') == 0) return ''
+		if (img.indexOf('/assets/') == 0) return cmsHttpBase() + img
+		return cmsAssetUrl(img)
+	}
+
+	function sortByViewsDesc(list: Array<CmsArchiveItem>): Array<CmsArchiveItem> {
+		const out: Array<CmsArchiveItem> = []
+		for (let i = 0; i < list.length; i++) out.push(list[i])
+		for (let i = 0; i < out.length; i++) {
+			for (let j = i + 1; j < out.length; j++) {
+				if (out[j].views > out[i].views) {
+					const tmp = out[i]
+					out[i] = out[j]
+					out[j] = tmp
+				}
+			}
+		}
+		return out
+	}
+
+	function sortByTimeDesc(list: Array<CmsArchiveItem>): Array<CmsArchiveItem> {
+		const out: Array<CmsArchiveItem> = []
+		for (let i = 0; i < list.length; i++) out.push(list[i])
+		for (let i = 0; i < out.length; i++) {
+			for (let j = i + 1; j < out.length; j++) {
+				if (out[j].publishtime > out[i].publishtime) {
+					const tmp = out[i]
+					out[i] = out[j]
+					out[j] = tmp
+				}
+			}
+		}
+		return out
 	}
 
 	function tvlOf(item: CmsArchiveItem): number {
@@ -281,21 +320,12 @@
 		return (count * 320 + 40) + 'rpx'
 	}
 
-	function tabLabel(tab: string): string {
-		return tx(tab)
-	}
-
-	function tabDiyname(tab: string): string {
-		if (tab == '金融') return 'investment'
-		if (tab == '直播') return 'internet'
-		if (tab == 'Web3') return 'product'
-		if (tab == 'Defi') return 'smarthome'
-		if (tab == '项目') return 'download'
-		return ''
+	function tabLabel(tab: DiscoverTab): string {
+		return tab.name
 	}
 
 	function onOpen(item: CmsArchiveItem): void {
-		openArchiveDetail(item.id)
+		openProjectDetail(item.id)
 	}
 
 	function goHome(): void {
@@ -327,71 +357,50 @@
 		}
 	}
 
+	function splitHotLatest(list: Array<CmsArchiveItem>): void {
+		hotList.value = sortByViewsDesc(list)
+		latestList.value = sortByTimeDesc(list)
+	}
+
+	async function loadCategories(): Promise<void> {
+		try {
+			const rows = await fetchProjectCategories()
+			const next: Array<DiscoverTab> = []
+			next.push({ id: 0, name: t('api.catAll') } as DiscoverTab)
+			for (let i = 0; i < rows.length; i++) {
+				const c = rows[i] as CmsProjectCategory
+				next.push({ id: c.id, name: c.name } as DiscoverTab)
+			}
+			tabs.value = next
+		} catch (e) {
+			console.warn('加载分类失败', e)
+		}
+	}
+
 	async function loadData(): Promise<void> {
 		loading.value = true
 		try {
-			const home = await fetchCmsHome()
-			let hot = home.hot
-			let latest = home.latest
-			const tab = activeTab.value
-			if (tab != '全部') {
-				const filtered: Array<CmsArchiveItem> = []
-				const all: Array<CmsArchiveItem> = []
-				for (let i = 0; i < hot.length; i++) all.push(hot[i])
-				for (let j = 0; j < latest.length; j++) all.push(latest[j])
-				for (let k = 0; k < all.length; k++) {
-					const t = all[k].title
-					const d = all[k].description
-					if (t.indexOf(tab) >= 0 || d.indexOf(tab) >= 0) filtered.push(all[k])
-				}
-				if (filtered.length > 0) {
-					hot = filtered
-					latest = filtered
-				} else {
-					const diy = tabDiyname(tab)
-					if (diy.length > 0) {
-						try {
-							const more = await fetchChannelArchives(0, '', diy)
-							if (more.length > 0) {
-								hot = more
-								latest = more
-							}
-						} catch (e2) {}
-					}
-				}
-			}
-			hotList.value = hot
-			latestList.value = latest
+			const list = await fetchProjects(activeTabId.value, keyword.value.trim())
+			splitHotLatest(list)
 		} catch (e) {
 			console.warn('加载发现失败', e)
 		}
 		loading.value = false
 	}
 
-	function onTab(tab: string): void {
-		activeTab.value = tab
+	function onTab(tab: DiscoverTab): void {
+		activeTabId.value = tab.id
 		loadData()
 	}
 
 	async function onSearch(): Promise<void> {
-		const kw = keyword.value.trim()
-		if (kw.length == 0) {
-			loadData()
-			return
-		}
-		loading.value = true
-		try {
-			const list = await searchCmsArchives(kw)
-			hotList.value = list
-			latestList.value = list
-		} catch (e) {
-			console.warn('搜索失败', e)
-		}
-		loading.value = false
+		await loadData()
 	}
 
 	onMounted(() => {
-		loadData()
+		loadCategories().then(() => {
+			loadData()
+		})
 		refreshPublishGate()
 	})
 
