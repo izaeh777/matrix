@@ -8,13 +8,13 @@
 			<view class="topbar-back" @click="goBack">
 				<image class="topbar-back-icon" src="/static/login/f.png" mode="aspectFit"></image>
 			</view>
-			<text class="topbar-title">{{ i18n.title }}</text>
+			<text class="topbar-title">{{ pageTitle }}</text>
 			<view class="topbar-right"></view>
 		</view>
 
 		<scroll-view class="settings-scroll" scroll-y>
 			<!-- 个人资料：对接 PUT /api/v1/users/me -->
-			<view class="section">
+			<view v-if="pageMode == 'profile'" class="section">
 				<view class="section-title">{{ i18n.profile }}</view>
 				<view class="setting-row" @click="onEditAvatar">
 					<text class="setting-label">{{ i18n.avatar }}</text>
@@ -75,7 +75,7 @@
 					<text class="setting-label danger-text">{{ t('settings.logoutOthers') }}</text>
 				</view>
 			</view>
-			<view class="section">
+			<view v-if="pageMode == 'settings'" class="section">
 				<view class="section-title">{{ t('settings.accountSafe') }}</view>
 				<view class="setting-row" @click="onOpenAccounts">
 					<text class="setting-label">{{ t('accounts.title') }}</text>
@@ -91,7 +91,7 @@
 					<text class="setting-arrow">›</text>
 				</view>
 			</view>
-			<view class="section">
+			<view v-if="pageMode == 'settings'" class="section">
 				<view class="section-title">{{ t('settings.about') }}</view>
 				<view class="setting-row">
 					<text class="setting-label">{{ t('settings.appVer') }}</text>
@@ -104,7 +104,7 @@
 			</view>
 
 			<!-- 退出登录 -->
-			<view class="logout-wrap">
+			<view v-if="pageMode == 'settings'" class="logout-wrap">
 				<view class="btn-logout" @click="onLogout">
 					<text class="btn-logout-text">{{ i18n.logout }}</text>
 				</view>
@@ -367,7 +367,26 @@
 	}
 
 	const i18n = ref<SettingsI18n>(buildSettingsI18n())
+	/** profile=仅个人资料；settings=账号安全+关于 */
+	const pageMode = ref<string>('settings')
+	const pageTitle = computed((): string => {
+		if (pageMode.value == 'profile') return i18n.value.profile
+		return i18n.value.title
+	})
 	const session = ref<SessionInfo | null>(loadSession())
+
+	onLoad((opts: UTSJSONObject) => {
+		try {
+			const m = opts['mode']
+			if (m != null && ('' + m) == 'profile') {
+				pageMode.value = 'profile'
+			} else {
+				pageMode.value = 'settings'
+			}
+		} catch (e) {
+			pageMode.value = 'settings'
+		}
+	})
 	const currentDeviceId = computed(() => {
 		const s = session.value
 		if (s == null) return ''

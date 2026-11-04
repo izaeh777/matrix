@@ -331,8 +331,8 @@
 			console.warn('加载首页资讯失败', e)
 		}
 		try {
-			const projects = await fetchProjects(0, '')
-			const ranked = sortByViewsDesc(projects)
+			const projectsRes = await fetchProjects(0, '', 1, 20)
+			const ranked = sortByViewsDesc(projectsRes.list)
 			const top: Array<CmsArchiveItem> = []
 			const n = ranked.length < 6 ? ranked.length : 6
 			for (let i = 0; i < n; i++) top.push(ranked[i])
@@ -519,7 +519,7 @@
 	.banner-mascot-wrap {
 		position: absolute;
 		right: -20rpx;
-		bottom: 8rpx;
+		bottom: -36rpx;
 		width: 360rpx;
 		height: 400rpx;
 		z-index: 1;

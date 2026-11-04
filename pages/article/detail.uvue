@@ -7,7 +7,7 @@
 			<view class="back-btn" @click="goBack">
 				<text class="back-text">‹</text>
 			</view>
-			<text class="topbar-title">{{ t('article.title') }}</text>
+			<text class="topbar-title">{{ pageTitle }}</text>
 			<view class="topbar-actions">
 				<view v-if="showChatBtn" class="chat-btn" @click="onChatOwner">
 					<text class="chat-btn-text">{{ t('article.chatOwner') }}</text>
@@ -55,7 +55,28 @@
 				<view v-if="tagList.length > 0" class="tags">
 					<text v-for="tag in tagList" :key="tag" class="tag">{{ tag }}</text>
 				</view>
-				<text class="content">{{ contentText }}</text>
+				<video
+					v-for="(vsrc, vidx) in videoList"
+					:key="'vid-' + vidx"
+					class="content-video"
+					:src="vsrc"
+					controls
+					object-fit="contain"
+					:show-center-play-btn="true"
+				></video>
+				<view v-if="fileList.length > 0" class="file-list">
+					<view
+						v-for="(furl, fidx) in fileList"
+						:key="'file-' + fidx"
+						class="file-row"
+						@click="openFileUrl(furl)"
+					>
+						<text class="file-label">{{ fileLabelOf(furl) }}</text>
+						<text class="file-arrow">›</text>
+					</view>
+				</view>
+				<rich-text v-if="contentHtml.length > 0" class="content-html" :nodes="contentHtml"></rich-text>
+				<text v-else-if="contentPlain.length > 0" class="content">{{ contentPlain }}</text>
 				<view v-if="outlinkText.length > 0" class="outlink" @click="openOutlink">
 					<text class="outlink-text">{{ t('article.origin') }}</text>
 				</view>
@@ -95,6 +116,7 @@
 		cmsHttpBase,
 		formatPublishAgo,
 		openCmsLink,
+		parseContentMedia,
 		CmsArchiveDetail
 	} from '@/common/cms.uts'
 	import {
@@ -122,6 +144,10 @@
 
 	const followBtnText = computed((): string => {
 		return followed.value ? t('follow.following') : t('follow.doFollow')
+	})
+
+	const pageTitle = computed((): string => {
+		return detailType.value == 'project' ? t('article.projectTitle') : t('article.title')
 	})
 
 	const hasDetail = computed((): boolean => {
@@ -191,14 +217,58 @@
 		const d = detail.value
 		return d != null ? ('' + d.comments) : '0'
 	})
-	const contentText = computed((): string => {
+	function looksLikeHtml(s: string): boolean {
+		const t = s.trim()
+		return t.indexOf('<') >= 0 && t.indexOf('>') > t.indexOf('<')
+	}
+
+	const videoList = computed((): Array<string> => {
 		const d = detail.value
-		return d != null ? d.content : ''
+		if (d == null) return [] as Array<string>
+		return parseContentMedia(d.content, d.video_url, d.material_url).videos
 	})
+
+	const fileList = computed((): Array<string> => {
+		const d = detail.value
+		if (d == null) return [] as Array<string>
+		return parseContentMedia(d.content, d.video_url, d.material_url).files
+	})
+
+	const contentHtml = computed((): string => {
+		const d = detail.value
+		if (d == null) return ''
+		const html = parseContentMedia(d.content, d.video_url, d.material_url).html.trim()
+		if (html.length == 0) return ''
+		if (!looksLikeHtml(html)) return ''
+		return html
+	})
+
+	const contentPlain = computed((): string => {
+		const d = detail.value
+		if (d == null) return ''
+		if (looksLikeHtml(d.content)) return ''
+		return d.content
+	})
+
 	const outlinkText = computed((): string => {
 		const d = detail.value
 		return d != null ? d.outlink : ''
 	})
+
+	function fileLabelOf(url: string): string {
+		const lower = url.toLowerCase()
+		if (lower.indexOf('.ppt') >= 0) return t('article.filePpt')
+		if (lower.indexOf('.pdf') >= 0) return t('article.filePdf')
+		if (lower.indexOf('.doc') >= 0) return t('article.fileDoc')
+		if (lower.indexOf('.xls') >= 0) return t('article.fileXls')
+		if (lower.indexOf('.zip') >= 0 || lower.indexOf('.rar') >= 0) return t('article.fileZip')
+		return t('article.fileOther')
+	}
+
+	function openFileUrl(url: string): void {
+		if (url.length == 0) return
+		openCmsLink(url)
+	}
 	const tagList = computed((): Array<string> => {
 		const d = detail.value
 		return d != null ? d.tags : ([] as Array<string>)
@@ -551,6 +621,44 @@
 		font-size: 30rpx;
 		color: #333333;
 		line-height: 48rpx;
+	}
+	.content-html {
+		width: 100%;
+		font-size: 30rpx;
+		color: #333333;
+		line-height: 48rpx;
+		margin-top: 8rpx;
+	}
+	.content-video {
+		width: 100%;
+		height: 400rpx;
+		border-radius: 16rpx;
+		background-color: #111111;
+		margin-bottom: 20rpx;
+	}
+	.file-list {
+		flex-direction: column;
+		margin-bottom: 20rpx;
+	}
+	.file-row {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 22rpx 24rpx;
+		margin-bottom: 12rpx;
+		border-radius: 16rpx;
+		background-color: #f3f6fb;
+	}
+	.file-label {
+		flex: 1;
+		font-size: 28rpx;
+		color: #1861c8;
+		font-weight: 600;
+	}
+	.file-arrow {
+		font-size: 32rpx;
+		color: #9aa3af;
+		margin-left: 12rpx;
 	}
 	.outlink {
 		margin-top: 32rpx;

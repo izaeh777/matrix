@@ -12,7 +12,7 @@
 		</view>
 
 		<scroll-view class="form-scroll" scroll-y="true">
-			<text class="brand">i-tiklink</text>
+			<image class="brand-logo" src="/static/login/logo.png" mode="aspectFit"></image>
 			<text class="card-title">{{ t('login.walletAuth') }}</text>
 			<text class="card-subtitle">{{ subTitle }}</text>
 
@@ -484,23 +484,21 @@
 	.top-spacer {
 		width: 72rpx;
 	}
-	.brand {
-		font-size: 48rpx;
-		font-weight: 700;
-		color: #0b6bcb;
-		margin-bottom: 12rpx;
+	.brand-logo {
+		width: 280rpx;
+		height: 64rpx;
+		margin-bottom: 20rpx;
 	}
 	.card-title {
-		font-size: 36rpx;
-		font-weight: 600;
-		color: #1a1a1a;
-		margin-top: 24rpx;
+		font-size: 48rpx;
+		font-weight: 700;
+		color: #0f172a;
+		margin-bottom: 10rpx;
 	}
 	.card-subtitle {
 		font-size: 26rpx;
-		color: #6b7280;
-		margin-top: 8rpx;
-		margin-bottom: 36rpx;
+		color: #64748b;
+		margin-bottom: 28rpx;
 		lines: 2;
 	}
 	.status-card {

@@ -58,7 +58,13 @@
 		</scroll-view>
 		<!-- #endif -->
 
-		<scroll-view class="body" direction="vertical" :show-scrollbar="false">
+		<scroll-view
+			class="body"
+			direction="vertical"
+			:show-scrollbar="false"
+			:lower-threshold="120"
+			@scrolltolower="onScrollToLower"
+		>
 			<view class="banner">
 				<view class="banner-text">
 					<text class="banner-title">{{ t('discover.bannerTitle') }}</text>
@@ -69,134 +75,73 @@
 				</view>
 			</view>
 
-			<view v-if="loading && hotList.length == 0" class="empty">
+			<view v-if="loading && leftCol.length == 0 && rightCol.length == 0" class="empty">
 				<text class="empty-text">{{ t('common.loading') }}</text>
 			</view>
-
-			<view class="section">
-				<view class="section-head">
-					<text class="section-title">{{ t('discover.sectionWeb3') }}</text>
-					<view class="section-more" @click="onSearch">
-						<text class="section-more-ico">›</text>
-					</view>
-				</view>
-				<!-- #ifdef H5 -->
-				<view class="card-h5">
-					<view class="card-row" :style="{ width: rowWidth(hotList.length) }">
-						<view
-							v-for="(item, idx) in hotList"
-							:key="item.id"
-							class="card"
-							@click="onOpen(item)"
-						>
-							<view class="card-cover-wrap">
-								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
-								<view v-else class="card-cover card-cover-fallback"></view>
-								<view class="badge" :class="idx % 2 == 0 ? 'badge-hot' : 'badge-new'">
-									<text class="badge-text">{{ idx % 2 == 0 ? t('discover.hot') : t('discover.latest') }}</text>
-								</view>
-							</view>
-							<text class="card-title">{{ item.title }}</text>
-							<text class="card-meta">${{ tvlOf(item) }} {{ t('discover.tvlFrom') }}</text>
-							<view class="stat-row">
-								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
-								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>
-								<text class="stat">◎ {{ item.views > 0 ? item.views : 12 }}</text>
-							</view>
-						</view>
-					</view>
-				</view>
-				<!-- #endif -->
-				<!-- #ifndef H5 -->
-				<scroll-view class="card-scroll" direction="horizontal" :show-scrollbar="false">
-					<view class="card-row" :style="{ width: rowWidth(hotList.length) }">
-						<view
-							v-for="(item, idx) in hotList"
-							:key="item.id"
-							class="card"
-							@click="onOpen(item)"
-						>
-							<view class="card-cover-wrap">
-								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
-								<view v-else class="card-cover card-cover-fallback"></view>
-								<view class="badge" :class="idx % 2 == 0 ? 'badge-hot' : 'badge-new'">
-									<text class="badge-text">{{ idx % 2 == 0 ? t('discover.hot') : t('discover.latest') }}</text>
-								</view>
-							</view>
-							<text class="card-title">{{ item.title }}</text>
-							<text class="card-meta">${{ tvlOf(item) }} {{ t('discover.tvlFrom') }}</text>
-							<view class="stat-row">
-								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
-								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>
-								<text class="stat">◎ {{ item.views > 0 ? item.views : 12 }}</text>
-							</view>
-						</view>
-					</view>
-				</scroll-view>
-				<!-- #endif -->
+			<view v-else-if="!loading && leftCol.length == 0 && rightCol.length == 0" class="empty">
+				<text class="empty-text">{{ t('common.empty') }}</text>
 			</view>
-
-			<view class="section">
-				<view class="section-head">
-					<text class="section-title">{{ t('discover.sectionWeb3') }}</text>
-					<view class="section-more" @click="goNotify">
-						<text class="section-more-ico">›</text>
-					</view>
-				</view>
-				<!-- #ifdef H5 -->
-				<view class="card-h5">
-					<view class="card-row" :style="{ width: rowWidth(latestList.length) }">
-						<view
-							v-for="(item, idx) in latestList"
-							:key="item.id"
-							class="card"
-							@click="onOpen(item)"
-						>
-							<view class="card-cover-wrap">
-								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
-								<view v-else class="card-cover card-cover-fallback"></view>
-								<view class="badge" :class="idx % 2 == 0 ? 'badge-new' : 'badge-hot'">
-									<text class="badge-text">{{ idx % 2 == 0 ? t('discover.latest') : t('discover.hot') }}</text>
-								</view>
+			<view v-else class="waterfall">
+				<view class="waterfall-col">
+					<view
+						v-for="(cell, idx) in leftCol"
+						:key="'l' + cell.item.id + '-' + idx"
+						class="wf-card"
+						@click="onOpen(cell.item)"
+					>
+						<view class="wf-cover-wrap" :style="{ height: cell.coverH + 'rpx' }">
+							<image
+								v-if="coverOf(cell.item).length > 0"
+								class="wf-cover"
+								:src="coverOf(cell.item)"
+								mode="aspectFill"
+							></image>
+							<view v-else class="wf-cover wf-cover-fallback"></view>
+							<view class="badge" :class="cell.hot ? 'badge-hot' : 'badge-new'">
+								<text class="badge-text">{{ cell.hot ? t('discover.hot') : t('discover.latest') }}</text>
 							</view>
-							<text class="card-title">{{ item.title }}</text>
-							<text class="card-meta">${{ tvlOf(item) }} {{ t('discover.tvlFrom') }}</text>
-							<view class="stat-row">
-								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
-								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>
-								<text class="stat">◎ {{ item.views > 0 ? item.views : 12 }}</text>
-							</view>
+						</view>
+						<text class="wf-title">{{ cell.item.title }}</text>
+						<text v-if="descOf(cell.item).length > 0" class="wf-desc">{{ descOf(cell.item) }}</text>
+						<view class="stat-row">
+							<text class="stat">★ {{ cell.item.likes }}</text>
+							<text class="stat">◎ {{ cell.item.views }}</text>
 						</view>
 					</view>
 				</view>
-				<!-- #endif -->
-				<!-- #ifndef H5 -->
-				<scroll-view class="card-scroll" direction="horizontal" :show-scrollbar="false">
-					<view class="card-row" :style="{ width: rowWidth(latestList.length) }">
-						<view
-							v-for="(item, idx) in latestList"
-							:key="item.id"
-							class="card"
-							@click="onOpen(item)"
-						>
-							<view class="card-cover-wrap">
-								<image v-if="coverOf(item).length > 0" class="card-cover" :src="coverOf(item)" mode="aspectFill"></image>
-								<view v-else class="card-cover card-cover-fallback"></view>
-								<view class="badge" :class="idx % 2 == 0 ? 'badge-new' : 'badge-hot'">
-									<text class="badge-text">{{ idx % 2 == 0 ? t('discover.latest') : t('discover.hot') }}</text>
-								</view>
-							</view>
-							<text class="card-title">{{ item.title }}</text>
-							<text class="card-meta">${{ tvlOf(item) }} {{ t('discover.tvlFrom') }}</text>
-							<view class="stat-row">
-								<text class="stat">★ {{ item.likes > 0 ? item.likes : 12 }}</text>
-								<text class="stat">♡ {{ item.comments > 0 ? item.comments : 12 }}</text>
-								<text class="stat">◎ {{ item.views > 0 ? item.views : 12 }}</text>
+				<view class="waterfall-col">
+					<view
+						v-for="(cell, idx) in rightCol"
+						:key="'r' + cell.item.id + '-' + idx"
+						class="wf-card"
+						@click="onOpen(cell.item)"
+					>
+						<view class="wf-cover-wrap" :style="{ height: cell.coverH + 'rpx' }">
+							<image
+								v-if="coverOf(cell.item).length > 0"
+								class="wf-cover"
+								:src="coverOf(cell.item)"
+								mode="aspectFill"
+							></image>
+							<view v-else class="wf-cover wf-cover-fallback"></view>
+							<view class="badge" :class="cell.hot ? 'badge-hot' : 'badge-new'">
+								<text class="badge-text">{{ cell.hot ? t('discover.hot') : t('discover.latest') }}</text>
 							</view>
 						</view>
+						<text class="wf-title">{{ cell.item.title }}</text>
+						<text v-if="descOf(cell.item).length > 0" class="wf-desc">{{ descOf(cell.item) }}</text>
+						<view class="stat-row">
+							<text class="stat">★ {{ cell.item.likes }}</text>
+							<text class="stat">◎ {{ cell.item.views }}</text>
+						</view>
 					</view>
-				</scroll-view>
-				<!-- #endif -->
+				</view>
+			</view>
+			<view v-if="loadingMore" class="more-row">
+				<text class="more-text">{{ t('common.loading') }}</text>
+			</view>
+			<view v-else-if="!hasMore && (leftCol.length > 0 || rightCol.length > 0)" class="more-row">
+				<text class="more-text">{{ t('common.noMore') }}</text>
 			</view>
 			<view class="scroll-pad"></view>
 		</scroll-view>
@@ -260,6 +205,11 @@
 	const keyword = ref<string>('')
 	const searchFocused = ref<boolean>(false)
 	const loading = ref<boolean>(false)
+	const loadingMore = ref<boolean>(false)
+	const page = ref<number>(1)
+	const pageSize = 10
+	const total = ref<number>(0)
+	const hasMore = ref<boolean>(true)
 	const canPublish = ref<boolean>(canPublishProject(loadCachedVipLabel()))
 
 	function onSearchBoxTap(): void {
@@ -268,8 +218,14 @@
 	function onSearchBlur(): void {
 		searchFocused.value = false
 	}
-	const hotList = ref<Array<CmsArchiveItem>>([])
-	const latestList = ref<Array<CmsArchiveItem>>([])
+	type WaterfallCell = {
+		item: CmsArchiveItem
+		coverH: number
+		hot: boolean
+	}
+
+	const leftCol = ref<Array<WaterfallCell>>([] as Array<WaterfallCell>)
+	const rightCol = ref<Array<WaterfallCell>>([] as Array<WaterfallCell>)
 
 	function coverOf(item: CmsArchiveItem): string {
 		const img = item.image
@@ -279,45 +235,79 @@
 		return cmsAssetUrl(img)
 	}
 
-	function sortByViewsDesc(list: Array<CmsArchiveItem>): Array<CmsArchiveItem> {
-		const out: Array<CmsArchiveItem> = []
-		for (let i = 0; i < list.length; i++) out.push(list[i])
-		for (let i = 0; i < out.length; i++) {
-			for (let j = i + 1; j < out.length; j++) {
-				if (out[j].views > out[i].views) {
-					const tmp = out[i]
-					out[i] = out[j]
-					out[j] = tmp
-				}
+	function stripHtml(raw: string): string {
+		let s = raw.trim()
+		if (s.length == 0) return ''
+		let out = ''
+		let i = 0
+		while (i < s.length) {
+			const c = s.charAt(i)
+			if (c == '<') {
+				const j = s.indexOf('>', i)
+				if (j < 0) break
+				i = j + 1
+				continue
 			}
+			out += c
+			i++
+		}
+		out = out.split('&nbsp;').join(' ')
+		out = out.split('&lt;').join('<')
+		out = out.split('&gt;').join('>')
+		out = out.split('&amp;').join('&')
+		out = out.split('\n').join(' ').trim()
+		while (out.indexOf('  ') >= 0) {
+			out = out.split('  ').join(' ')
 		}
 		return out
 	}
 
-	function sortByTimeDesc(list: Array<CmsArchiveItem>): Array<CmsArchiveItem> {
-		const out: Array<CmsArchiveItem> = []
-		for (let i = 0; i < list.length; i++) out.push(list[i])
-		for (let i = 0; i < out.length; i++) {
-			for (let j = i + 1; j < out.length; j++) {
-				if (out[j].publishtime > out[i].publishtime) {
-					const tmp = out[i]
-					out[i] = out[j]
-					out[j] = tmp
-				}
+	function descOf(item: CmsArchiveItem): string {
+		const plain = stripHtml(item.description)
+		if (plain.length == 0) return ''
+		if (plain.length <= 48) return plain
+		return plain.substring(0, 48) + '…'
+	}
+
+	function coverHOf(item: CmsArchiveItem): number {
+		const m = item.id % 3
+		if (m == 0) return 280
+		if (m == 1) return 220
+		return 340
+	}
+
+	function colEstHeight(col: Array<WaterfallCell>): number {
+		let h = 0
+		for (let i = 0; i < col.length; i++) {
+			h += col[i].coverH + 120
+		}
+		return h
+	}
+
+	function applyWaterfall(list: Array<CmsArchiveItem>, append: boolean): void {
+		const left: Array<WaterfallCell> = append ? leftCol.value.slice(0) : ([] as Array<WaterfallCell>)
+		const right: Array<WaterfallCell> = append ? rightCol.value.slice(0) : ([] as Array<WaterfallCell>)
+		let leftH = colEstHeight(left)
+		let rightH = colEstHeight(right)
+		for (let i = 0; i < list.length; i++) {
+			const it = list[i]
+			const coverH = coverHOf(it)
+			const cell: WaterfallCell = {
+				item: it,
+				coverH: coverH,
+				hot: it.views >= 1000
+			} as WaterfallCell
+			const est = coverH + 120
+			if (leftH <= rightH) {
+				left.push(cell)
+				leftH += est
+			} else {
+				right.push(cell)
+				rightH += est
 			}
 		}
-		return out
-	}
-
-	function tvlOf(item: CmsArchiveItem): number {
-		const n = item.views
-		if (n <= 0) return 163
-		return 100 + (n % 800)
-	}
-
-	function rowWidth(count: number): string {
-		if (count <= 0) return '100%'
-		return (count * 320 + 40) + 'rpx'
+		leftCol.value = left
+		rightCol.value = right
 	}
 
 	function tabLabel(tab: DiscoverTab): string {
@@ -357,11 +347,6 @@
 		}
 	}
 
-	function splitHotLatest(list: Array<CmsArchiveItem>): void {
-		hotList.value = sortByViewsDesc(list)
-		latestList.value = sortByTimeDesc(list)
-	}
-
 	async function loadCategories(): Promise<void> {
 		try {
 			const rows = await fetchProjectCategories()
@@ -377,29 +362,57 @@
 		}
 	}
 
-	async function loadData(): Promise<void> {
-		loading.value = true
+	async function loadData(reset: boolean): Promise<void> {
+		if (reset) {
+			if (loading.value) return
+			page.value = 1
+			hasMore.value = true
+			total.value = 0
+			loading.value = true
+		} else {
+			if (loading.value || loadingMore.value || !hasMore.value) return
+			loadingMore.value = true
+		}
+		const reqPage = page.value
 		try {
-			const list = await fetchProjects(activeTabId.value, keyword.value.trim())
-			splitHotLatest(list)
+			const res = await fetchProjects(activeTabId.value, keyword.value.trim(), reqPage, pageSize)
+			total.value = res.total
+			applyWaterfall(res.list, !reset)
+			const loaded = leftCol.value.length + rightCol.value.length
+			if (res.list.length == 0 || loaded >= res.total || res.list.length < pageSize) {
+				hasMore.value = false
+			} else {
+				hasMore.value = true
+				page.value = reqPage + 1
+			}
 		} catch (e) {
 			console.warn('加载发现失败', e)
+			if (reset) {
+				leftCol.value = [] as Array<WaterfallCell>
+				rightCol.value = [] as Array<WaterfallCell>
+				hasMore.value = false
+			}
 		}
 		loading.value = false
+		loadingMore.value = false
+	}
+
+	function onScrollToLower(): void {
+		loadData(false)
 	}
 
 	function onTab(tab: DiscoverTab): void {
 		activeTabId.value = tab.id
-		loadData()
+		loadData(true)
 	}
 
 	async function onSearch(): Promise<void> {
-		await loadData()
+		await loadData(true)
 	}
 
 	onMounted(() => {
 		loadCategories().then(() => {
-			loadData()
+			loadData(true)
 		})
 		refreshPublishGate()
 	})
@@ -538,76 +551,39 @@
 		font-size: 22rpx;
 		color: #ffffff;
 	}
-	.section {
-		padding: 0 0 28rpx;
-	}
-	.section-head {
+	.waterfall {
 		flex-direction: row;
-		align-items: center;
-		padding: 0 28rpx 16rpx;
+		align-items: flex-start;
+		padding: 0 20rpx 8rpx;
 	}
-	.section-title {
+	.waterfall-col {
 		flex: 1;
-		font-size: 32rpx;
-		font-weight: 700;
-		color: #1a1a1a;
-	}
-	.section-more {
-		width: 44rpx;
-		height: 44rpx;
-		border-radius: 22rpx;
-		background-color: #f3f4f6;
-		align-items: center;
-		justify-content: center;
-	}
-	.section-more-ico {
-		font-size: 28rpx;
-		color: #6b7280;
-	}
-	.card-scroll {
-		width: 750rpx;
-		height: 400rpx;
-	}
-	.card-h5 {
-		width: 100%;
-		height: 400rpx;
-		/* #ifdef H5 */
-		overflow-x: auto;
-		overflow-y: hidden;
-		-webkit-overflow-scrolling: touch;
-		/* #endif */
-	}
-	.card-row {
-		flex-direction: row;
-		flex-wrap: nowrap;
-		padding-left: 20rpx;
-		padding-right: 20rpx;
-		height: 400rpx;
-		/* #ifdef H5 */
-		width: max-content;
-		display: flex;
-		/* #endif */
-	}
-	.card {
-		width: 300rpx;
-		height: 380rpx;
-		margin-right: 20rpx;
 		flex-direction: column;
-		flex-shrink: 0;
+		padding: 0 8rpx;
 	}
-	.card-cover-wrap {
-		width: 300rpx;
-		height: 220rpx;
+	.wf-card {
+		background-color: #ffffff;
+		border-radius: 20rpx;
+		overflow: hidden;
+		margin-bottom: 16rpx;
+		flex-direction: column;
+		padding-bottom: 16rpx;
+	}
+	.wf-cover-wrap {
+		width: 100%;
 		border-radius: 20rpx;
 		overflow: hidden;
 		margin-bottom: 12rpx;
 		position: relative;
+		background-color: #e8eef8;
 	}
-	.card-cover {
-		width: 300rpx;
-		height: 220rpx;
+	.wf-cover {
+		width: 100%;
+		height: 100%;
 	}
-	.card-cover-fallback {
+	.wf-cover-fallback {
+		width: 100%;
+		height: 100%;
 		background-color: #93c5fd;
 	}
 	.badge {
@@ -623,22 +599,26 @@
 		font-size: 20rpx;
 		color: #ffffff;
 	}
-	.card-title {
+	.wf-title {
 		font-size: 26rpx;
 		color: #1a1a1a;
 		font-weight: 600;
 		lines: 2;
 		text-overflow: ellipsis;
+		padding: 0 16rpx;
 		margin-bottom: 8rpx;
-		width: 300rpx;
 	}
-	.card-meta {
+	.wf-desc {
 		font-size: 22rpx;
 		color: #9aa3af;
+		lines: 2;
+		text-overflow: ellipsis;
+		padding: 0 16rpx;
 		margin-bottom: 8rpx;
 	}
 	.stat-row {
 		flex-direction: row;
+		padding: 0 16rpx;
 	}
 	.stat {
 		font-size: 20rpx;
@@ -651,6 +631,14 @@
 	}
 	.empty-text {
 		font-size: 26rpx;
+		color: #9aa3af;
+	}
+	.more-row {
+		padding: 16rpx 0 8rpx;
+		align-items: center;
+	}
+	.more-text {
+		font-size: 24rpx;
 		color: #9aa3af;
 	}
 	.scroll-pad { height: 120rpx; }

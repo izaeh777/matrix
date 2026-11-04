@@ -52,6 +52,108 @@ export type CmsArchiveDetail = {
 	owner_id: string
 	/** 发布者 Matrix IM（owner.imUser），有则详情页可聊天 */
 	owner_im_user: string
+	/** 项目视频（字段 video 或正文内嵌） */
+	video_url: string
+	/** 项目资料 PPT/PDF 等 */
+	material_url: string
+}
+
+export type CmsContentMedia = {
+	videos: Array<string>
+	files: Array<string>
+	html: string
+}
+
+/** 从 HTML 正文提取视频 / 附件链接，并保留可展示的 HTML */
+export function parseContentMedia(html: string, videoField: string = '', materialField: string = ''): CmsContentMedia {
+	const videos: Array<string> = []
+	const files: Array<string> = []
+	function pushUnique(arr: Array<string>, url: string): void {
+		const u = url.trim()
+		if (u.length == 0) return
+		if (u.indexOf('blob:') == 0) return
+		for (let i = 0; i < arr.length; i++) {
+			if (arr[i] == u) return
+		}
+		arr.push(u)
+	}
+	function absUrl(raw: string): string {
+		let u = raw.trim()
+		if (u.length == 0) return ''
+		// 站点域名下的 uploads 实际在 S3；拼到 m.itiklink.com 会落到 H5 首页
+		const site = CMS_HOST
+		if (site.length > 0 && u.indexOf(site + '/uploads/') == 0) {
+			u = u.substring(site.length)
+		}
+		if (u.indexOf('http://') == 0 || u.indexOf('https://') == 0) return u
+		if (u.indexOf('//') == 0) return 'https:' + u
+		return cmsAssetUrl(u)
+	}
+	function isVideoUrl(u: string): boolean {
+		const lower = u.toLowerCase()
+		return lower.indexOf('.mp4') >= 0 || lower.indexOf('.webm') >= 0 || lower.indexOf('.mov') >= 0 || lower.indexOf('.m3u8') >= 0
+	}
+	function isFileUrl(u: string): boolean {
+		const lower = u.toLowerCase()
+		return lower.indexOf('.ppt') >= 0 || lower.indexOf('.pptx') >= 0 || lower.indexOf('.pdf') >= 0
+			|| lower.indexOf('.doc') >= 0 || lower.indexOf('.docx') >= 0 || lower.indexOf('.xls') >= 0
+			|| lower.indexOf('.xlsx') >= 0 || lower.indexOf('.zip') >= 0 || lower.indexOf('.rar') >= 0
+	}
+	function collectQuotedUrls(src: string, key: string): void {
+		let from = 0
+		const needle = key + '="'
+		while (from < src.length) {
+			const i = src.indexOf(needle, from)
+			if (i < 0) break
+			const start = i + needle.length
+			const end = src.indexOf('"', start)
+			if (end < 0) break
+			const raw = src.substring(start, end)
+			const u = absUrl(raw)
+			if (isVideoUrl(u)) pushUnique(videos, u)
+			else if (isFileUrl(u)) pushUnique(files, u)
+			from = end + 1
+		}
+		const needle2 = key + "='"
+		from = 0
+		while (from < src.length) {
+			const i = src.indexOf(needle2, from)
+			if (i < 0) break
+			const start = i + needle2.length
+			const end = src.indexOf("'", start)
+			if (end < 0) break
+			const raw = src.substring(start, end)
+			const u = absUrl(raw)
+			if (isVideoUrl(u)) pushUnique(videos, u)
+			else if (isFileUrl(u)) pushUnique(files, u)
+			from = end + 1
+		}
+	}
+	const vf = absUrl(videoField)
+	if (vf.length > 0) pushUnique(videos, vf)
+	const mf = absUrl(materialField)
+	if (mf.length > 0) pushUnique(files, mf)
+	const raw = html != null ? html : ''
+	collectQuotedUrls(raw, 'src')
+	collectQuotedUrls(raw, 'href')
+	// 去掉 video 标签，避免 rich-text 再渲染一遍
+	let cleaned = raw
+	while (true) {
+		const a = cleaned.toLowerCase().indexOf('<video')
+		if (a < 0) break
+		const b = cleaned.toLowerCase().indexOf('</video>', a)
+		if (b < 0) {
+			cleaned = cleaned.substring(0, a)
+			break
+		}
+		cleaned = cleaned.substring(0, a) + cleaned.substring(b + 8)
+	}
+	const out: CmsContentMedia = {
+		videos: videos,
+		files: files,
+		html: cleaned
+	}
+	return out
 }
 
 export type CmsHomeData = {
@@ -396,8 +498,13 @@ function parseMyProjectRows(rows: Array<UTSJSONObject>): Array<CmsArchiveItem> {
 		if (image.length == 0) image = pickStr(row, 'logo')
 		let description = pickStr(row, 'description')
 		if (description.length == 0) description = pickStr(row, 'summary')
-		if (description.length == 0) description = pickStr(row, 'content')
+		if (description.length == 0) description = pickStr(row, 'subtitle')
 		if (description.length == 0) description = pickStr(row, 'intro')
+		// content 常为富文本 HTML，列表摘要不用原文，避免卡片露出标签
+		if (description.length == 0) {
+			const rawContent = pickStr(row, 'content')
+			if (rawContent.indexOf('<') < 0) description = rawContent
+		}
 		let publishtime = pickNum(row, 'publishtime')
 		if (publishtime <= 0) publishtime = pickNum(row, 'start_time')
 		if (publishtime <= 0) publishtime = pickNum(row, 'createtime')
@@ -443,17 +550,33 @@ function parseMyProjectRows(rows: Array<UTSJSONObject>): Array<CmsArchiveItem> {
 	return out
 }
 
+export type CmsProjectListResult = {
+	list: Array<CmsArchiveItem>
+	total: number
+	page: number
+	limit: number
+}
+
 /**
  * 项目列表（发现页等）
- * GET /api/v1/projects?category_id=&keyword=
+ * GET /api/v1/projects?category_id=&keyword=&page=&limit=
  */
-export async function fetchProjects(categoryId: number = 0, keyword: string = ''): Promise<Array<CmsArchiveItem>> {
+export async function fetchProjects(
+	categoryId: number = 0,
+	keyword: string = '',
+	page: number = 1,
+	limit: number = 20
+): Promise<CmsProjectListResult> {
 	let path = '/api/v1/projects'
 	const qs: Array<string> = []
 	if (categoryId > 0) qs.push('category_id=' + categoryId)
 	const kw = keyword.trim()
 	if (kw.length > 0) qs.push('keyword=' + encodeURIComponent(kw))
-	if (qs.length > 0) path += '?' + qs.join('&')
+	const p = page > 0 ? page : 1
+	const lim = limit > 0 ? limit : 20
+	qs.push('page=' + p)
+	qs.push('limit=' + lim)
+	path += '?' + qs.join('&')
 	const root = await httpGetJson(path)
 	const code = pickNum(root, 'code')
 	if (code != 1) {
@@ -465,13 +588,31 @@ export async function fetchProjects(categoryId: number = 0, keyword: string = ''
 		rows = parseList(root['data'])
 	} catch (e0) {}
 	const data = root['data'] as UTSJSONObject
+	let total = 0
+	let pageNum = p
+	let limitNum = lim
+	if (data != null) {
+		total = pickNum(data, 'total')
+		const pn = pickNum(data, 'page')
+		if (pn > 0) pageNum = pn
+		const ln = pickNum(data, 'limit')
+		if (ln > 0) limitNum = ln
+	}
 	if (rows.length == 0 && data != null) {
 		rows = listFromData(data, 'list')
 		if (rows.length == 0) rows = listFromData(data, 'projects')
 		if (rows.length == 0) rows = listFromData(data, 'items')
 		if (rows.length == 0) rows = parseList(data as any)
 	}
-	return parseMyProjectRows(rows)
+	const list = parseMyProjectRows(rows)
+	if (total <= 0) total = list.length
+	const out: CmsProjectListResult = {
+		list: list,
+		total: total,
+		page: pageNum,
+		limit: limitNum
+	}
+	return out
 }
 
 /**
@@ -606,7 +747,9 @@ export async function fetchArchiveDetail(id: number): Promise<CmsArchiveDetail> 
 		next_id: nextId,
 		next_title: nextTitle,
 		owner_id: ownerId,
-		owner_im_user: ''
+		owner_im_user: '',
+		video_url: '',
+		material_url: ''
 	}
 	return detail
 }
@@ -711,6 +854,8 @@ export async function fetchProjectDetail(id: number): Promise<CmsArchiveDetail> 
 	}
 	let likes = pickNum(proj, 'likes')
 	if (likes <= 0) likes = pickNum(proj, 'follows')
+	const videoUrl = pickStr(proj, 'video')
+	const materialUrl = pickStr(proj, 'material')
 	const detail: CmsArchiveDetail = {
 		id: pickNum(proj, 'id'),
 		channel_id: pickNum(proj, 'category_id'),
@@ -731,7 +876,9 @@ export async function fetchProjectDetail(id: number): Promise<CmsArchiveDetail> 
 		next_id: 0,
 		next_title: '',
 		owner_id: ownerId,
-		owner_im_user: ownerIm
+		owner_im_user: ownerIm,
+		video_url: videoUrl,
+		material_url: materialUrl
 	}
 	return detail
 }
@@ -1127,21 +1274,95 @@ export function matrixIdFromFriendCode(code: string): string {
 	return toMatrixUserId(code)
 }
 
+function normalizeExternalUrl(url: string): string {
+	let u = url.trim()
+	if (u.length == 0) return ''
+	if (u.indexOf('javascript:') == 0) return ''
+	const site = CMS_HOST
+	if (site.length > 0 && u.indexOf(site + '/uploads/') == 0) {
+		u = cmsAssetUrl(u.substring(site.length))
+	}
+	if (u.indexOf('http://') != 0 && u.indexOf('https://') != 0) {
+		if (u.indexOf('//') == 0) u = 'https:' + u
+		else u = cmsAssetUrl(u)
+	}
+	return u
+}
+
+function isOfficeOrPdfUrl(url: string): boolean {
+	const lower = url.toLowerCase()
+	return lower.indexOf('.ppt') >= 0 || lower.indexOf('.pptx') >= 0 || lower.indexOf('.pdf') >= 0
+		|| lower.indexOf('.doc') >= 0 || lower.indexOf('.docx') >= 0
+		|| lower.indexOf('.xls') >= 0 || lower.indexOf('.xlsx') >= 0
+}
+
+/** 打开外链 / 资料（PPT/PDF 等）；禁止落到本站 SPA 首页 */
 export function openCmsLink(url: string): void {
-	if (url.length == 0) return
-	if (url.indexOf('javascript:') == 0) return
+	const finalUrl = normalizeExternalUrl(url)
+	if (finalUrl.length == 0) return
 	// #ifdef H5
 	try {
 		const w = window as any
+		const doc = w != null ? w.document : null
+		if (doc != null) {
+			const a = doc.createElement('a')
+			a.href = finalUrl
+			a.target = '_blank'
+			a.rel = 'noopener noreferrer'
+			doc.body.appendChild(a)
+			a.click()
+			doc.body.removeChild(a)
+			return
+		}
 		if (w != null && w.open != null) {
-			w.open(url, '_blank')
+			w.open(finalUrl, '_blank')
 			return
 		}
 	} catch (e0) {}
 	// #endif
-	// uni-app x 无 plus；App 暂复制链接，避免 Kotlin 找不到 plus
+	// App：办公文档先下载再用系统打开，避免内嵌打开成站点首页
+	if (isOfficeOrPdfUrl(finalUrl)) {
+		uni.showLoading({ title: t('common.loading'), mask: true })
+		uni.downloadFile({
+			url: finalUrl,
+			success: (res) => {
+				uni.hideLoading()
+				if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath.length > 0) {
+					uni.openDocument({
+						filePath: res.tempFilePath,
+						showMenu: true,
+						fail: (_e1) => {
+							uni.setClipboardData({
+								data: finalUrl,
+								success: () => {
+									uni.showToast({ title: t('cms.copyOpen'), icon: 'none' })
+								}
+							})
+						}
+					})
+				} else {
+					uni.setClipboardData({
+						data: finalUrl,
+						success: () => {
+							uni.showToast({ title: t('cms.copyOpen'), icon: 'none' })
+						}
+					})
+				}
+			},
+			fail: (_e2) => {
+				uni.hideLoading()
+				uni.setClipboardData({
+					data: finalUrl,
+					success: () => {
+						uni.showToast({ title: t('cms.copyOpen'), icon: 'none' })
+					}
+				})
+			}
+		})
+		return
+	}
 	uni.setClipboardData({
-		data: url,
+		data: finalUrl,
 		success: () => {
 			uni.showToast({ title: t('cms.copyOpen'), icon: 'none' })
 		}
