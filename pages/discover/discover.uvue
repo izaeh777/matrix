@@ -97,8 +97,13 @@
 								mode="aspectFill"
 							></image>
 							<view v-else class="wf-cover wf-cover-fallback"></view>
-							<view class="badge" :class="cell.hot ? 'badge-hot' : 'badge-new'">
-								<text class="badge-text">{{ cell.hot ? t('discover.hot') : t('discover.latest') }}</text>
+							<view v-if="cell.isHot || cell.isNew" class="badge-row">
+								<view v-if="cell.isHot" class="badge badge-hot">
+									<text class="badge-text">{{ t('discover.hot') }}</text>
+								</view>
+								<view v-if="cell.isNew" class="badge badge-new">
+									<text class="badge-text">{{ t('discover.latest') }}</text>
+								</view>
 							</view>
 						</view>
 						<text class="wf-title">{{ cell.item.title }}</text>
@@ -124,8 +129,13 @@
 								mode="aspectFill"
 							></image>
 							<view v-else class="wf-cover wf-cover-fallback"></view>
-							<view class="badge" :class="cell.hot ? 'badge-hot' : 'badge-new'">
-								<text class="badge-text">{{ cell.hot ? t('discover.hot') : t('discover.latest') }}</text>
+							<view v-if="cell.isHot || cell.isNew" class="badge-row">
+								<view v-if="cell.isHot" class="badge badge-hot">
+									<text class="badge-text">{{ t('discover.hot') }}</text>
+								</view>
+								<view v-if="cell.isNew" class="badge badge-new">
+									<text class="badge-text">{{ t('discover.latest') }}</text>
+								</view>
 							</view>
 						</view>
 						<text class="wf-title">{{ cell.item.title }}</text>
@@ -221,7 +231,8 @@
 	type WaterfallCell = {
 		item: CmsArchiveItem
 		coverH: number
-		hot: boolean
+		isHot: boolean
+		isNew: boolean
 	}
 
 	const leftCol = ref<Array<WaterfallCell>>([] as Array<WaterfallCell>)
@@ -295,7 +306,8 @@
 			const cell: WaterfallCell = {
 				item: it,
 				coverH: coverH,
-				hot: it.views >= 1000
+				isHot: it.is_hot == 1,
+				isNew: it.is_new == 1
 			} as WaterfallCell
 			const est = coverH + 120
 			if (leftH <= rightH) {
@@ -586,12 +598,17 @@
 		height: 100%;
 		background-color: #93c5fd;
 	}
-	.badge {
+	.badge-row {
 		position: absolute;
 		left: 12rpx;
 		top: 12rpx;
+		flex-direction: row;
+		align-items: center;
+	}
+	.badge {
 		border-radius: 8rpx;
 		padding: 4rpx 10rpx;
+		margin-right: 8rpx;
 	}
 	.badge-hot { background-color: #ef4444; }
 	.badge-new { background-color: #9ca3af; }

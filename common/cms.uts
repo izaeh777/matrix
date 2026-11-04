@@ -27,6 +27,10 @@ export type CmsArchiveItem = {
 	publishtime: number
 	/** 项目状态：draft/pending/normal/rejected/hidden/offline */
 	status: string
+	/** 1=显示热门 */
+	is_hot: number
+	/** 1=显示最新 */
+	is_new: number
 }
 
 export type CmsArchiveDetail = {
@@ -357,7 +361,9 @@ function parseArchiveRows(rows: Array<UTSJSONObject>): Array<CmsArchiveItem> {
 			likes: pickNum(row, 'likes'),
 			comments: pickNum(row, 'comments'),
 			publishtime: pickNum(row, 'publishtime'),
-			status: pickStr(row, 'status')
+			status: pickStr(row, 'status'),
+			is_hot: pickNum(row, 'is_hot'),
+			is_new: pickNum(row, 'is_new')
 		}
 		out.push(item)
 	}
@@ -543,7 +549,9 @@ function parseMyProjectRows(rows: Array<UTSJSONObject>): Array<CmsArchiveItem> {
 			likes: likes,
 			comments: pickNum(row, 'comments'),
 			publishtime: publishtime,
-			status: status
+			status: status,
+			is_hot: pickNum(row, 'is_hot'),
+			is_new: pickNum(row, 'is_new')
 		}
 		out.push(item)
 	}
