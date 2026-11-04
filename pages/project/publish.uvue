@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<view class="pub-page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -108,7 +108,7 @@
 				<view v-if="step == 3" class="form">
 					<text class="label">{{ i18n.material }}</text>
 					<view class="upload-row">
-						<view class="upload-box" @click="pickImage('material')">
+						<view class="upload-box" @click="pickFile('material')">
 							<image v-if="materialFullurl.length > 0" class="upload-img" :src="materialFullurl" mode="aspectFill"></image>
 							<view v-else class="upload-empty">
 								<image class="upload-ico-img" src="/static/login/sf.png" mode="aspectFit"></image>
@@ -584,6 +584,21 @@
 				const paths = res.tempFilePaths
 				if (paths == null || paths.length == 0) return
 				await uploadPickedFile('' + paths[0], kind)
+			}
+		})
+	}
+
+	async function pickFile(kind : string) : Promise<void> {
+		uni.chooseFile({
+			count: 1,
+			extension: ['pdf', 'ppt', 'pptx'],
+			success: async (res) => {
+				const paths = res.tempFilePaths
+				if (paths == null || paths.length == 0) return
+				await uploadPickedFile('' + paths[0], kind)
+			},
+			fail: (err) => {
+				console.warn('chooseFile fail', err)
 			}
 		})
 	}
