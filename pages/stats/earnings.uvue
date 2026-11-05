@@ -21,25 +21,12 @@
 					<text class="filter-text" :class="typeKey == 'all' ? 'filter-text-on' : ''">{{ t('stats.typeAll') }}</text>
 				</view>
 				<view
-					class="filter-chip"
-					:class="typeKey == '分享奖励' ? 'filter-on' : ''"
-					@click="setType('分享奖励')"
-				>
-					<text class="filter-text" :class="typeKey == '分享奖励' ? 'filter-text-on' : ''">{{ t('stats.typeShare') }}</text>
-				</view>
-				<view
-					class="filter-chip"
-					:class="typeKey == '社区奖励' ? 'filter-on' : ''"
-					@click="setType('社区奖励')"
-				>
-					<text class="filter-text" :class="typeKey == '社区奖励' ? 'filter-text-on' : ''">{{ t('stats.typeTeam') }}</text>
-				</view>
-				<view
-					class="filter-chip"
-					:class="typeKey == '社区平级' ? 'filter-on' : ''"
-					@click="setType('社区平级')"
-				>
-					<text class="filter-text" :class="typeKey == '社区平级' ? 'filter-text-on' : ''">{{ t('stats.typePeer') }}</text>
+				      v-for="code in typeCodes"
+				      :key="code"
+				      :class="['filter-chip', typeKey === code ? 'filter-on' : '']"
+				      @click="setType(code)"
+				    >
+				      <text :class="['filter-text', typeKey === code ? 'filter-text-on' : '']">{{ typeName(code) }}</text>
 				</view>
 			</view>
 		</scroll-view>
@@ -97,6 +84,22 @@
 	const page = ref<number>(1)
 	const pageSize = 20
 	const rows = ref<Array<MoneyLogItem>>([] as Array<MoneyLogItem>)
+	const typeCodes = ref<Array<string>>([
+		'share', 'community', 'peerLv'
+	] as Array<string>)
+	const typeNameMap = ref<UTSJSONObject>({
+		'share': 'Direct referral reward',
+		'community': 'Community Rewards',
+		'peerLv': 'peer-level reward'
+	} as UTSJSONObject)
+
+	function typeName(code: string): string {
+		try {
+			const v = '' + typeNameMap.value[code]
+			if (v.length > 0 && v != 'undefined' && v != 'null') return v
+		} catch (e) {}
+		return code
+	}
 
 	function memoOf(memo: string): string {
 		const s = memo.trim()
@@ -144,6 +147,15 @@
 				const next: Array<MoneyLogItem> = rows.value.slice(0)
 				for (let i = 0; i < res.list.length; i++) next.push(res.list[i])
 				rows.value = next
+			}
+			if (res.type != null) {
+				typeNameMap.value = res.type!
+				const arr: Array<string> = []
+				try {
+					const ks = UTSJSONObject.keys(res.type!)
+					for (let i = 0; i < ks.length; i++) arr.push('' + ks[i])
+				} catch (e) {}
+				if (arr.length > 0) typeCodes.value = arr
 			}
 			if (res.list.length < pageSize) {
 				hasMore.value = false
