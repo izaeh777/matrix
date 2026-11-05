@@ -215,7 +215,8 @@
 		muted.value = matrix.isRoomMuted(roomId.value)
 		pinned.value = matrix.isRoomFavourite(roomId.value)
 		try {
-			canKick.value = await matrix.canManageRoom(roomId.value)
+			// canKick.value = await matrix.canManageRoom(roomId.value)
+			canKick.value = members.value.length > 2
 		} catch (e2) {
 			canKick.value = false
 		}
