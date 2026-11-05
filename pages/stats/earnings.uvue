@@ -1,0 +1,302 @@
+<template>
+	<view class="earn-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">{{ t('stats.earnings') }}</text>
+			<view class="topbar-right"></view>
+		</view>
+
+		<scroll-view class="filter-scroll" scroll-x="true" :show-scrollbar="false">
+			<view class="filter-row">
+				<view
+					class="filter-chip"
+					:class="typeKey == 'all' ? 'filter-on' : ''"
+					@click="setType('all')"
+				>
+					<text class="filter-text" :class="typeKey == 'all' ? 'filter-text-on' : ''">{{ t('stats.typeAll') }}</text>
+				</view>
+				<view
+					class="filter-chip"
+					:class="typeKey == '分享奖励' ? 'filter-on' : ''"
+					@click="setType('分享奖励')"
+				>
+					<text class="filter-text" :class="typeKey == '分享奖励' ? 'filter-text-on' : ''">{{ t('stats.typeShare') }}</text>
+				</view>
+				<view
+					class="filter-chip"
+					:class="typeKey == '社区奖励' ? 'filter-on' : ''"
+					@click="setType('社区奖励')"
+				>
+					<text class="filter-text" :class="typeKey == '社区奖励' ? 'filter-text-on' : ''">{{ t('stats.typeTeam') }}</text>
+				</view>
+				<view
+					class="filter-chip"
+					:class="typeKey == '社区平级' ? 'filter-on' : ''"
+					@click="setType('社区平级')"
+				>
+					<text class="filter-text" :class="typeKey == '社区平级' ? 'filter-text-on' : ''">{{ t('stats.typePeer') }}</text>
+				</view>
+			</view>
+		</scroll-view>
+
+		<scroll-view
+			class="body"
+			direction="vertical"
+			:show-scrollbar="false"
+			:rebound="false"
+			@scrolltolower="onReachBottom"
+		>
+			<view v-if="loading && rows.length == 0" class="state-row">
+				<text class="state-text">{{ t('common.loading') }}</text>
+			</view>
+			<view v-else-if="!loading && rows.length == 0" class="state-row">
+				<text class="state-text">{{ t('stats.earnEmpty') }}</text>
+			</view>
+			<view v-else class="list-card">
+				<view
+					v-for="(item, idx) in rows"
+					:key="'e' + item.id + '-' + idx"
+					class="item-row"
+				>
+					<view class="item-left">
+						<text class="item-memo">{{ memoOf(item.memo) }}</text>
+						<text class="item-time">{{ item.createtime }}</text>
+					</view>
+					<text class="item-money" :class="isNegative(item.money) ? 'money-down' : 'money-up'">{{ moneyText(item.money) }}</text>
+				</view>
+			</view>
+			<view v-if="loadingMore" class="more-row">
+				<text class="more-text">{{ t('common.loading') }}</text>
+			</view>
+			<view v-else-if="!hasMore && rows.length > 0" class="more-row">
+				<text class="more-text">{{ t('common.noMore') }}</text>
+			</view>
+			<view class="scroll-pad"></view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref } from 'vue'
+	import { t as __i18nT, tx } from '@/common/i18n.uts'
+	import { fetchMoneyLog, MoneyLogItem } from '@/common/platform.uts'
+
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+	const typeKey = ref<string>('all')
+	const loading = ref<boolean>(false)
+	const loadingMore = ref<boolean>(false)
+	const hasMore = ref<boolean>(true)
+	const page = ref<number>(1)
+	const pageSize = 20
+	const rows = ref<Array<MoneyLogItem>>([] as Array<MoneyLogItem>)
+
+	function memoOf(memo: string): string {
+		const s = memo.trim()
+		if (s.length == 0) return t('stats.earnings')
+		return tx(s)
+	}
+
+	function isNegative(money: string): boolean {
+		return money.trim().indexOf('-') == 0
+	}
+
+	function moneyText(money: string): string {
+		const s = money.trim()
+		if (s.length == 0) return '0.00'
+		if (s.indexOf('+') == 0 || s.indexOf('-') == 0) return s
+		const n = parseFloat(s)
+		if (n == n && n > 0) return '+' + s
+		return s
+	}
+
+	function goBack(): void {
+		uni.navigateBack({})
+	}
+
+	function setType(tp: string): void {
+		if (typeKey.value == tp) return
+		typeKey.value = tp
+		loadList(true)
+	}
+
+	async function loadList(reset: boolean): Promise<void> {
+		if (reset) {
+			page.value = 1
+			hasMore.value = true
+			loading.value = true
+		} else {
+			if (!hasMore.value || loadingMore.value || loading.value) return
+			loadingMore.value = true
+		}
+		try {
+			const res = await fetchMoneyLog(page.value, pageSize, typeKey.value, '', '')
+			if (reset) {
+				rows.value = res.list
+			} else {
+				const next: Array<MoneyLogItem> = rows.value.slice(0)
+				for (let i = 0; i < res.list.length; i++) next.push(res.list[i])
+				rows.value = next
+			}
+			if (res.list.length < pageSize) {
+				hasMore.value = false
+			} else if (res.total > 0 && rows.value.length >= res.total) {
+				hasMore.value = false
+			} else {
+				hasMore.value = true
+			}
+			if (res.list.length > 0) page.value = page.value + 1
+		} catch (e) {
+			if (reset) rows.value = [] as Array<MoneyLogItem>
+			let msg = ''
+			try { msg = ('' + e).trim() } catch (e0) { msg = '' }
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? msg : t('stats.earnLoadFail'), icon: 'none' })
+		}
+		loading.value = false
+		loadingMore.value = false
+	}
+
+	function onReachBottom(): void {
+		loadList(false)
+	}
+
+	onShow(() => {
+		loadList(true)
+	})
+</script>
+
+<style>
+	.earn-page {
+		flex: 1;
+		background-color: #f5f6f8;
+		flex-direction: column;
+	}
+	.status-bar-holder {
+		height: var(--status-bar-height);
+		background-color: #ffffff;
+	}
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 48rpx 24rpx 20rpx;
+		background-color: #ffffff;
+	}
+	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.back-text {
+		font-size: 56rpx;
+		color: #181818;
+		line-height: 56rpx;
+	}
+	.topbar-title {
+		font-size: 34rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.topbar-right {
+		width: 72rpx;
+	}
+	.filter-scroll {
+		background-color: #ffffff;
+		padding-bottom: 16rpx;
+	}
+	.filter-row {
+		flex-direction: row;
+		padding: 0 20rpx;
+		align-items: center;
+	}
+	.filter-chip {
+		padding: 10rpx 22rpx;
+		background-color: #eef0f3;
+		border-radius: 28rpx;
+		margin-right: 12rpx;
+	}
+	.filter-on {
+		background-color: #e8f0fe;
+	}
+	.filter-text {
+		font-size: 24rpx;
+		color: #6b7280;
+		lines: 1;
+	}
+	.filter-text-on {
+		color: #3b82f6;
+		font-weight: 600;
+	}
+	.body {
+		flex: 1;
+		height: 0;
+	}
+	.state-row {
+		padding: 80rpx 28rpx;
+		align-items: center;
+	}
+	.state-text {
+		font-size: 28rpx;
+		color: #9aa3af;
+	}
+	.list-card {
+		margin: 16rpx 20rpx;
+		background-color: #ffffff;
+		border-radius: 16rpx;
+		overflow: hidden;
+	}
+	.item-row {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 28rpx 24rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-style: solid;
+		border-bottom-color: #f0f0f0;
+	}
+	.item-left {
+		flex: 1;
+		flex-direction: column;
+		margin-right: 20rpx;
+	}
+	.item-memo {
+		font-size: 30rpx;
+		color: #111827;
+		font-weight: 600;
+		margin-bottom: 8rpx;
+	}
+	.item-time {
+		font-size: 22rpx;
+		color: #9aa3af;
+	}
+	.item-money {
+		font-size: 32rpx;
+		font-weight: 700;
+	}
+	.money-up {
+		color: #ef4444;
+	}
+	.money-down {
+		color: #16a34a;
+	}
+	.more-row {
+		padding: 24rpx;
+		align-items: center;
+	}
+	.more-text {
+		font-size: 24rpx;
+		color: #9aa3af;
+	}
+	.scroll-pad {
+		height: 40rpx;
+	}
+</style>

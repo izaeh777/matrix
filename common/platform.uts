@@ -2689,3 +2689,334 @@ export async function findFriendByUsername(username: string): Promise<Array<Find
 	}
 	return out
 }
+
+/** 资金统计指标块 */
+export type MoneyStatMetric = {
+	key: string
+	amount: string
+	diff: string
+	trend: string
+}
+
+export type MoneyStatPoint = {
+	date: string
+	amount: number
+}
+
+export type MoneyStatResult = {
+	metrics: Array<MoneyStatMetric>
+	series: Array<MoneyStatPoint>
+	updated_at: string
+}
+
+export type MoneyLogItem = {
+	id: number
+	money: string
+	before: string
+	after: string
+	memo: string
+	createtime: string
+}
+
+export type MoneyLogResult = {
+	list: Array<MoneyLogItem>
+	total: number
+	page: number
+	limit: number
+}
+
+function fmtMoneyNum(n: number): string {
+	if (n != n) return '0'
+	const fixed = n.toFixed(2)
+	return fixed
+}
+
+function moneyAmountText(obj: UTSJSONObject | null, keys: Array<string>): string {
+	if (obj == null) return '0.00'
+	const s = pickStrAny(obj!, keys)
+	if (s.length > 0) {
+		const n = parseFloat(s)
+		if (n == n) return fmtMoneyNum(n)
+		return s
+	}
+	const n2 = pickNumAny(obj!, keys)
+	return fmtMoneyNum(n2)
+}
+
+function moneyDiffText(obj: UTSJSONObject | null, keys: Array<string>): string {
+	if (obj == null) return ''
+	const s = pickStrAny(obj!, keys)
+	if (s.length > 0) return s
+	const n = pickNumAny(obj!, keys)
+	if (n == 0) return ''
+	return fmtMoneyNum(Math.abs(n)) + '%'
+}
+
+function moneyTrendOf(obj: UTSJSONObject | null, amountDiffKeys: Array<string>): string {
+	if (obj == null) return 'flat'
+	const t = pickStrAny(obj!, ['trend', 'change_trend', 'diff_trend', 'direction']).toLowerCase()
+	if (t == 'up' || t == 'rise' || t == 'inc' || t == 'increase') return 'up'
+	if (t == 'down' || t == 'fall' || t == 'dec' || t == 'decrease') return 'down'
+	const n = pickNumAny(obj!, amountDiffKeys)
+	if (n > 0) return 'up'
+	if (n < 0) return 'down'
+	const rate = pickStrAny(obj!, ['diff_rate', 'change_rate', 'rate', 'percent', 'pct'])
+	if (rate.indexOf('-') == 0) return 'down'
+	if (rate.length > 0 && rate != '0' && rate != '0%' && rate != '0.00%') return 'up'
+	return 'flat'
+}
+
+function metricFromBlock(key: string, block: UTSJSONObject | null, flat: UTSJSONObject, amountKeys: Array<string>, diffKeys: Array<string>): MoneyStatMetric {
+	const src = block != null ? block! : flat
+	const amount = moneyAmountText(src, amountKeys)
+	const diff = moneyDiffText(src, diffKeys)
+	const trend = moneyTrendOf(src, ['diff', 'change', 'delta', 'diff_amount', 'change_amount', 'compare'])
+	const out: MoneyStatMetric = {
+		key: key,
+		amount: amount,
+		diff: diff,
+		trend: trend
+	}
+	return out
+}
+
+function parseMoneySeries(raw: any | null): Array<MoneyStatPoint> {
+	const out: Array<MoneyStatPoint> = []
+	if (raw == null) return out
+	let rows: Array<UTSJSONObject> = []
+	try {
+		rows = collectMyFriArray(raw)
+	} catch (e0) {}
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i]
+		let date = pickStrAny(row, ['date', 'day', 'time', 'label', 'stat_date', 'dt'])
+		if (date.length == 0) {
+			const ts = pickNumAny(row, ['createtime', 'time', 'ts', 'timestamp'])
+			if (ts > 0) {
+				const ms = ts > 1e12 ? ts : ts * 1000
+				const d = new Date(ms)
+				const m = d.getMonth() + 1
+				const day = d.getDate()
+				date = '' + d.getFullYear() + (m < 10 ? '0' : '') + m + (day < 10 ? '0' : '') + day
+			}
+		}
+		let amount = pickNumAny(row, ['amount', 'money', 'value', 'total', 'sum'])
+		if (amount == 0) {
+			const s = pickStrAny(row, ['amount', 'money', 'value', 'total', 'sum'])
+			const n = parseFloat(s)
+			if (n == n) amount = n
+		}
+		if (date.length == 0 && amount == 0) continue
+		const pt: MoneyStatPoint = { date: date, amount: amount }
+		out.push(pt)
+	}
+	return out
+}
+
+/**
+ * GET /api/v1/users/money-stat
+ * 资金统计：start_date / end_date / type(all|分享奖励|社区奖励|社区平级)
+ */
+export async function fetchMoneyStat(startDate: string, endDate: string, type: string = 'all'): Promise<MoneyStatResult> {
+	const qs: Array<string> = []
+	const sd = startDate.trim()
+	const ed = endDate.trim()
+	const tp = type.trim().length > 0 ? type.trim() : 'all'
+	if (sd.length > 0) qs.push('start_date=' + encodeURIComponent(sd))
+	if (ed.length > 0) qs.push('end_date=' + encodeURIComponent(ed))
+	qs.push('type=' + encodeURIComponent(tp))
+	const path = '/api/v1/users/money-stat?' + qs.join('&')
+	const root = await httpGet(path, true)
+	logJson('[platform] users/money-stat', root)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '获取收益统计失败')
+	}
+	let data = pickObj(root, 'data')
+	if (data == null) data = root
+	const flat = data!
+	const summary = pickObj(flat, 'summary')
+	const stats = pickObj(flat, 'stats')
+	const base = summary != null ? summary! : (stats != null ? stats! : flat)
+
+	let totalBlock = pickObj(base, 'total')
+	if (totalBlock == null) totalBlock = pickObj(base, 'all')
+	if (totalBlock == null) totalBlock = pickObj(base, '合计')
+	let directBlock = pickObj(base, 'direct')
+	if (directBlock == null) directBlock = pickObj(base, 'share')
+	if (directBlock == null) directBlock = pickObj(base, 'share_reward')
+	if (directBlock == null) directBlock = pickObj(base, '分享奖励')
+	if (directBlock == null) directBlock = pickObj(base, '直推')
+	if (directBlock == null) directBlock = pickObj(base, '直推收益')
+	let teamBlock = pickObj(base, 'team')
+	if (teamBlock == null) teamBlock = pickObj(base, 'community')
+	if (teamBlock == null) teamBlock = pickObj(base, '社区奖励')
+	if (teamBlock == null) teamBlock = pickObj(base, '社区收益')
+	let rewardBlock = pickObj(base, 'reward')
+	if (rewardBlock == null) rewardBlock = pickObj(base, 'peer')
+	if (rewardBlock == null) rewardBlock = pickObj(base, 'level')
+	if (rewardBlock == null) rewardBlock = pickObj(base, '社区平级')
+	if (rewardBlock == null) rewardBlock = pickObj(base, '平级奖励')
+
+	const metrics: Array<MoneyStatMetric> = []
+	metrics.push(metricFromBlock(
+		'total',
+		totalBlock,
+		base,
+		['total', 'total_amount', 'amount', 'sum', 'money', 'all'],
+		['total_diff', 'diff_rate', 'change_rate', 'rate', 'percent', 'diff', 'compare_rate']
+	))
+	metrics.push(metricFromBlock(
+		'direct',
+		directBlock,
+		base,
+		['direct', 'share', 'share_amount', 'share_reward', '直推', '分享奖励'],
+		['direct_diff', 'share_diff', 'diff_rate', 'change_rate', 'rate', 'percent', 'diff']
+	))
+	metrics.push(metricFromBlock(
+		'team',
+		teamBlock,
+		base,
+		['team', 'community', 'community_amount', '社区奖励', '社区收益'],
+		['team_diff', 'community_diff', 'diff_rate', 'change_rate', 'rate', 'percent', 'diff']
+	))
+	metrics.push(metricFromBlock(
+		'reward',
+		rewardBlock,
+		base,
+		['reward', 'peer', 'peer_amount', 'level', '社区平级', '平级奖励'],
+		['reward_diff', 'peer_diff', 'diff_rate', 'change_rate', 'rate', 'percent', 'diff']
+	))
+
+	let series = parseMoneySeries(flat['series'])
+	if (series.length == 0) series = parseMoneySeries(flat['list'])
+	if (series.length == 0) series = parseMoneySeries(flat['days'])
+	if (series.length == 0) series = parseMoneySeries(flat['chart'])
+	if (series.length == 0) series = parseMoneySeries(flat['trend'])
+	if (series.length == 0) {
+		const chart = pickObj(flat, 'chart')
+		if (chart != null) {
+			series = parseMoneySeries(chart!['list'])
+			if (series.length == 0) series = parseMoneySeries(chart!['points'])
+			if (series.length == 0) series = parseMoneySeries(chart!['data'])
+		}
+	}
+
+	let updated = pickStrAny(flat, ['updated_at', 'update_time', 'updated', 'time', 'stat_time'])
+	if (updated.length == 0) {
+		const now = new Date()
+		const m = now.getMonth() + 1
+		const d = now.getDate()
+		const h = now.getHours()
+		const mi = now.getMinutes()
+		updated = '' + now.getFullYear() + '.' + (m < 10 ? '0' : '') + m + '.' + (d < 10 ? '0' : '') + d + ' ' + (h < 10 ? '0' : '') + h + ':' + (mi < 10 ? '0' : '') + mi
+	}
+
+	const result: MoneyStatResult = {
+		metrics: metrics,
+		series: series,
+		updated_at: updated
+	}
+	return result
+}
+
+function parseMoneyLogItem(row: UTSJSONObject): MoneyLogItem {
+	let money = pickStrAny(row, ['money', 'amount', 'change', 'value'])
+	if (money.length == 0) money = fmtMoneyNum(pickNumAny(row, ['money', 'amount', 'change', 'value']))
+	let before = pickStrAny(row, ['before', 'before_money', 'balance_before'])
+	if (before.length == 0) before = fmtMoneyNum(pickNumAny(row, ['before', 'before_money']))
+	let after = pickStrAny(row, ['after', 'after_money', 'balance_after'])
+	if (after.length == 0) after = fmtMoneyNum(pickNumAny(row, ['after', 'after_money']))
+	let memo = pickStrAny(row, ['memo', 'remark', 'type', 'title', 'desc', 'description', 'note'])
+	let createtime = pickStrAny(row, ['createtime', 'create_time', 'created_at', 'time', 'date'])
+	if (createtime.length == 0) {
+		const ts = pickNumAny(row, ['createtime', 'create_time', 'created_at', 'time', 'ts'])
+		if (ts > 0) {
+			const ms = ts > 1e12 ? ts : ts * 1000
+			const d = new Date(ms)
+			const mo = d.getMonth() + 1
+			const day = d.getDate()
+			const h = d.getHours()
+			const mi = d.getMinutes()
+			createtime = '' + d.getFullYear() + '-' + (mo < 10 ? '0' : '') + mo + '-' + (day < 10 ? '0' : '') + day + ' ' + (h < 10 ? '0' : '') + h + ':' + (mi < 10 ? '0' : '') + mi
+		}
+	}
+	const item: MoneyLogItem = {
+		id: pickNumAny(row, ['id']),
+		money: money,
+		before: before,
+		after: after,
+		memo: memo,
+		createtime: createtime
+	}
+	return item
+}
+
+/**
+ * GET /api/v1/users/money-log
+ * 资金明细：page / limit / orderby=id / orderway=desc，可选 type、start_date、end_date
+ */
+export async function fetchMoneyLog(
+	page: number = 1,
+	limit: number = 20,
+	type: string = 'all',
+	startDate: string = '',
+	endDate: string = ''
+): Promise<MoneyLogResult> {
+	const p = page > 0 ? page : 1
+	const lim = limit > 0 ? limit : 20
+	const qs: Array<string> = []
+	qs.push('page=' + p)
+	qs.push('limit=' + lim)
+	qs.push('orderby=id')
+	qs.push('orderway=desc')
+	const tp = type.trim()
+	if (tp.length > 0 && tp != 'all') qs.push('type=' + encodeURIComponent(tp))
+	const sd = startDate.trim()
+	const ed = endDate.trim()
+	if (sd.length > 0) qs.push('start_date=' + encodeURIComponent(sd))
+	if (ed.length > 0) qs.push('end_date=' + encodeURIComponent(ed))
+	const path = '/api/v1/users/money-log?' + qs.join('&')
+	const root = await httpGet(path, true)
+	logJson('[platform] users/money-log', root)
+	const code = pickNum(root, 'code')
+	if (code != 1) {
+		const msg = pickStr(root, 'msg')
+		throw new Error(msg.length > 0 ? msg : '获取收益明细失败')
+	}
+	let rows: Array<UTSJSONObject> = []
+	try {
+		rows = collectMyFriArray(root['data'])
+	} catch (e0) {}
+	const data = pickObj(root, 'data')
+	let total = 0
+	let pageNum = p
+	let limitNum = lim
+	if (data != null) {
+		total = pickNum(data!, 'total')
+		const pn = pickNum(data!, 'page')
+		if (pn > 0) pageNum = pn
+		const ln = pickNum(data!, 'limit')
+		if (ln > 0) limitNum = ln
+		if (rows.length == 0) {
+			rows = collectMyFriArray(data!['list'])
+			if (rows.length == 0) rows = collectMyFriArray(data!['logs'])
+			if (rows.length == 0) rows = collectMyFriArray(data!['items'])
+			if (rows.length == 0) rows = collectMyFriArray(data!['data'])
+			if (rows.length == 0) rows = collectMyFriArray(data as any)
+		}
+	}
+	const list: Array<MoneyLogItem> = []
+	for (let i = 0; i < rows.length; i++) {
+		list.push(parseMoneyLogItem(rows[i]))
+	}
+	if (total <= 0) total = list.length
+	const result: MoneyLogResult = {
+		list: list,
+		total: total,
+		page: pageNum,
+		limit: limitNum
+	}
+	return result
+}

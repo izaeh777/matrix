@@ -33,10 +33,14 @@
 						<text class="range-text" :class="rangeKey == '7d' ? 'range-text-on' : ''">{{ t('stats.d7') }}</text>
 					</view>
 					<view class="range-chip" @click="onMoreRange">
-						<text class="range-text">{{ t('stats.more') }}</text>
+						<text class="range-text">{{ moreLabel }}</text>
 						<text class="range-caret">▾</text>
 					</view>
 				</view>
+			</view>
+
+			<view v-if="loading" class="state-row">
+				<text class="state-text">{{ t('common.loading') }}</text>
 			</view>
 
 			<view class="card-grid">
@@ -67,10 +71,8 @@
 			<view class="chart-card">
 				<view class="chart-area">
 					<view class="y-axis">
-						<text class="y-label">1</text>
-						<text class="y-label">0.75</text>
-						<text class="y-label">0.5</text>
-						<text class="y-label">0.25</text>
+						<text class="y-label">{{ yMaxLabel }}</text>
+						<text class="y-label">{{ yMidLabel }}</text>
 						<text class="y-label">0</text>
 					</view>
 					<view class="plot">
@@ -115,12 +117,15 @@
 <script setup lang="uts">
 	import { ref } from 'vue'
 	import { t as __i18nT } from '@/common/i18n.uts'
+	import {
+		fetchMoneyStat,
+		MoneyStatMetric,
+		MoneyStatPoint
+	} from '@/common/platform.uts'
+
 	function t(key: string): string {
 		return __i18nT(key)
 	}
-
-
-
 
 	type MetricItem = {
 		key: string
@@ -144,58 +149,190 @@
 
 	const rangeKey = ref('1d')
 	const selectedKey = ref('total')
-	const updateTime = ref('2026.05.26 12:00')
+	const updateTime = ref('--')
+	const loading = ref<boolean>(false)
+	const moreLabel = ref<string>(t('stats.more'))
+	const yMaxLabel = ref<string>('1')
+	const yMidLabel = ref<string>('0.5')
 
 	const metricList = ref([
-		{ key: 'total', label: t('stats.total'), value: '2,569.40', diff: '100.00%', trend: 'down' } as MetricItem,
-		{ key: 'direct', label: t('stats.direct'), value: '8600.00', diff: '100.00%', trend: 'up' } as MetricItem,
-		{ key: 'team', label: t('stats.team'), value: '0', diff: '', trend: 'flat' } as MetricItem,
-		{ key: 'reward', label: t('stats.reward'), value: '0', diff: '', trend: 'flat' } as MetricItem
+		{ key: 'total', label: t('stats.total'), value: '--', diff: '', trend: 'flat' } as MetricItem,
+		{ key: 'direct', label: t('stats.direct'), value: '--', diff: '', trend: 'flat' } as MetricItem,
+		{ key: 'team', label: t('stats.team'), value: '--', diff: '', trend: 'flat' } as MetricItem,
+		{ key: 'reward', label: t('stats.reward'), value: '--', diff: '', trend: 'flat' } as MetricItem
 	] as MetricItem[])
 
-	const xLabels = ref(['20260519', '20260521', '20260523', '20260526'] as string[])
+	const xLabels = ref([] as string[])
+	const chartPoints = ref([] as ChartPt[])
+	const lineSegs = ref([] as LineSeg[])
 
-	// 与效果图一致：前期为 0，末期冲高后回落（坐标已预计算线段）
-	const chartPoints = ref([
-		{ x: 0, y: 100 } as ChartPt,
-		{ x: 14, y: 100 } as ChartPt,
-		{ x: 28, y: 100 } as ChartPt,
-		{ x: 42, y: 100 } as ChartPt,
-		{ x: 56, y: 100 } as ChartPt,
-		{ x: 68, y: 88 } as ChartPt,
-		{ x: 78, y: 8 } as ChartPt,
-		{ x: 88, y: 42 } as ChartPt,
-		{ x: 100, y: 78 } as ChartPt
-	] as ChartPt[])
+	function pad2(n: number): string {
+		return n < 10 ? '0' + n : '' + n
+	}
 
-	const lineSegs = ref([
-		{ left: 0, top: 100, width: 14, deg: 0 } as LineSeg,
-		{ left: 14, top: 100, width: 14, deg: 0 } as LineSeg,
-		{ left: 28, top: 100, width: 14, deg: 0 } as LineSeg,
-		{ left: 42, top: 100, width: 14, deg: 0 } as LineSeg,
-		{ left: 56, top: 100, width: 16.97, deg: -45 } as LineSeg,
-		{ left: 68, top: 88, width: 85.4, deg: -82.9 } as LineSeg,
-		{ left: 78, top: 8, width: 35.4, deg: 73.6 } as LineSeg,
-		{ left: 88, top: 42, width: 37.9, deg: 71.6 } as LineSeg
-	] as LineSeg[])
+	function formatYmd(d: Date): string {
+		return '' + d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate())
+	}
+
+	function rangeDays(key: string): number {
+		if (key == '7d') return 6
+		if (key == '30d') return 29
+		if (key == '90d') return 89
+		return 0
+	}
+
+	function dateRangeForKey(key: string): Array<string> {
+		const end = new Date()
+		const start = new Date()
+		start.setDate(end.getDate() - rangeDays(key))
+		return [formatYmd(start), formatYmd(end)] as Array<string>
+	}
+
+	function labelOfMetric(key: string): string {
+		if (key == 'direct') return t('stats.direct')
+		if (key == 'team') return t('stats.team')
+		if (key == 'reward') return t('stats.reward')
+		return t('stats.total')
+	}
+
+	function applyMetrics(list: Array<MoneyStatMetric>): void {
+		const next: Array<MetricItem> = [] as Array<MetricItem>
+		const keys = ['total', 'direct', 'team', 'reward'] as Array<string>
+		for (let i = 0; i < keys.length; i++) {
+			const k = keys[i]
+			let hit: MoneyStatMetric | null = null
+			for (let j = 0; j < list.length; j++) {
+				if (list[j].key == k) {
+					hit = list[j]
+					break
+				}
+			}
+			const value = hit != null ? hit!.amount : '0.00'
+			const diff = hit != null ? hit!.diff : ''
+			const trend = hit != null ? hit!.trend : 'flat'
+			next.push({
+				key: k,
+				label: labelOfMetric(k),
+				value: value,
+				diff: diff,
+				trend: trend
+			} as MetricItem)
+		}
+		metricList.value = next
+	}
+
+	function shortDateLabel(raw: string): string {
+		let s = raw.trim()
+		if (s.length >= 10 && s.indexOf('-') > 0) {
+			return s.substring(5, 10).split('-').join('')
+		}
+		if (s.length >= 8) return s.substring(s.length - 4)
+		return s
+	}
+
+	function buildChart(series: Array<MoneyStatPoint>): void {
+		if (series.length == 0) {
+			chartPoints.value = [] as ChartPt[]
+			lineSegs.value = [] as LineSeg[]
+			xLabels.value = [] as string[]
+			yMaxLabel.value = '1'
+			yMidLabel.value = '0.5'
+			return
+		}
+		let maxV = 0
+		for (let i = 0; i < series.length; i++) {
+			if (series[i].amount > maxV) maxV = series[i].amount
+		}
+		if (maxV <= 0) maxV = 1
+		yMaxLabel.value = '' + (Math.round(maxV * 100) / 100)
+		yMidLabel.value = '' + (Math.round(maxV * 50) / 100)
+
+		const pts: Array<ChartPt> = [] as ChartPt[]
+		const n = series.length
+		for (let i = 0; i < n; i++) {
+			const x = n == 1 ? 50 : (i * 100) / (n - 1)
+			const ratio = series[i].amount / maxV
+			const y = 100 - ratio * 100
+			pts.push({ x: x, y: y } as ChartPt)
+		}
+		chartPoints.value = pts
+
+		const segs: Array<LineSeg> = [] as LineSeg[]
+		for (let i = 0; i < pts.length - 1; i++) {
+			const a = pts[i]
+			const b = pts[i + 1]
+			const dx = b.x - a.x
+			const dy = b.y - a.y
+			const width = Math.sqrt(dx * dx + dy * dy)
+			const deg = Math.atan2(dy, dx) * 180 / Math.PI
+			segs.push({
+				left: a.x,
+				top: a.y,
+				width: width,
+				deg: deg
+			} as LineSeg)
+		}
+		lineSegs.value = segs
+
+		const labels: Array<string> = [] as string[]
+		if (n <= 4) {
+			for (let i = 0; i < n; i++) labels.push(shortDateLabel(series[i].date))
+		} else {
+			labels.push(shortDateLabel(series[0].date))
+			labels.push(shortDateLabel(series[Math.floor((n - 1) / 3)].date))
+			labels.push(shortDateLabel(series[Math.floor(((n - 1) * 2) / 3)].date))
+			labels.push(shortDateLabel(series[n - 1].date))
+		}
+		xLabels.value = labels
+	}
+
+	async function loadStat(): Promise<void> {
+		loading.value = true
+		try {
+			const range = dateRangeForKey(rangeKey.value)
+			const res = await fetchMoneyStat(range[0], range[1], 'all')
+			applyMetrics(res.metrics)
+			buildChart(res.series)
+			updateTime.value = res.updated_at
+		} catch (e) {
+			applyMetrics([] as Array<MoneyStatMetric>)
+			buildChart([] as Array<MoneyStatPoint>)
+			let msg = ''
+			try { msg = ('' + e).trim() } catch (e0) { msg = '' }
+			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+			uni.showToast({ title: msg.length > 0 ? msg : t('stats.loadFail'), icon: 'none' })
+		}
+		loading.value = false
+	}
 
 	function goBack() {
 		uni.navigateBack({})
 	}
 
 	function onEarnings() {
-		uni.showToast({ title: t('stats.earnSoon'), icon: 'none' })
+		uni.navigateTo({ url: '/pages/stats/earnings' })
 	}
 
 	function setRange(key: string) {
 		rangeKey.value = key
+		if (key == '1d' || key == '7d') moreLabel.value = t('stats.more')
+		loadStat()
 	}
 
 	function onMoreRange() {
 		uni.showActionSheet({
-			itemList: ['近30天', '近90天', '自定义'],
-			success: (_res) => {
-				uni.showToast({ title: t('stats.filterSoon'), icon: 'none' })
+			itemList: [t('stats.d30'), t('stats.d90')],
+			success: (res) => {
+				const idx = res.tapIndex
+				if (idx == 0) {
+					rangeKey.value = '30d'
+					moreLabel.value = t('stats.d30')
+					loadStat()
+				} else if (idx == 1) {
+					rangeKey.value = '90d'
+					moreLabel.value = t('stats.d90')
+					loadStat()
+				}
 			}
 		})
 	}
@@ -203,6 +340,17 @@
 	function selectMetric(key: string) {
 		selectedKey.value = key
 	}
+
+	onShow(() => {
+		moreLabel.value = (rangeKey.value == '30d') ? t('stats.d30') : ((rangeKey.value == '90d') ? t('stats.d90') : t('stats.more'))
+		metricList.value = [
+			{ key: 'total', label: t('stats.total'), value: metricList.value[0].value, diff: metricList.value[0].diff, trend: metricList.value[0].trend } as MetricItem,
+			{ key: 'direct', label: t('stats.direct'), value: metricList.value[1].value, diff: metricList.value[1].diff, trend: metricList.value[1].trend } as MetricItem,
+			{ key: 'team', label: t('stats.team'), value: metricList.value[2].value, diff: metricList.value[2].diff, trend: metricList.value[2].trend } as MetricItem,
+			{ key: 'reward', label: t('stats.reward'), value: metricList.value[3].value, diff: metricList.value[3].diff, trend: metricList.value[3].trend } as MetricItem
+		] as MetricItem[]
+		loadStat()
+	})
 </script>
 
 <style>
@@ -302,6 +450,13 @@
 		color: #6b7280;
 		margin-left: 2rpx;
 	}
+	.state-row {
+		padding: 12rpx 28rpx;
+	}
+	.state-text {
+		font-size: 24rpx;
+		color: #9aa3af;
+	}
 	.card-grid {
 		flex-direction: row;
 		flex-wrap: wrap;
@@ -312,15 +467,15 @@
 		width: 48.5%;
 		background-color: #ffffff;
 		border-radius: 16rpx;
-		padding: 24rpx 22rpx 20rpx;
+		padding: 24rpx 20rpx;
 		margin-bottom: 16rpx;
 		border-width: 2rpx;
-		border-color: transparent;
 		border-style: solid;
+		border-color: transparent;
 	}
 	.metric-on {
 		border-color: #3b82f6;
-		background-color: #f7faff;
+		background-color: #f5f9ff;
 	}
 	.metric-label {
 		font-size: 24rpx;
@@ -330,17 +485,16 @@
 	.metric-value {
 		font-size: 40rpx;
 		font-weight: 700;
-		color: #111111;
-		margin-bottom: 12rpx;
+		color: #111827;
+		margin-bottom: 10rpx;
 	}
 	.metric-diff {
 		flex-direction: row;
 		align-items: center;
-		flex-wrap: wrap;
 	}
 	.diff-prefix {
 		font-size: 20rpx;
-		color: #9aa3af;
+		color: #9ca3af;
 	}
 	.diff-up {
 		font-size: 20rpx;
@@ -348,37 +502,36 @@
 	}
 	.diff-down {
 		font-size: 20rpx;
-		color: #3b82f6;
+		color: #22c55e;
 	}
 	.diff-flat {
 		font-size: 20rpx;
-		color: #9aa3af;
+		color: #9ca3af;
 	}
 	.chart-card {
 		margin: 8rpx 20rpx 0;
 		background-color: #ffffff;
 		border-radius: 16rpx;
-		padding: 28rpx 20rpx 24rpx;
+		padding: 24rpx 16rpx 20rpx;
 	}
 	.chart-area {
 		flex-direction: row;
-		height: 360rpx;
+		height: 320rpx;
 	}
 	.y-axis {
-		width: 64rpx;
+		width: 72rpx;
 		justify-content: space-between;
 		padding-bottom: 8rpx;
 	}
 	.y-label {
 		font-size: 18rpx;
-		color: #9aa3af;
+		color: #9ca3af;
 		text-align: right;
 	}
 	.plot {
 		flex: 1;
 		position: relative;
 		margin-left: 8rpx;
-		margin-right: 8rpx;
 	}
 	.grid-h {
 		position: absolute;
@@ -387,11 +540,11 @@
 		height: 1rpx;
 		background-color: #eef0f3;
 	}
-	.grid-h0 { top: 0%; }
+	.grid-h0 { top: 0; }
 	.grid-h1 { top: 25%; }
 	.grid-h2 { top: 50%; }
 	.grid-h3 { top: 75%; }
-	.grid-h4 { top: 100%; }
+	.grid-h4 { bottom: 0; }
 	.grid-v {
 		position: absolute;
 		top: 0;
@@ -399,10 +552,10 @@
 		width: 1rpx;
 		background-color: #eef0f3;
 	}
-	.grid-v0 { left: 0%; }
-	.grid-v1 { left: 33.33%; }
-	.grid-v2 { left: 66.66%; }
-	.grid-v3 { left: 100%; }
+	.grid-v0 { left: 0; }
+	.grid-v1 { left: 33%; }
+	.grid-v2 { left: 66%; }
+	.grid-v3 { right: 0; }
 	.line-seg {
 		position: absolute;
 		height: 3rpx;
@@ -411,23 +564,28 @@
 	}
 	.chart-dot {
 		position: absolute;
-		width: 10rpx;
-		height: 10rpx;
-		border-radius: 5rpx;
+		width: 12rpx;
+		height: 12rpx;
+		margin-left: -6rpx;
+		margin-top: -6rpx;
+		border-radius: 6rpx;
 		background-color: #3b82f6;
-		margin-left: -5rpx;
-		margin-top: -5rpx;
 	}
 	.x-axis {
 		flex-direction: row;
 		justify-content: space-between;
-		padding: 16rpx 0 0 72rpx;
+		padding-left: 80rpx;
+		margin-top: 12rpx;
 	}
 	.x-label {
 		font-size: 18rpx;
-		color: #9aa3af;
+		color: #9ca3af;
 	}
 	.scroll-pad {
-		height: 48rpx;
+		height: 40rpx;
+	}
+	.status-bar-holder {
+		height: var(--status-bar-height);
+		background-color: #ffffff;
 	}
 </style>
