@@ -1,4 +1,4 @@
-﻿<template>
+<template>
 	<view class="detail-page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -54,6 +54,31 @@
 				></image>
 				<view v-if="tagList.length > 0" class="tags">
 					<text v-for="tag in tagList" :key="tag" class="tag">{{ tag }}</text>
+				</view>
+				<view v-if="showMaterialPreview" class="material-block">
+					<view class="material-head">
+						<view class="material-info">
+							<text class="material-badge" :class="'badge-' + materialKind">{{ materialKind.toUpperCase() }}</text>
+							<text class="material-title">{{ materialTitle }}</text>
+						</view>
+						<view class="material-actions">
+							<view class="material-btn-fullscreen" @click="openMaterialFullscreen">
+								<text class="material-btn-fullscreen-text">{{ t('article.fullscreenPreview') }}</text>
+							</view>
+							<view class="material-btn-download" @click="downloadMaterial">
+								<text class="material-btn-download-text">{{ t('article.download') }}</text>
+							</view>
+						</view>
+					</view>
+					<view class="material-web-wrap">
+						<web-view
+							class="material-web"
+							:src="materialPreviewUrl"
+						></web-view>
+					</view>
+					<view class="material-foot">
+						<text class="material-hint">{{ previewHint }}</text>
+					</view>
 				</view>
 				<video
 					v-for="(vsrc, vidx) in videoList"
@@ -113,7 +138,10 @@
 		fetchProjectDetail,
 		fetchMyArchives,
 		cmsAssetUrl,
+		cmsFileUrl,
+		cmsEnsureHttps,
 		cmsHttpBase,
+		downloadCmsFile,
 		formatPublishAgo,
 		openCmsLink,
 		parseContentMedia,
@@ -228,10 +256,93 @@
 		return parseContentMedia(d.content, d.video_url, d.material_url).videos
 	})
 
+	/** 项目资料（仅 project 详情）：pdf / ppt / pptx */
+	const materialFileUrl = computed((): string => {
+		const d = detail.value
+		if (d == null || detailType.value != 'project') return ''
+		let raw = d.material_url.trim()
+		if (raw.length == 0) {
+			const parsed = parseContentMedia(d.content, d.video_url, d.material_url)
+			for (let i = 0; i < parsed.files.length; i++) {
+				const fl = parsed.files[i].toLowerCase()
+				if (fl.indexOf('.pdf') >= 0 || fl.indexOf('.pptx') >= 0 || fl.indexOf('.ppt') >= 0) {
+					raw = parsed.files[i]
+					break
+				}
+			}
+		}
+		if (raw.length == 0) return ''
+		return cmsFileUrl(raw)
+	})
+
+	const materialKind = computed((): string => {
+		const url = materialFileUrl.value
+		if (url.length == 0) return ''
+		const q = url.indexOf('?')
+		const clean = q >= 0 ? url.substring(0, q) : url
+		const lower = clean.toLowerCase()
+		if (lower.indexOf('.pdf') >= 0) return 'pdf'
+		if (lower.indexOf('.pptx') >= 0) return 'pptx'
+		if (lower.indexOf('.ppt') >= 0) return 'ppt'
+		return ''
+	})
+
+	const showMaterialPreview = computed((): boolean => {
+		return detailType.value == 'project' && materialFileUrl.value.length > 0 && materialKind.value.length > 0
+	})
+
+	const materialTitle = computed((): string => {
+		const url = materialFileUrl.value
+		if (url.length == 0) return t('pub.material')
+		const q = url.indexOf('?')
+		const clean = q >= 0 ? url.substring(0, q) : url
+		const slash = clean.lastIndexOf('/')
+		if (slash >= 0 && slash + 1 < clean.length) {
+			try {
+				const name = decodeURIComponent(clean.substring(slash + 1)).trim()
+				if (name.length > 0) return name
+			} catch (e) {
+				return clean.substring(slash + 1)
+			}
+		}
+		return t('pub.material')
+	})
+
+	const previewHint = computed((): string => {
+		const h = t('article.previewHint')
+		if (h.length > 0 && h != 'article.previewHint') return h
+		return '若预览未正常显示，可点击「全屏预览」或「下载」打开文件'
+	})
+
+	const materialPreviewUrl = computed((): string => {
+		const raw = materialFileUrl.value
+		if (raw.length == 0) return ''
+		const url = cmsEnsureHttps(raw)
+		const kind = materialKind.value
+		if (kind == 'pdf') {
+			// #ifdef APP-ANDROID || APP-HARMONY
+			return 'https://docs.google.com/gview?embedded=true&url=' + encodeURIComponent(url)
+			// #endif
+			return url
+		}
+		if (kind == 'ppt' || kind == 'pptx') {
+			return 'https://view.officeapps.live.com/op/embed.aspx?src=' + encodeURIComponent(url)
+		}
+		return ''
+	})
+
 	const fileList = computed((): Array<string> => {
 		const d = detail.value
 		if (d == null) return [] as Array<string>
-		return parseContentMedia(d.content, d.video_url, d.material_url).files
+		const files = parseContentMedia(d.content, d.video_url, d.material_url).files
+		if (!showMaterialPreview.value) return files
+		const mat = materialFileUrl.value
+		const out: Array<string> = []
+		for (let i = 0; i < files.length; i++) {
+			if (cmsFileUrl(files[i]) == mat) continue
+			out.push(files[i])
+		}
+		return out
 	})
 
 	const contentHtml = computed((): string => {
@@ -268,6 +379,22 @@
 	function openFileUrl(url: string): void {
 		if (url.length == 0) return
 		openCmsLink(url)
+	}
+
+	function downloadMaterial(): void {
+		const url = materialFileUrl.value
+		if (url.length == 0) return
+		downloadCmsFile(url, materialKind.value)
+	}
+
+	function openMaterialFullscreen(): void {
+		const rawUrl = materialFileUrl.value
+		if (rawUrl.length == 0) return
+		const kind = materialKind.value
+		const title = detail.value != null ? detail.value!.title : ''
+		uni.navigateTo({
+			url: '/pages/article/material-preview?url=' + encodeURIComponent(rawUrl) + '&kind=' + encodeURIComponent(kind) + '&title=' + encodeURIComponent(title)
+		})
 	}
 	const tagList = computed((): Array<string> => {
 		const d = detail.value
@@ -437,7 +564,7 @@
 		} catch (e0) {}
 		try {
 			const typ = options['type']
-			if (typ != null && ('' + typ).trim() == 'project') {
+			if (typ != null && ('' + typ).trim().toLowerCase() == 'project') {
 				detailType.value = 'project'
 			}
 		} catch (e1) {}
@@ -446,6 +573,10 @@
 </script>
 
 <style>
+	.status-bar-holder {
+		height: var(--status-bar-height);
+		background-color: #ffffff;
+	}
 	.detail-page {
 		flex: 1;
 		background-color: #ffffff;
@@ -616,6 +747,114 @@
 		border-radius: 20rpx;
 		margin-right: 12rpx;
 		margin-bottom: 10rpx;
+	}
+	.material-block {
+		flex-direction: column;
+		margin-bottom: 24rpx;
+		border-radius: 16rpx;
+		background-color: #f7f9fc;
+		border-width: 1rpx;
+		border-style: solid;
+		border-color: #e5e9f2;
+		overflow: hidden;
+	}
+	.material-head {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 20rpx 24rpx;
+		background-color: #f9fbfe;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #edf2f9;
+	}
+	.material-info {
+		flex: 1;
+		flex-direction: row;
+		align-items: center;
+		margin-right: 16rpx;
+	}
+	.material-badge {
+		font-size: 20rpx;
+		font-weight: 700;
+		padding: 4rpx 12rpx;
+		border-radius: 8rpx;
+		margin-right: 12rpx;
+	}
+	.badge-pdf {
+		background-color: #fff1f0;
+		color: #f5222d;
+		border-width: 1rpx;
+		border-style: solid;
+		border-color: #ffa39e;
+	}
+	.badge-ppt,
+	.badge-pptx {
+		background-color: #fff7e6;
+		color: #fa8c16;
+		border-width: 1rpx;
+		border-style: solid;
+		border-color: #ffd591;
+	}
+	.material-title {
+		flex: 1;
+		font-size: 28rpx;
+		color: #1a1a1a;
+		font-weight: 700;
+		lines: 1;
+		text-overflow: ellipsis;
+	}
+	.material-actions {
+		flex-direction: row;
+		align-items: center;
+	}
+	.material-btn-fullscreen {
+		padding: 10rpx 22rpx;
+		margin-right: 12rpx;
+		border-radius: 28rpx;
+		background-color: #eef4ff;
+		border-width: 1rpx;
+		border-style: solid;
+		border-color: #c7d7f5;
+		align-items: center;
+		justify-content: center;
+	}
+	.material-btn-fullscreen-text {
+		font-size: 24rpx;
+		color: #1861c8;
+		font-weight: 600;
+	}
+	.material-btn-download {
+		padding: 10rpx 24rpx;
+		border-radius: 28rpx;
+		background-color: #1861c8;
+		align-items: center;
+		justify-content: center;
+	}
+	.material-btn-download-text {
+		font-size: 24rpx;
+		color: #ffffff;
+		font-weight: 600;
+	}
+	.material-web-wrap {
+		width: 100%;
+		height: 500px;
+		background-color: #ffffff;
+	}
+	.material-web {
+		width: 100%;
+		height: 500px;
+		background-color: #ffffff;
+	}
+	.material-foot {
+		padding: 14rpx 24rpx;
+		background-color: #fafbfc;
+		border-top-width: 1rpx;
+		border-top-color: #edf2f9;
+	}
+	.material-hint {
+		font-size: 22rpx;
+		color: #8c95a6;
+		line-height: 32rpx;
 	}
 	.content {
 		font-size: 30rpx;
