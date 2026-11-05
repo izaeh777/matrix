@@ -665,6 +665,8 @@ export type PlatformMe = {
 	invite_code: string
 	/** 推荐人：0 / 空 = 尚未绑定 */
 	inviter_id: string
+	/** 已绑定的 BSC 钱包地址；空 = 未绑定 */
+	wallet_address: string
 }
 
 /** 待绑定的推荐人邀请码（扫码/DeepLink 落地后写入，登录注册时透传） */
@@ -1044,6 +1046,17 @@ function parsePlatformMe(data: UTSJSONObject): PlatformMe {
 	if (inviterId.length == 0) {
 		inviterId = pickStrAny(data, ['inviter_id', 'inviterId'])
 	}
+	let walletAddress = pickStrAny(user, [
+		'wallet_address', 'walletAddress', 'bsc_address', 'bscAddress', 'wallet'
+	])
+	if (walletAddress.length == 0) {
+		walletAddress = pickStrAny(data, [
+			'wallet_address', 'walletAddress', 'bsc_address', 'bscAddress'
+		])
+	}
+	if (walletAddress.length > 10) {
+		try { uni.setStorageSync('tp_wallet_address_v1', walletAddress) } catch (eWa) {}
+	}
 	const me: PlatformMe = {
 		money: money,
 		nickname: nickname,
@@ -1054,7 +1067,8 @@ function parsePlatformMe(data: UTSJSONObject): PlatformMe {
 		vip_period: formatVipPeriod(sub),
 		team_name: teamName,
 		invite_code: inviteCode,
-		inviter_id: inviterId
+		inviter_id: inviterId,
+		wallet_address: walletAddress
 	}
 	return me
 }
@@ -1277,6 +1291,121 @@ export async function bindPlatformEmail(email: string, code: string): Promise<vo
 		s.email = em
 		savePlatformSession(s)
 	}
+}
+
+function isMissingApiErr(e: any): boolean {
+	const s = '' + e
+	return s.indexOf('HTTP_404') >= 0 || s.indexOf('HTTP_405') >= 0 || s.indexOf('HTTP_501') >= 0
+}
+
+function isMissingApiMsg(msg: string): boolean {
+	const s = msg.toLowerCase()
+	if (s.length == 0) return false
+	if (s.indexOf('不存在') >= 0) return true
+	if (s.indexOf('not found') >= 0) return true
+	if (s.indexOf('not exist') >= 0) return true
+	if (s.indexOf('undefined') >= 0) return true
+	if (s.indexOf('method not') >= 0) return true
+	return false
+}
+
+function pickBoundWalletFromData(data: UTSJSONObject, fallback: string): string {
+	let wa = pickStrAny(data, [
+		'wallet_address', 'walletAddress', 'address', 'wallet', 'bsc_address', 'bscAddress'
+	])
+	if (wa.length == 0) {
+		const user = pickObj(data, 'user')
+		if (user != null) {
+			wa = pickStrAny(user!, [
+				'wallet_address', 'walletAddress', 'address', 'wallet', 'bsc_address', 'bscAddress'
+			])
+		}
+	}
+	if (wa.length > 10) return wa
+	return fallback
+}
+
+async function tryBindWalletOnce(path: string, asJson: boolean, body: UTSJSONObject): Promise<UTSJSONObject | null> {
+	try {
+		const root = asJson ? await httpPostJson(path, body, true) : await httpPostForm(path, body, true)
+		const code = pickNum(root, 'code')
+		console.log('[platform] wallet bind', path, asJson ? 'json' : 'form', 'code=', code, 'msg=', pickStr(root, 'msg'))
+		if (code == 1) return root
+		const msg = pickStr(root, 'msg')
+		if (code == 404 || isMissingApiMsg(msg)) return null
+		if (msg.length > 0) throw new Error(msg)
+		return null
+	} catch (e) {
+		if (isMissingApiErr(e)) {
+			console.warn('[platform] wallet bind missing', path, e)
+			return null
+		}
+		throw e
+	}
+}
+
+/**
+ * 绑定 BSC 钱包：签名消息同钱包登录（challenge），提交时带当前登录 token。
+ * 优先 POST /api/v1/users/me/wallet/bind ；回退 /api/v1/auth/wallet/bind 。
+ */
+export async function bindPlatformWallet(address: string, signature: string, nonce: string = ''): Promise<string> {
+	const addr = address.trim()
+	const sig = signature.trim()
+	if (addr.length < 10) throw new Error('钱包地址无效')
+	if (sig.length == 0) throw new Error('签名为空')
+	if (platformToken().length == 0) throw new Error('请先登录后再绑定钱包')
+	const body: UTSJSONObject = {
+		address: addr,
+		wallet: addr,
+		signature: sig,
+		sign: sig,
+		chain_id: '56',
+		chainId: '56',
+		chain: 'BSC'
+	}
+	const n = nonce.trim()
+	if (n.length > 0) body['nonce'] = n
+
+	let root: UTSJSONObject | null = null
+	root = await tryBindWalletOnce('/api/v1/users/me/wallet/bind', true, body)
+	if (root == null) root = await tryBindWalletOnce('/api/v1/users/me/wallet/bind', false, body)
+	if (root == null) root = await tryBindWalletOnce('/api/v1/auth/wallet/bind', true, body)
+	if (root == null) root = await tryBindWalletOnce('/api/v1/auth/wallet/bind', false, body)
+	if (root == null) {
+		try {
+			const rVerify = await httpPostJson('/api/v1/auth/wallet/verify', body, true)
+			const code = pickNum(rVerify, 'code')
+			console.log('[platform] wallet bind via verify code=', code, 'msg=', pickStr(rVerify, 'msg'))
+			if (code == 1) {
+				root = rVerify
+				try {
+					const data = pickObj(rVerify, 'data')
+					if (data != null) {
+						const incoming = parseSession(data, addr)
+						const cur = loadPlatformSession()
+						if (cur != null && incoming.user_id.length > 0 && cur.user_id.length > 0 && incoming.user_id != cur.user_id) {
+							throw new Error('该钱包已绑定其他账号')
+						}
+					}
+				} catch (eSess) {
+					const msg = '' + eSess
+					if (msg.indexOf('已绑定其他') >= 0) throw eSess
+				}
+			} else {
+				const msg = pickStr(rVerify, 'msg')
+				if (msg.length > 0) throw new Error(msg)
+			}
+		} catch (eV) {
+			if (!isMissingApiErr(eV)) throw eV
+		}
+	}
+	if (root == null) throw new Error('绑定钱包失败')
+	const data = assertOk(root!, '绑定钱包失败')
+	const bound = pickBoundWalletFromData(data, addr)
+	if (bound.length > 10) {
+		try { uni.setStorageSync('tp_wallet_address_v1', bound) } catch (eSave) {}
+	}
+	return bound
 }
 
 export async function fetchPlatformMe(): Promise<PlatformMe> {

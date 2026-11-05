@@ -31,6 +31,11 @@
 					<text class="setting-value" :class="emailBound ? '' : 'setting-value-muted'">{{ emailBindText }}</text>
 					<text v-if="!emailBound" class="setting-arrow">›</text>
 				</view>
+				<view class="setting-row" @click="onWalletRowTap">
+					<text class="setting-label">{{ t('settings.wallet') }}</text>
+					<text class="setting-value" :class="walletBound ? '' : 'setting-value-muted'">{{ walletBindText }}</text>
+					<text v-if="!walletBound" class="setting-arrow">›</text>
+				</view>
 			</view>
 
 			<!-- 推送 / 设备 / 账号安全 / 关于：暂隐 -->
@@ -287,10 +292,18 @@
 		fetchUserBindings,
 		sendBindEmailCode,
 		bindPlatformEmail,
+		bindPlatformWallet,
+		walletChallenge,
 		updatePlatformProfile,
 		sendModifyPwdEmailCode,
 		modifyPlatformPassword
 	} from '@/common/platform.uts'
+	import {
+		tpSdkAuthorize,
+		tpSdkPersonalSign,
+		loadTpWalletAddress,
+		saveTpWalletAddress
+	} from '@/common/tp-wallet.uts'
 	import { t as __i18nT } from '@/common/i18n.uts'
 	import { checkAppUpdate, localAppVersionName, localAppVersionCode } from '@/common/app-update.uts'
 	function t(key: string): string {
@@ -397,6 +410,14 @@
 	const profileAvatar = ref<string>(DEFAULT_AVATAR)
 	const emailBound = ref<boolean>(false)
 	const emailBindText = ref<string>('…')
+	const walletBound = ref<boolean>(false)
+	const walletAddress = ref<string>('')
+	const walletBindText = ref<string>('…')
+	const walletBinding = ref<boolean>(false)
+	const appWalletMode = ref<boolean>(false)
+	// #ifdef APP
+	appWalletMode.value = true
+	// #endif
 	const showBindEmailModal = ref<boolean>(false)
 	const bindEmailDraft = ref<string>('')
 	const bindCodeDraft = ref<string>('')
@@ -570,6 +591,186 @@
 		}
 	}
 
+	function shortWalletAddr(addr: string): string {
+		const a = addr.trim()
+		if (a.length < 16) return a
+		return a.substring(0, 8) + '...' + a.substring(a.length - 6)
+	}
+
+	function applyWalletBindDisplay(bound: boolean, wallet: string): void {
+		walletBound.value = bound
+		const wa = wallet.trim()
+		walletAddress.value = wa
+		if (bound) {
+			walletBindText.value = wa.length > 0 ? shortWalletAddr(wa) : t('settings.bound')
+		} else {
+			walletBindText.value = t('settings.goBind')
+		}
+	}
+
+	async function loadWalletBindStatus(): Promise<void> {
+		const local = loadPlatformSession()
+		if (local == null || local.token.length == 0) {
+			if (!walletBound.value) {
+				walletBindText.value = t('settings.notLogin')
+			}
+			return
+		}
+		try {
+			const b = await fetchUserBindings()
+			if (b.walletBound || b.wallet.length > 10) {
+				applyWalletBindDisplay(true, b.wallet)
+				if (b.wallet.length > 10) saveTpWalletAddress(b.wallet)
+				return
+			}
+		} catch (e) {
+			console.warn('load wallet bind fail', e)
+		}
+		if (!walletBound.value) applyWalletBindDisplay(false, '')
+	}
+
+	function walletErrMsg(e: any): string {
+		let msg = t('settings.bindFail')
+		try { msg = '' + e } catch (e2) {}
+		if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
+		if (msg.indexOf('HTTP_525') >= 0 || msg.indexOf('CDN') >= 0) {
+			return t('login.walletNet')
+		}
+		return msg.length > 0 ? msg : t('settings.bindFail')
+	}
+
+	type WalletBridge = {
+		connect: () => Promise<string>
+		personalSign: (message: string, addr: string) => Promise<string>
+	}
+
+	function ensureWalletBridge(): WalletBridge | null {
+		// #ifdef H5
+		try {
+			const w = window as any
+			if (w == null) return null
+			if (w.__itikWallet != null) return w.__itikWallet as WalletBridge
+			const makeBridge = (): WalletBridge => {
+				const provider = (): any | null => {
+					try {
+						if (w.tokenpocket != null && w.tokenpocket.ethereum != null) return w.tokenpocket.ethereum
+					} catch (e0) {}
+					try {
+						if (w.deboxWallet != null) return w.deboxWallet
+					} catch (e1) {}
+					try {
+						if (w.ethereum != null) return w.ethereum
+					} catch (e2) {}
+					return null
+				}
+				const bridge: WalletBridge = {
+					connect: async (): Promise<string> => {
+						const eth = provider()
+						if (eth == null) throw new Error(t('login.noWallet'))
+						const accounts = await eth.request({ method: 'eth_requestAccounts', params: [] }) as string[]
+						if (accounts == null || accounts.length == 0) throw new Error(t('login.noAddr'))
+						return accounts[0]
+					},
+					personalSign: async (message: string, addr: string): Promise<string> => {
+						const eth = provider()
+						if (eth == null) throw new Error(t('login.noWallet'))
+						return await eth.request({ method: 'personal_sign', params: [message, addr] }) as string
+					}
+				}
+				w.__itikWallet = bridge
+				return bridge
+			}
+			return makeBridge()
+		} catch (e0) {}
+		// #endif
+		return null
+	}
+
+	async function finishBindWallet(addr: string, signature: string, nonce: string): Promise<void> {
+		uni.showLoading({ title: t('settings.binding'), mask: true })
+		const bound = await bindPlatformWallet(addr, signature, nonce)
+		const show = bound.length > 10 ? bound : addr
+		saveTpWalletAddress(show)
+		applyWalletBindDisplay(true, show)
+		uni.hideLoading()
+		uni.showToast({ title: t('settings.bindOk'), icon: 'success' })
+		await loadWalletBindStatus()
+	}
+
+	async function bindWalletApp(): Promise<void> {
+		uni.showLoading({ title: t('login.walletPreparing') })
+		let wallet = loadTpWalletAddress().trim()
+		if (wallet.length < 10) {
+			const auth = await tpSdkAuthorize()
+			if (!auth.ok || auth.wallet.length < 10) {
+				throw new Error(t('login.signCancel'))
+			}
+			wallet = auth.wallet
+			saveTpWalletAddress(wallet)
+		}
+		uni.showLoading({ title: t('login.walletSigning') })
+		const challenge = await walletChallenge(wallet)
+		uni.showLoading({ title: t('login.walletOpenSign') })
+		const signed = await tpSdkPersonalSign(challenge.message)
+		if (!signed.ok || signed.signature.length == 0) {
+			throw new Error(t('login.signCancel'))
+		}
+		const useWallet = signed.wallet.length > 10 ? signed.wallet : wallet
+		saveTpWalletAddress(useWallet)
+		await finishBindWallet(useWallet, signed.signature, challenge.nonce)
+	}
+
+	async function bindWalletH5(): Promise<void> {
+		const bridge = ensureWalletBridge()
+		if (bridge == null) {
+			uni.showToast({ title: t('login.openInWallet'), icon: 'none' })
+			return
+		}
+		uni.showLoading({ title: t('login.signing') })
+		const addr = await bridge.connect()
+		const useAddr = addr != null ? ('' + addr).trim() : ''
+		if (useAddr.length == 0) throw new Error(t('login.noAddr'))
+		const challenge = await walletChallenge(useAddr)
+		const signature = await bridge.personalSign(challenge.message, useAddr)
+		if (signature == null || ('' + signature).length == 0) {
+			throw new Error(t('login.signFail'))
+		}
+		saveTpWalletAddress(useAddr)
+		await finishBindWallet(useAddr, '' + signature, challenge.nonce)
+	}
+
+	async function onWalletRowTap(): Promise<void> {
+		if (walletBound.value) {
+			const addr = walletAddress.value.trim()
+			if (addr.length == 0) return
+			uni.setClipboardData({
+				data: addr,
+				success: () => {
+					uni.showToast({ title: t('settings.walletCopied'), icon: 'none' })
+				}
+			})
+			return
+		}
+		if (walletBinding.value) return
+		const local = loadPlatformSession()
+		if (local == null || local.token.length == 0) {
+			uni.showToast({ title: t('profile.loginFirst'), icon: 'none' })
+			return
+		}
+		walletBinding.value = true
+		try {
+			if (appWalletMode.value) {
+				await bindWalletApp()
+			} else {
+				await bindWalletH5()
+			}
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: walletErrMsg(e), icon: 'none', duration: 3500 })
+		}
+		walletBinding.value = false
+	}
+
 	async function onSendBindCode(): Promise<void> {
 		if (bindCodeWait.value > 0 || bindEmailSubmitting.value) return
 		const em = bindEmailDraft.value.trim()
@@ -664,10 +865,14 @@
 					}
 				}
 			}
+			if (me.wallet_address.length > 10) {
+				applyWalletBindDisplay(true, me.wallet_address)
+			}
 		} catch (e) {
 			console.warn('load profile me fail', e)
 		}
 		await loadEmailBindStatus()
+		await loadWalletBindStatus()
 	}
 
 	function onEditNickname(): void {
@@ -960,6 +1165,11 @@
 			applyEmailBindDisplay(true, em)
 		} else if (emailBindText.value != '…') {
 			applyEmailBindDisplay(false, '')
+		}
+		if (walletBound.value) {
+			applyWalletBindDisplay(true, walletAddress.value)
+		} else if (walletBindText.value != '…') {
+			applyWalletBindDisplay(false, '')
 		}
 	})
 
@@ -1368,7 +1578,9 @@
 	.setting-value {
 		font-size: 26rpx;
 		color: #999;
-		max-width: 320rpx;
+		max-width: 400rpx;
+		lines: 1;
+		text-overflow: ellipsis;
 	}
 
 	.setting-avatar {
