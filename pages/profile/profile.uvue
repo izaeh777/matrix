@@ -21,7 +21,8 @@
 				<view class="user-meta">
 					<text class="user-name">{{ displayName }}</text>
 					<view class="user-sub">
-						<text class="user-id">ID: {{ accountName }}</text>
+						<!-- <text class="user-id">ID: {{ accountName }}</text> -->
+						<text class="user-id" @click.stop="copyUsername">{{ projUsername || '' }}</text>
 						<view class="vip-badge">
 							<text class="vip-text">{{ vipLabelText }}</text>
 						</view>
@@ -344,6 +345,7 @@
 	const session = ref<SessionInfo | null>(loadSession())
 	const platform = ref<PlatformSession | null>(loadPlatformSession())
 	const usdtBalance = ref<string>('--')
+	const projUsername = ref<string>('--')
 	const BALANCE_VISIBLE_KEY = 'profile_balance_visible_v1'
 	const balanceVisible = ref<boolean>(true)
 	try {
@@ -494,6 +496,7 @@
 			teamName.value = me.team_name
 			if (me.invite_code.length > 0) myInviteCode.value = me.invite_code
 			else if (me.username.length > 0) myInviteCode.value = me.username
+			projUsername.value = me.username
 			myInviterId.value = me.inviter_id.length > 0 ? me.inviter_id : '0'
 			// vip_label 已在 fetchPlatformMe 内缓存，供首页/发现页判断发布入口
 			console.log('[profile] vip=', me.vip_label, me.vip_period, 'team=', me.team_name, 'invite=', me.invite_code, 'inviter=', me.inviter_id)
@@ -1253,6 +1256,15 @@
 			data: code,
 			success: () => {
 				uni.showToast({ title: t('invite.codeCopied'), icon: 'none' })
+			}
+		})
+	}
+
+	function copyUsername(): void {
+		uni.setClipboardData({
+			data: projUsername.value,
+			success: () => {
+				uni.showToast({ title: t('profile.usernameCopied'), icon: 'none' })
 			}
 		})
 	}
