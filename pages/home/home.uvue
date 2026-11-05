@@ -41,7 +41,7 @@
 			<view class="section">
 				<view class="section-head">
 					<text class="section-title">{{ i18n.latest }}</text>
-					<text class="section-more" @click="goDiscover">{{ i18n.more }}</text>
+					<text class="section-more" @click="goNotify">{{ i18n.more }}</text>
 				</view>
 				<view class="timeline-card">
 					<view v-if="latest.length == 0" class="empty-tip">
@@ -304,7 +304,8 @@
 		uni.redirectTo({ url: '/pages/profile/profile' })
 	}
 	function goSearch(): void {
-		uni.navigateTo({ url: '/pages/search/search' })
+		// uni.navigateTo({ url: '/pages/search/search' })
+		uni.navigateTo({ url: '/pages/discover/discover' })
 	}
 	function goPublish(): void {
 		if (!canPublish.value) {
