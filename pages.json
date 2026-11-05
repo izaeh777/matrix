@@ -186,6 +186,15 @@
 			}
 		},
 		{
+			"path": "pages/stats/earnings",
+			"style": {
+				"navigationBarTitleText": "Earnings",
+				"navigationStyle": "custom",
+				"backgroundColor": "#F5F6F8",
+				"backgroundColorContent": "#F5F6F8"
+			}
+		},
+		{
 			"path": "pages/profile/team",
 			"style": {
 				"navigationBarTitleText": "My team",
