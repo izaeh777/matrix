@@ -1586,7 +1586,8 @@
 	.setting-avatar {
 		width: 72rpx;
 		height: 72rpx;
-		border-radius: 36rpx;
+		/* border-radius: 36rpx; */
+		border-radius: 12rpx;
 		background-color: #e8eef8;
 		margin-right: 8rpx;
 	}

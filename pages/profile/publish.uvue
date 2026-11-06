@@ -69,6 +69,9 @@
 			</view>
 			<view class="scroll-pad"></view>
 		</scroll-view>
+		<view v-if="canPublish" class="fab" @click="goPublish">
+			<text class="fab-text">＋</text>
+		</view>
 	</view>
 </template>
 
@@ -86,6 +89,10 @@
 		openProjectEdit,
 		CmsArchiveItem
 	} from '@/common/cms.uts'
+	import {
+		canPublishProject,
+		loadCachedVipLabel
+	} from '@/common/platform.uts'
 	import { loadPlatformSession } from '@/common/platform.uts'
 
 	function t(key: string): string {
@@ -98,6 +105,7 @@
 	const loading = ref<boolean>(false)
 	const busy = ref<boolean>(false)
 	const rows = ref<Array<CmsArchiveItem>>([] as Array<CmsArchiveItem>)
+	const canPublish = ref<boolean>(canPublishProject(loadCachedVipLabel()))
 
 	function coverOf(item: CmsArchiveItem): string {
 		return cmsAssetUrl(item.image)
@@ -208,6 +216,13 @@
 			uni.showToast({ title: errMsg(e, t('publish.loadFail')), icon: 'none' })
 		}
 		loading.value = false
+	}
+	function goPublish(): void {
+		if (!canPublish.value) {
+			uni.showToast({ title: t('pub.visitorBlock'), icon: 'none' })
+			return
+		}
+		uni.navigateTo({ url: '/pages/project/publish' })
 	}
 
 	onShow(() => {
@@ -402,5 +417,22 @@
 	}
 	.scroll-pad {
 		height: 40rpx;
+	}
+	.fab {
+		position: absolute;
+		right: 36rpx;
+		bottom: 160rpx;
+		width: 96rpx;
+		height: 96rpx;
+		border-radius: 48rpx;
+		background-color: #2f6ff2;
+		align-items: center;
+		justify-content: center;
+		z-index: 20;
+	}
+	.fab-text {
+		color: #ffffff;
+		font-size: 52rpx;
+		font-weight: 300;
 	}
 </style>
