@@ -146,6 +146,15 @@
 			}
 		},
 		{
+			"path": "pages/article/material-preview",
+			"style": {
+				"navigationBarTitleText": "资料预览",
+				"navigationStyle": "custom",
+				"backgroundColor": "#FFFFFF",
+				"backgroundColorContent": "#FFFFFF"
+			}
+		},
+		{
 			"path": "pages/settings/settings",
 			"style": {
 				"navigationBarTitleText": "Settings",

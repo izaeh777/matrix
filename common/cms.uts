@@ -863,7 +863,16 @@ export async function fetchProjectDetail(id: number): Promise<CmsArchiveDetail> 
 	let likes = pickNum(proj, 'likes')
 	if (likes <= 0) likes = pickNum(proj, 'follows')
 	const videoUrl = pickStr(proj, 'video')
-	const materialUrl = pickStr(proj, 'material')
+	let materialUrl = pickStr(proj, 'material')
+	if (materialUrl.length == 0) materialUrl = pickStr(proj, 'material_url')
+	if (materialUrl.length == 0) materialUrl = pickStr(proj, 'attachment')
+	if (materialUrl.length == 0) materialUrl = pickStr(proj, 'file')
+	let materialFull = pickStr(proj, 'material_fullurl')
+	if (materialFull.length == 0) materialFull = pickStr(proj, 'materialFullurl')
+	if (materialFull.length == 0) materialFull = pickStr(proj, 'attachment_fullurl')
+	if (materialFull.length > 0) {
+		materialUrl = materialFull
+	}
 	const detail: CmsArchiveDetail = {
 		id: pickNum(proj, 'id'),
 		channel_id: pickNum(proj, 'category_id'),
@@ -1297,6 +1306,20 @@ function normalizeExternalUrl(url: string): string {
 	return u
 }
 
+/** 项目资料等文件地址归一化（相对路径 → S3 / CMS 绝对地址） */
+export function cmsFileUrl(url: string): string {
+	return normalizeExternalUrl(url)
+}
+
+/** 确保外部预览链接为 HTTPS，避免 Office Apps Viewer 或混合内容拦截 */
+export function cmsEnsureHttps(url: string): string {
+	let u = url.trim()
+	if (u.indexOf('http://') == 0) {
+		return 'https://' + u.substring(7)
+	}
+	return u
+}
+
 function isOfficeOrPdfUrl(url: string): boolean {
 	const lower = url.toLowerCase()
 	return lower.indexOf('.ppt') >= 0 || lower.indexOf('.pptx') >= 0 || lower.indexOf('.pdf') >= 0
@@ -1373,6 +1396,74 @@ export function openCmsLink(url: string): void {
 		data: finalUrl,
 		success: () => {
 			uni.showToast({ title: t('cms.copyOpen'), icon: 'none' })
+		}
+	})
+}
+
+/** 下载资料文件：H5 触发浏览器下载，App 下载后交给系统打开（可保存/分享） */
+export function downloadCmsFile(url: string, fileType: string = ''): void {
+	const finalUrl = normalizeExternalUrl(url)
+	if (finalUrl.length == 0) return
+	let fileName = 'material'
+	const q = finalUrl.indexOf('?')
+	const noQuery = q >= 0 ? finalUrl.substring(0, q) : finalUrl
+	const slash = noQuery.lastIndexOf('/')
+	if (slash >= 0 && slash + 1 < noQuery.length) {
+		fileName = noQuery.substring(slash + 1)
+	}
+	// #ifdef H5
+	try {
+		const w = window as any
+		const doc = w != null ? w.document : null
+		if (doc != null) {
+			const a = doc.createElement('a')
+			a.href = finalUrl
+			a.download = fileName
+			a.target = '_blank'
+			a.rel = 'noopener noreferrer'
+			doc.body.appendChild(a)
+			a.click()
+			doc.body.removeChild(a)
+			return
+		}
+	} catch (e0) {}
+	// #endif
+	uni.showLoading({ title: t('common.loading'), mask: true })
+	uni.downloadFile({
+		url: finalUrl,
+		success: (res) => {
+			uni.hideLoading()
+			if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath.length > 0) {
+				uni.openDocument({
+					filePath: res.tempFilePath,
+					fileType: fileType,
+					showMenu: true,
+					fail: (_e1) => {
+						uni.setClipboardData({
+							data: finalUrl,
+							success: () => {
+								uni.showToast({ title: t('cms.copyOpen'), icon: 'none' })
+							}
+						})
+					}
+				})
+			} else {
+				uni.setClipboardData({
+					data: finalUrl,
+					success: () => {
+						uni.showToast({ title: t('cms.copyOpen'), icon: 'none' })
+					}
+				})
+			}
+		},
+		fail: (_e2) => {
+			uni.hideLoading()
+			uni.setClipboardData({
+				data: finalUrl,
+				success: () => {
+					uni.showToast({ title: t('cms.copyOpen'), icon: 'none' })
+				}
+			})
 		}
 	})
 }

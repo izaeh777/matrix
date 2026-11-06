@@ -2852,6 +2852,7 @@ export type MoneyLogResult = {
 	total: number
 	page: number
 	limit: number
+	type: UTSJSONObject | null
 }
 
 function fmtMoneyNum(n: number): string {
@@ -2945,6 +2946,17 @@ function parseMoneySeries(raw: any | null): Array<MoneyStatPoint> {
 /**
  * GET /api/v1/users/money-stat
  * 资金统计：start_date / end_date / type(all|分享奖励|社区奖励|社区平级)
+ *
+ * API 实际返回结构：
+ * {
+ *   "code": 1,
+ *   "data": {
+ *     "current": { "share": "7200.40", "community": "1020.06", "peerLv": 0, "total": 8220.46 },
+ *     "period": { "start": "2026-10-07", "end": "2026-11-05" },
+ *     "compare": { "share": 0, "community": 0, "peerLv": 0, "total": 0 },
+ *     "last7days": [{ "date": "2026-10-30", "total": 8220.46 }, ...]
+ *   }
+ * }
  */
 export async function fetchMoneyStat(startDate: string, endDate: string, type: string = 'all'): Promise<MoneyStatResult> {
 	const qs: Array<string> = []
@@ -2965,72 +2977,105 @@ export async function fetchMoneyStat(startDate: string, endDate: string, type: s
 	let data = pickObj(root, 'data')
 	if (data == null) data = root
 	const flat = data!
-	const summary = pickObj(flat, 'summary')
-	const stats = pickObj(flat, 'stats')
-	const base = summary != null ? summary! : (stats != null ? stats! : flat)
 
-	let totalBlock = pickObj(base, 'total')
-	if (totalBlock == null) totalBlock = pickObj(base, 'all')
-	if (totalBlock == null) totalBlock = pickObj(base, '合计')
-	let directBlock = pickObj(base, 'direct')
-	if (directBlock == null) directBlock = pickObj(base, 'share')
-	if (directBlock == null) directBlock = pickObj(base, 'share_reward')
-	if (directBlock == null) directBlock = pickObj(base, '分享奖励')
-	if (directBlock == null) directBlock = pickObj(base, '直推')
-	if (directBlock == null) directBlock = pickObj(base, '直推收益')
-	let teamBlock = pickObj(base, 'team')
-	if (teamBlock == null) teamBlock = pickObj(base, 'community')
-	if (teamBlock == null) teamBlock = pickObj(base, '社区奖励')
-	if (teamBlock == null) teamBlock = pickObj(base, '社区收益')
-	let rewardBlock = pickObj(base, 'reward')
-	if (rewardBlock == null) rewardBlock = pickObj(base, 'peer')
-	if (rewardBlock == null) rewardBlock = pickObj(base, 'level')
-	if (rewardBlock == null) rewardBlock = pickObj(base, '社区平级')
-	if (rewardBlock == null) rewardBlock = pickObj(base, '平级奖励')
+	// 解析 current 块（当前周期数据）
+	const current = pickObj(flat, 'current')
+	const compare = pickObj(flat, 'compare')
 
+	// 构建 metrics
 	const metrics: Array<MoneyStatMetric> = []
-	metrics.push(metricFromBlock(
-		'total',
-		totalBlock,
-		base,
-		['total', 'total_amount', 'amount', 'sum', 'money', 'all'],
-		['total_diff', 'diff_rate', 'change_rate', 'rate', 'percent', 'diff', 'compare_rate']
-	))
-	metrics.push(metricFromBlock(
-		'direct',
-		directBlock,
-		base,
-		['direct', 'share', 'share_amount', 'share_reward', '直推', '分享奖励'],
-		['direct_diff', 'share_diff', 'diff_rate', 'change_rate', 'rate', 'percent', 'diff']
-	))
-	metrics.push(metricFromBlock(
-		'team',
-		teamBlock,
-		base,
-		['team', 'community', 'community_amount', '社区奖励', '社区收益'],
-		['team_diff', 'community_diff', 'diff_rate', 'change_rate', 'rate', 'percent', 'diff']
-	))
-	metrics.push(metricFromBlock(
-		'reward',
-		rewardBlock,
-		base,
-		['reward', 'peer', 'peer_amount', 'level', '社区平级', '平级奖励'],
-		['reward_diff', 'peer_diff', 'diff_rate', 'change_rate', 'rate', 'percent', 'diff']
-	))
 
-	let series = parseMoneySeries(flat['series'])
+	// total
+	let totalAmount = moneyAmountText(current != null ? current! : flat, ['total', 'amount', 'sum', 'money'])
+	let totalDiff = ''
+	let totalTrend = 'flat'
+	if (compare != null) {
+		const diffVal = pickNum(compare!, 'total')
+		if (diffVal > 0) {
+			totalDiff = '+' + fmtMoneyNum(diffVal)
+			totalTrend = 'up'
+		} else if (diffVal < 0) {
+			totalDiff = fmtMoneyNum(diffVal)
+			totalTrend = 'down'
+		}
+	}
+	metrics.push({
+		key: 'total',
+		amount: totalAmount,
+		diff: totalDiff,
+		trend: totalTrend
+	} as MoneyStatMetric)
+
+	// direct (share)
+	let directAmount = moneyAmountText(current != null ? current! : flat, ['share', 'direct', 'share_reward'])
+	let directDiff = ''
+	let directTrend = 'flat'
+	if (compare != null) {
+		const diffVal = pickNum(compare!, 'share')
+		if (diffVal > 0) {
+			directDiff = '+' + fmtMoneyNum(diffVal)
+			directTrend = 'up'
+		} else if (diffVal < 0) {
+			directDiff = fmtMoneyNum(diffVal)
+			directTrend = 'down'
+		}
+	}
+	metrics.push({
+		key: 'direct',
+		amount: directAmount,
+		diff: directDiff,
+		trend: directTrend
+	} as MoneyStatMetric)
+
+	// team (community)
+	let teamAmount = moneyAmountText(current != null ? current! : flat, ['community', 'team', 'community_reward'])
+	let teamDiff = ''
+	let teamTrend = 'flat'
+	if (compare != null) {
+		const diffVal = pickNum(compare!, 'community')
+		if (diffVal > 0) {
+			teamDiff = '+' + fmtMoneyNum(diffVal)
+			teamTrend = 'up'
+		} else if (diffVal < 0) {
+			teamDiff = fmtMoneyNum(diffVal)
+			teamTrend = 'down'
+		}
+	}
+	metrics.push({
+		key: 'team',
+		amount: teamAmount,
+		diff: teamDiff,
+		trend: teamTrend
+	} as MoneyStatMetric)
+
+	// reward (peerLv)
+	let rewardAmount = moneyAmountText(current != null ? current! : flat, ['peerLv', 'peer', 'reward', 'level'])
+	let rewardDiff = ''
+	let rewardTrend = 'flat'
+	if (compare != null) {
+		const diffVal = pickNum(compare!, 'peerLv')
+		if (diffVal > 0) {
+			rewardDiff = '+' + fmtMoneyNum(diffVal)
+			rewardTrend = 'up'
+		} else if (diffVal < 0) {
+			rewardDiff = fmtMoneyNum(diffVal)
+			rewardTrend = 'down'
+		}
+	}
+	metrics.push({
+		key: 'reward',
+		amount: rewardAmount,
+		diff: rewardDiff,
+		trend: rewardTrend
+	} as MoneyStatMetric)
+
+	// 解析 last7days 作为图表数据
+	let series = parseMoneySeries(flat['last7days'])
+	if (series.length == 0) series = parseMoneySeries(flat['series'])
 	if (series.length == 0) series = parseMoneySeries(flat['list'])
 	if (series.length == 0) series = parseMoneySeries(flat['days'])
 	if (series.length == 0) series = parseMoneySeries(flat['chart'])
 	if (series.length == 0) series = parseMoneySeries(flat['trend'])
-	if (series.length == 0) {
-		const chart = pickObj(flat, 'chart')
-		if (chart != null) {
-			series = parseMoneySeries(chart!['list'])
-			if (series.length == 0) series = parseMoneySeries(chart!['points'])
-			if (series.length == 0) series = parseMoneySeries(chart!['data'])
-		}
-	}
 
 	let updated = pickStrAny(flat, ['updated_at', 'update_time', 'updated', 'time', 'stat_time'])
 	if (updated.length == 0) {
@@ -3141,11 +3186,16 @@ export async function fetchMoneyLog(
 		list.push(parseMoneyLogItem(rows[i]))
 	}
 	if (total <= 0) total = list.length
+	let typeMap: UTSJSONObject | null = null
+	if (data != null) {
+		typeMap = pickObj(data!, 'type')
+	}
 	const result: MoneyLogResult = {
 		list: list,
 		total: total,
 		page: pageNum,
-		limit: limitNum
+		limit: limitNum,
+		type: typeMap
 	}
 	return result
 }

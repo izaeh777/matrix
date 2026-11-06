@@ -1,0 +1,168 @@
+<template>
+	<view class="preview-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">{{ pageTitle }}</text>
+			<view class="dl-btn" @click="onDownload">
+				<text class="dl-btn-text">{{ t('article.download') }}</text>
+			</view>
+		</view>
+		<view v-if="previewSrc.length == 0" class="state-row">
+			<text class="state-text">{{ t('article.previewFail') }}</text>
+			<view class="open-btn" @click="onOpenNative">
+				<text class="open-btn-text">{{ t('article.openFile') }}</text>
+			</view>
+		</view>
+		<web-view v-else class="preview-web" :src="previewSrc"></web-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref } from 'vue'
+	import { t as __i18nT } from '@/common/i18n.uts'
+	import { cmsEnsureHttps, downloadCmsFile, openCmsLink } from '@/common/cms.uts'
+
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+	const pageTitle = ref<string>(t('article.fullscreenPreview'))
+	const fileUrl = ref<string>('')
+	const fileKind = ref<string>('')
+	const previewSrc = ref<string>('')
+
+	function buildPreviewSrc(url: string, kind: string): string {
+		const httpsUrl = cmsEnsureHttps(url)
+		if (httpsUrl.length == 0) return ''
+		if (kind == 'pdf') {
+			// #ifdef APP-ANDROID || APP-HARMONY
+			return 'https://docs.google.com/gview?embedded=true&url=' + encodeURIComponent(httpsUrl)
+			// #endif
+			return httpsUrl
+		}
+		if (kind == 'ppt' || kind == 'pptx') {
+			return 'https://view.officeapps.live.com/op/embed.aspx?src=' + encodeURIComponent(httpsUrl)
+		}
+		return httpsUrl
+	}
+
+	function goBack(): void {
+		uni.navigateBack({})
+	}
+
+	function onDownload(): void {
+		if (fileUrl.value.length == 0) return
+		downloadCmsFile(fileUrl.value, fileKind.value)
+	}
+
+	function onOpenNative(): void {
+		if (fileUrl.value.length == 0) return
+		openCmsLink(fileUrl.value)
+	}
+
+	onLoad((opts: UTSJSONObject) => {
+		try {
+			const u = opts['url']
+			const k = opts['kind']
+			const title = opts['title']
+			if (u != null) fileUrl.value = decodeURIComponent('' + u)
+			if (k != null) fileKind.value = ('' + k).trim().toLowerCase()
+			if (title != null) {
+				const tt = decodeURIComponent('' + title).trim()
+				if (tt.length > 0) pageTitle.value = tt
+			}
+			if (fileKind.value.length == 0 && fileUrl.value.length > 0) {
+				const lower = fileUrl.value.toLowerCase()
+				if (lower.indexOf('.pdf') >= 0) fileKind.value = 'pdf'
+				else if (lower.indexOf('.pptx') >= 0) fileKind.value = 'pptx'
+				else if (lower.indexOf('.ppt') >= 0) fileKind.value = 'ppt'
+			}
+			previewSrc.value = buildPreviewSrc(fileUrl.value, fileKind.value)
+		} catch (e) {
+			previewSrc.value = ''
+		}
+	})
+</script>
+
+<style>
+	.preview-page {
+		flex: 1;
+		background-color: #ffffff;
+		flex-direction: column;
+	}
+	.status-bar-holder {
+		height: var(--status-bar-height);
+		background-color: #ffffff;
+	}
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 20rpx 16rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-style: solid;
+		border-bottom-color: #f0f0f0;
+	}
+	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.back-text {
+		font-size: 56rpx;
+		color: #181818;
+		line-height: 56rpx;
+	}
+	.topbar-title {
+		flex: 1;
+		font-size: 30rpx;
+		font-weight: 700;
+		color: #111827;
+		text-align: center;
+		lines: 1;
+		text-overflow: ellipsis;
+		margin: 0 12rpx;
+	}
+	.dl-btn {
+		padding: 10rpx 18rpx;
+		background-color: #eff6ff;
+		border-radius: 12rpx;
+	}
+	.dl-btn-text {
+		font-size: 24rpx;
+		color: #2563eb;
+		font-weight: 600;
+	}
+	.state-row {
+		flex: 1;
+		align-items: center;
+		justify-content: center;
+		padding: 40rpx;
+	}
+	.state-text {
+		font-size: 28rpx;
+		color: #9ca3af;
+		margin-bottom: 28rpx;
+		text-align: center;
+	}
+	.open-btn {
+		padding: 18rpx 36rpx;
+		background-color: #2563eb;
+		border-radius: 40rpx;
+	}
+	.open-btn-text {
+		font-size: 28rpx;
+		color: #ffffff;
+		font-weight: 600;
+	}
+	.preview-web {
+		flex: 1;
+		width: 100%;
+	}
+</style>
