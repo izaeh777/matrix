@@ -45,7 +45,7 @@
 			</view>
 
 			<view v-else-if="!hasSearched" class="state-row">
-				<image class="state-search-icon" src="/static/login/ssearch.png" mode="aspectFit"></image>
+				<image class="state-search-icon" src="/static/login/sss.png" mode="aspectFit"></image>
 				<text class="state-text">{{ t('search.hint') }}</text>
 			</view>
 
