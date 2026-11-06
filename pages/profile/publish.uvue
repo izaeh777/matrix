@@ -51,6 +51,10 @@
 						<text class="item-arrow">›</text>
 					</view>
 					<view class="item-actions">
+						<view class="act-btn" @click.stop="onPublish(item)"
+						v-if="item.status == 'draft' || item.status == 'hidden' || item.status == 'rejected'">
+							<text class="act-text act-text-publish">{{ t('publish.actPublish') }}</text>
+						</view>
 						<view class="act-btn" @click.stop="onEdit(item)">
 							<text class="act-text">{{ t('publish.actEdit') }}</text>
 						</view>
@@ -87,7 +91,8 @@
 		hideCmsProject,
 		offlineCmsProject,
 		openProjectEdit,
-		CmsArchiveItem
+		CmsArchiveItem,
+		submitCmsProject
 	} from '@/common/cms.uts'
 	import {
 		canPublishProject,
@@ -130,6 +135,17 @@
 
 	function onOpen(item: CmsArchiveItem): void {
 		if (item.id > 0) openProjectDetail(item.id)
+	}
+
+	async function onPublish(item: CmsArchiveItem): Promise<void> {
+	    if (item.id <= 0) return
+
+	    try {
+	        await submitCmsProject(item.id, true)
+	        await loadList()
+	    } catch (e1) {
+	        console.error('[cms] 发布失败：', e1)
+	    }
 	}
 
 	function onEdit(item: CmsArchiveItem): void {
@@ -325,6 +341,9 @@
 	}
 	.act-text-danger {
 		color: #dc2626;
+	}
+	.act-text-publish {
+		color: blue;
 	}
 	.item-cover {
 		width: 120rpx;

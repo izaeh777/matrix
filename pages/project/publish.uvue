@@ -675,7 +675,7 @@
 				return
 			}
 			if (logo.value.length == 0 || cover.value.length == 0) {
-				uni.showToast({ title: i18n.value.uploadCover, icon: 'none' })
+				uni.showToast({ title: i18n.value.uploadLogo, icon: 'none' })
 				return
 			}
 		}
@@ -722,12 +722,16 @@
 				await updateCmsProjectContent(editId.value, draft)
 				uni.showToast({ title: i18n.value.saveUpdate, icon: 'none' })
 			} else {
-				const id = await createCmsProject(draft)
-				try {
-					await submitCmsProject(id)
-				} catch (e1) {}
+				const { id, status }  = await createCmsProject(draft)
+				if (status === 'pending') {
+					try {
+						await submitCmsProject(id, false)
+					} catch (e1) {}
+					uni.showToast({ title: i18n.value.submit, icon: 'none' })
+				}else{
+					uni.showToast({ title: i18n.value.draft, icon: 'none' })
+				}
 				try { uni.removeStorageSync(DRAFT_KEY) } catch (e2) {}
-				uni.showToast({ title: i18n.value.submit, icon: 'none' })
 			}
 			setTimeout(() => {
 				uni.navigateBack()

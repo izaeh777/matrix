@@ -1186,18 +1186,25 @@ export async function createCmsProject(draft: CmsProjectDraft): Promise<number> 
 	const data = root['data'] as UTSJSONObject
 	if (data == null) return 0
 	let id = pickNum(data, 'id')
+	let status = pickStr(data, 'status')
 	if (id == 0) id = pickNum(data, 'project_id')
-	return id
+	return {id,status}
 }
 
-export async function submitCmsProject(id: number): Promise<void> {
+export async function submitCmsProject(id: number, st: boolean): Promise<void> {
 	if (id <= 0) return
 	const fields: UTSJSONObject = { id: id }
 	const root = await httpPostForm('/api/v1/projects/submit', fields)
 	const code = pickNum(root, 'code')
 	if (code != 1) {
 		const msg = pickStr(root, 'msg')
-		throw new Error(msg.length > 0 ? msg : t('cms.submitFail'))
+		if(st){
+			uni.showToast({ title: msg.length > 0 ? msg : t('cms.submitFail'), icon: 'none' })
+		}else{
+			throw new Error(msg.length > 0 ? msg : t('cms.submitFail'))
+		}
+	}else if(st){
+		uni.showToast({ title: t('pub.submit'), icon: 'none' })
 	}
 }
 
@@ -1270,7 +1277,7 @@ export function inviteQrUrl(userId: string): string {
 export function inviteRegisterLink(inviteCode: string): string {
 	const code = inviteCode.trim()
 	if (code.length == 0) return ''
-	return CMS_HOST + '/#/pages/login/login-mail?mode=register&invite=' + encodeURIComponent(code)
+	return CMS_HOST + '/wap/#/pages/login/login-mail?mode=register&invite=' + encodeURIComponent(code)
 }
 
 /** 邀请注册二维码：扫码后带 invite_code 进登录/注册 */
