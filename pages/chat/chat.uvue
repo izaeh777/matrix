@@ -1041,6 +1041,7 @@
 		if (next) {
 			showEmojiPanel.value = false
 			dismissKeyboardForPanel()
+			scrollToBottomAfterLayout()
 		}
 	}
 	const activeEmojiList = computed<Array<string>>(() => {
@@ -1233,30 +1234,47 @@
 		if (s == 'undefined') return ''
 		return s
 	}
+	function forceScrollBottomDom(): void {
+		// #ifdef H5
+		try {
+			const doc = (window as any).document
+			if (doc == null) return
+			const roots = doc.querySelectorAll('.messages')
+			for (let i = 0; i < roots.length; i++) {
+				const root = roots[i]
+				const inner = root.querySelector('.uni-scroll-view')
+				const target = inner != null ? inner : root
+				target.scrollTop = target.scrollHeight
+			}
+			const anchor = doc.getElementById('chat-bottom')
+			if (anchor != null && typeof anchor.scrollIntoView == 'function') {
+				anchor.scrollIntoView({ block: 'end' })
+			}
+		} catch (e) {}
+		// #endif
+	}
+
 	function scrollToBottom() {
 		scrollInto.value = ''
 		nextTick(() => {
 			scrollInto.value = 'chat-bottom'
 			scrollTop.value = Date.now() % 100000 + 999000
-			// #ifdef H5
-			try {
-				const doc = (window as any).document
-				if (doc != null) {
-					const roots = doc.querySelectorAll('.messages')
-					for (let i = 0; i < roots.length; i++) {
-						const root = roots[i]
-						const inner = root.querySelector('.uni-scroll-view')
-						const target = inner != null ? inner : root
-						target.scrollTop = target.scrollHeight
-					}
-					const anchor = doc.getElementById('chat-bottom')
-					if (anchor != null && typeof anchor.scrollIntoView == 'function') {
-						anchor.scrollIntoView({ block: 'end' })
-					}
-				}
-			} catch (e) {}
-			// #endif
+			forceScrollBottomDom()
 		})
+	}
+
+	/** 键盘/表情面板改布局后再贴底（等高度变化落稳再滚） */
+	function scrollToBottomAfterLayout(): void {
+		scrollToBottom()
+		setTimeout(() => {
+			scrollToBottom()
+		}, 50)
+		setTimeout(() => {
+			scrollToBottom()
+		}, 180)
+		setTimeout(() => {
+			scrollToBottom()
+		}, 320)
 	}
 	function pickStr(obj: UTSJSONObject, key: string): string {
 		try {
@@ -2192,6 +2210,7 @@
 			showMorePanel.value = false
 			voiceMode.value = false
 			dismissKeyboardForPanel()
+			scrollToBottomAfterLayout()
 		}
 	}
 	function insertEmoji(e: string) {
@@ -2645,16 +2664,14 @@
 	function applyKeyboardHeight(h: number): void {
 		const next = normalizeKeyboardHeight(h)
 		if (keyboardHeight.value == next) {
-			if (next > 0) {
-				nextTick(() => { scrollToBottom() })
-			}
+			if (next > 0) scrollToBottomAfterLayout()
 			return
 		}
 		keyboardHeight.value = next
 		if (next > 0) {
-			nextTick(() => {
-				scrollToBottom()
-			})
+			showEmojiPanel.value = false
+			showMorePanel.value = false
+			scrollToBottomAfterLayout()
 		}
 	}
 	function readEventHeight(e: UniEvent): number {
@@ -2696,6 +2713,7 @@
 			if (n > 0) h = n
 		}
 		if (h > 0) applyKeyboardHeight(h)
+		else scrollToBottomAfterLayout()
 	}
 	function toggleVoiceMode() {
 		voiceMode.value = !voiceMode.value

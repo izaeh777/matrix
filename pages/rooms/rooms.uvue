@@ -7,8 +7,8 @@
 			<view class="msg-header-row">
 				<text class="msg-title">{{ i18n.title }}</text>
 				<view class="header-actions">
-					<text class="header-ico header-search" @click="onSearch">⌕</text>
-					<text class="header-ico" @click="onJoin">＋</text>
+					<image class="header-ico-img" src="/static/login/ssearch.png" mode="aspectFit" @click="onSearch"></image>
+					<image class="header-ico-img" src="/static/login/add.png" mode="aspectFit" @click="onJoin"></image>
 				</view>
 			</view>
 			<view class="filter-row">
@@ -82,43 +82,65 @@
 				:key="room.room_id"
 				class="room-item"
 				:class="{ 'room-pin': roomPinned(room) }"
-				@click="onOpenRoom(room.room_id)"
-				@longpress="onLongPressRoom(room)"
 			>
-				<view class="room-row">
-					<view class="avatar-wrap">
-						<view v-if="roomShowGrid(room)" class="group-ava-grid" :class="'gava-n' + roomGridCount(room)">
-							<image
-								v-for="(src, gi) in roomGridSrcs(room)"
-								:key="'g-' + room.room_id + '-' + gi"
-								class="group-ava-cell"
-								:src="src"
-								mode="aspectFill"
-							></image>
+				<view class="swipe-wrap">
+					<view class="swipe-actions">
+						<view class="swipe-btn swipe-btn-pin" @click.stop="onSwipeAction(room, 'pin')">
+							<text class="swipe-btn-text">{{ roomPinned(room) ? i18n.unpin : i18n.pinShort }}</text>
 						</view>
-						<image
-							v-else
-							class="room-avatar"
-							:src="roomAvatarSrc(room)"
-							mode="aspectFill"
-						></image>
-						<view v-if="roomHasUnread(room) && roomMuted(room)" class="mute-dot"></view>
-						<view v-else-if="roomHasUnread(room)" class="avatar-badge">
-							<text class="avatar-badge-text">{{ roomUnreadText(room) }}</text>
+						<view class="swipe-btn swipe-btn-mute" @click.stop="onSwipeAction(room, 'mute')">
+							<text class="swipe-btn-text">{{ roomMuted(room) ? i18n.unmuteShort : i18n.muteShort }}</text>
+						</view>
+						<view class="swipe-btn swipe-btn-del" @click.stop="onSwipeAction(room, 'leave')">
+							<text class="swipe-btn-text">{{ i18n.deleteShort }}</text>
 						</view>
 					</view>
-					<view class="room-body">
-						<view class="room-line1">
-							<text class="room-name">{{ roomTitle(room) }}</text>
-							<text class="room-time">{{ roomTimeText(room) }}</text>
+					<view
+						class="swipe-content"
+						:class="swipeRoomId == room.room_id && !swipeMoving ? 'swipe-anim' : ''"
+						:style="swipeContentStyle(room.room_id)"
+						@touchstart="onSwipeStart($event, room.room_id)"
+						@touchmove="onSwipeMove($event, room.room_id)"
+						@touchend="onSwipeEnd($event, room.room_id)"
+						@touchcancel="onSwipeCancel(room.room_id)"
+						@click="onRoomRowClick(room.room_id)"
+					>
+						<view class="room-row">
+							<view class="avatar-wrap">
+								<view v-if="roomShowGrid(room)" class="group-ava-grid" :class="'gava-n' + roomGridCount(room)">
+									<image
+										v-for="(src, gi) in roomGridSrcs(room)"
+										:key="'g-' + room.room_id + '-' + gi"
+										class="group-ava-cell"
+										:src="src"
+										mode="aspectFill"
+									></image>
+								</view>
+								<image
+									v-else
+									class="room-avatar"
+									:src="roomAvatarSrc(room)"
+									mode="aspectFill"
+								></image>
+								<view v-if="roomHasUnread(room) && roomMuted(room)" class="mute-dot"></view>
+								<view v-else-if="roomHasUnread(room)" class="avatar-badge">
+									<text class="avatar-badge-text">{{ roomUnreadText(room) }}</text>
+								</view>
+							</view>
+							<view class="room-body">
+								<view class="room-line1">
+									<text class="room-name">{{ roomTitle(room) }}</text>
+									<text class="room-time">{{ roomTimeText(room) }}</text>
+								</view>
+								<view class="room-line2">
+									<text class="room-preview">{{ roomPreviewText(room) }}</text>
+									<text v-if="roomMuted(room)" class="mute-mark">🔕</text>
+								</view>
+							</view>
 						</view>
-						<view class="room-line2">
-							<text class="room-preview">{{ roomPreviewText(room) }}</text>
-							<text v-if="roomMuted(room)" class="mute-mark">🔕</text>
-						</view>
+						<view class="room-divider"></view>
 					</view>
 				</view>
-				<view class="room-divider"></view>
 			</view>
 		</scroll-view>
 
@@ -140,34 +162,23 @@
 			</view>
 		</view>
 
-		<!-- 房间操作菜单（长按弹出） -->
-		<view v-if="roomAction.show" class="action-sheet" @click="roomAction.show = false">
-			<view class="action-panel" @click.stop="">
-				<view class="action-handle"></view>
-				<view class="action-header">
-					<text class="action-title">{{ actionRoomName }}</text>
-					<text class="action-subtitle">{{ actionRoomSub }}</text>
+		<!-- 微信式右上角加号菜单 -->
+		<view v-if="plusMenuShow" class="plus-mask" @click="closePlusMenu">
+			<view class="plus-menu" @click.stop="">
+				<view class="plus-arrow"></view>
+				<view class="plus-item" @click="onPlusCreate">
+					<text class="plus-item-ico">◎</text>
+					<text class="plus-item-text">{{ i18n.actionCreate }}</text>
 				</view>
-				<view class="action-list">
-					<view class="action-item" @click="doRoomAction('pin')">
-						<text class="action-icon">📌</text>
-						<text class="action-label">{{ pinActionLabel }}</text>
-					</view>
-					<view class="action-item" @click="doRoomAction('mute')">
-						<text class="action-icon">🔕</text>
-						<text class="action-label">{{ muteActionLabel }}</text>
-					</view>
-					<view class="action-item" @click="doRoomAction('invite')">
-						<text class="action-icon">＋</text>
-						<text class="action-label">{{ i18n.inviteMember }}</text>
-					</view>
-					<view class="action-item danger" @click="doRoomAction('leave')">
-						<text class="action-icon">⎋</text>
-						<text class="action-label">{{ i18n.deleteChat }}</text>
-					</view>
+				<view class="plus-line"></view>
+				<view class="plus-item" @click="onPlusAddFriend">
+					<text class="plus-item-ico">＋</text>
+					<text class="plus-item-text">{{ i18n.actionAddFriend }}</text>
 				</view>
-				<view class="action-cancel" @click="roomAction.show = false">
-					<text>{{ i18n.cancel }}</text>
+				<view class="plus-line"></view>
+				<view class="plus-item" @click="onPlusJoin">
+					<text class="plus-item-ico">⌕</text>
+					<text class="plus-item-text">{{ i18n.actionJoin }}</text>
 				</view>
 			</view>
 		</view>
@@ -209,6 +220,13 @@
 		unpin: string
 		mute: string
 		unmute: string
+		pinShort: string
+		muteShort: string
+		unmuteShort: string
+		deleteShort: string
+		actionCreate: string
+		actionAddFriend: string
+		actionJoin: string
 	}
 
 	const rooms = ref<Array<MatrixRoom>>([])
@@ -237,8 +255,16 @@
 		pin: t('chat.pin'),
 		unpin: t('chat.unpin'),
 		mute: t('chat.mute'),
-		unmute: t('chat.unmute')
+		unmute: t('chat.unmute'),
+		pinShort: t('chat.swipePin'),
+		muteShort: t('chat.swipeMute'),
+		unmuteShort: t('chat.swipeUnmute'),
+		deleteShort: t('chat.swipeDelete'),
+		actionCreate: t('rooms.actionCreate'),
+		actionAddFriend: t('rooms.actionAddFriend'),
+		actionJoin: t('rooms.actionJoin')
 	} as RoomsI18n)
+	const plusMenuShow = ref<boolean>(false)
 	const loading = ref<boolean>(false)
 	const needMatrixLogin = ref<boolean>(false)
 	const incomingCall = ref<boolean>(false)
@@ -248,11 +274,40 @@
 	const syncError = ref<string>('')
 	const session = ref<SessionInfo | null>(null)
 	const filterTab = ref<string>('all')
-	type RoomActionState = {
-		show: boolean
-		room: MatrixRoom | null
+
+	/** 微信式左滑：一次只开一行 */
+	const swipeRoomId = ref<string>('')
+	const swipeX = ref<number>(0)
+	const swipeMoving = ref<boolean>(false)
+	let swipeStartX = 0
+	let swipeStartY = 0
+	let swipeBaseX = 0
+	let swipeLocked = false
+	let swipeAxis = ''
+	const SWIPE_BTN_RPX = 150
+	const SWIPE_BTN_COUNT = 3
+
+	function swipeMaxPx(): number {
+		try {
+			return uni.upx2px(SWIPE_BTN_RPX * SWIPE_BTN_COUNT)
+		} catch (e0) {
+			return 225
+		}
 	}
-	const roomAction = ref<RoomActionState>({ show: false, room: null })
+
+	function swipeContentStyle(roomId: string): string {
+		let x = 0
+		if (swipeRoomId.value == roomId) x = swipeX.value
+		return 'transform:translateX(' + x + 'px);'
+	}
+
+	function closeSwipe(): void {
+		swipeRoomId.value = ''
+		swipeX.value = 0
+		swipeMoving.value = false
+		swipeLocked = false
+		swipeAxis = ''
+	}
 
 	function roomHasUnread(room: MatrixRoom): boolean {
 		const c = room.unread_count
@@ -428,30 +483,6 @@
 		return formatTime(ts)
 	}
 
-	const pinActionLabel = computed((): string => {
-		const r = roomAction.value.room
-		if (r != null && r.favourite == true) return i18n.value.unpin
-		return i18n.value.pin
-	})
-	const muteActionLabel = computed((): string => {
-		const r = roomAction.value.room
-		if (r != null && r.muted == true) return i18n.value.unmute
-		return i18n.value.mute
-	})
-	const actionRoomName = computed((): string => {
-		const r = roomAction.value.room
-		if (r == null) return ''
-		const n = r.name
-		if (n != null && n.length > 0) return n
-		return r.room_id
-	})
-	const actionRoomSub = computed((): string => {
-		const r = roomAction.value.room
-		if (r == null) return ''
-		const id = r.other_user_id
-		if (id != null) return id
-		return ''
-	})
 	const displayName = computed(() => {
 		const s = session.value
 		if (s == null) return ''
@@ -963,7 +994,14 @@
 			pin: t('chat.pin'),
 			unpin: t('chat.unpin'),
 			mute: t('chat.mute'),
-			unmute: t('chat.unmute')
+			unmute: t('chat.unmute'),
+			pinShort: t('chat.swipePin'),
+			muteShort: t('chat.swipeMute'),
+			unmuteShort: t('chat.swipeUnmute'),
+			deleteShort: t('chat.swipeDelete'),
+			actionCreate: t('rooms.actionCreate'),
+			actionAddFriend: t('rooms.actionAddFriend'),
+			actionJoin: t('rooms.actionJoin')
 		} as RoomsI18n
 	})
 
@@ -1111,19 +1149,27 @@
 		})
 	}
 
-	function onJoin() {
-		uni.showActionSheet({
-			itemList: [t('rooms.actionCreate'), t('rooms.actionAddFriend'), t('rooms.actionJoin')],
-			success: (res) => {
-				if (res.tapIndex == 0) {
-					openGroupPick('create')
-				} else if (res.tapIndex == 1) {
-					uni.navigateTo({ url: '/pages/contacts/add' })
-				} else if (res.tapIndex == 2) {
-					joinExistingRoom()
-				}
-			}
-		})
+	function closePlusMenu(): void {
+		plusMenuShow.value = false
+	}
+
+	function onJoin(): void {
+		plusMenuShow.value = !plusMenuShow.value
+	}
+
+	function onPlusCreate(): void {
+		closePlusMenu()
+		openGroupPick('create')
+	}
+
+	function onPlusAddFriend(): void {
+		closePlusMenu()
+		uni.navigateTo({ url: '/pages/contacts/add' })
+	}
+
+	function onPlusJoin(): void {
+		closePlusMenu()
+		joinExistingRoom()
 	}
 
 	function onHome() {
@@ -1156,9 +1202,85 @@
 		uni.redirectTo({ url: '/pages/discover/discover' })
 	}
 
-	function onLongPressRoom(room: MatrixRoom) {
-		roomAction.value.room = room
-		roomAction.value.show = true
+	function onRoomRowClick(roomId: string): void {
+		if (swipeRoomId.value.length > 0) {
+			closeSwipe()
+			return
+		}
+		onOpenRoom(roomId)
+	}
+
+	function onSwipeStart(e: UniTouchEvent, roomId: string): void {
+		if (e.touches.length == 0) return
+		swipeStartX = e.touches[0].clientX
+		swipeStartY = e.touches[0].clientY
+		swipeLocked = false
+		swipeAxis = ''
+		swipeMoving.value = true
+		if (swipeRoomId.value == roomId) {
+			swipeBaseX = swipeX.value
+		} else {
+			if (swipeRoomId.value.length > 0) {
+				swipeX.value = 0
+			}
+			swipeRoomId.value = roomId
+			swipeBaseX = 0
+			swipeX.value = 0
+		}
+	}
+
+	function onSwipeMove(e: UniTouchEvent, roomId: string): void {
+		if (swipeRoomId.value != roomId) return
+		if (e.touches.length == 0) return
+		const x = e.touches[0].clientX
+		const y = e.touches[0].clientY
+		const dx = x - swipeStartX
+		const dy = y - swipeStartY
+		const adx = dx > 0 ? dx : -dx
+		const ady = dy > 0 ? dy : -dy
+		if (swipeAxis.length == 0) {
+			if (adx < 6 && ady < 6) return
+			if (ady > adx * 1.2) {
+				swipeAxis = 'y'
+				return
+			}
+			swipeAxis = 'x'
+			swipeLocked = true
+		}
+		if (swipeAxis != 'x') return
+		try { e.preventDefault() } catch (ePrev) {}
+		const max = swipeMaxPx()
+		let next = swipeBaseX + dx
+		if (next > 0) next = 0
+		if (next < -max) next = -max
+		swipeX.value = next
+	}
+
+	function onSwipeEnd(_e: UniTouchEvent, roomId: string): void {
+		if (swipeRoomId.value != roomId) return
+		swipeMoving.value = false
+		const max = swipeMaxPx()
+		const x = swipeX.value
+		if (swipeAxis != 'x') {
+			if (x > -max * 0.3) closeSwipe()
+			return
+		}
+		if (x <= -max * 0.35) {
+			swipeX.value = -max
+		} else {
+			closeSwipe()
+		}
+		swipeAxis = ''
+		swipeLocked = false
+	}
+
+	function onSwipeCancel(_roomId: string): void {
+		closeSwipe()
+	}
+
+	async function onSwipeAction(room: MatrixRoom, action: string): Promise<void> {
+		closeSwipe()
+		await doRoomAction(room, action)
 	}
 
 	async function inviteMemberByInput(roomId: string, raw: string | null): Promise<void> {
@@ -1213,17 +1335,11 @@
 		}
 	}
 
-	async function doRoomAction(action: string) {
-		const sheet = roomAction.value
-		const room = sheet.room
-		sheet.show = false
-		if (room == null) return
+	async function doRoomAction(room: MatrixRoom, action: string): Promise<void> {
 		const matrix = getMatrix()
 		if (matrix == null) return
 		try {
-			if (action == 'invite') {
-				openGroupPick('invite', room.room_id)
-			} else if (action == 'pin') {
+			if (action == 'pin') {
 				const next = room.favourite != true
 				await matrix.favouriteRoom(room.room_id, next)
 				room.favourite = next
@@ -1296,15 +1412,59 @@
 		flex-direction: row;
 		align-items: center;
 	}
-	.header-ico {
-		font-size: 36rpx;
-		color: #333333;
-		margin-right: 18rpx;
-		line-height: 40rpx;
+	.header-ico-img {
+		width: 44rpx;
+		height: 44rpx;
+		margin-left: 28rpx;
 	}
-	.header-search {
-		font-size: 38rpx;
-		transform: scaleX(-1);
+	.plus-mask {
+		position: fixed;
+		left: 0;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		z-index: 1200;
+		background-color: rgba(0, 0, 0, 0.01);
+	}
+	.plus-menu {
+		position: absolute;
+		top: 110rpx;
+		right: 24rpx;
+		min-width: 320rpx;
+		background-color: #4c4c4c;
+		border-radius: 12rpx;
+		padding: 8rpx 0;
+	}
+	.plus-arrow {
+		position: absolute;
+		top: -10rpx;
+		right: 32rpx;
+		width: 20rpx;
+		height: 20rpx;
+		background-color: #4c4c4c;
+		transform: rotate(45deg);
+	}
+	.plus-item {
+		flex-direction: row;
+		align-items: center;
+		padding: 26rpx 32rpx;
+	}
+	.plus-item-ico {
+		width: 40rpx;
+		font-size: 28rpx;
+		color: #ffffff;
+		margin-right: 20rpx;
+		text-align: center;
+	}
+	.plus-item-text {
+		font-size: 30rpx;
+		color: #ffffff;
+		flex: 1;
+	}
+	.plus-line {
+		height: 1rpx;
+		background-color: rgba(255, 255, 255, 0.12);
+		margin-left: 72rpx;
 	}
 	.filter-row {
 		flex-direction: row;
@@ -1672,10 +1832,71 @@
 	.room-item {
 		flex-direction: column;
 		background-color: transparent;
+		overflow: hidden;
 	}
 
 	.room-item.room-pin {
 		background-color: transparent;
+	}
+
+	.swipe-wrap {
+		position: relative;
+		width: 100%;
+		overflow: hidden;
+		background-color: #ffffff;
+	}
+
+	.swipe-actions {
+		position: absolute;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		flex-direction: row;
+		align-items: stretch;
+	}
+
+	.swipe-btn {
+		width: 150rpx;
+		align-items: center;
+		justify-content: center;
+		padding: 0 8rpx;
+	}
+
+	.swipe-btn-pin {
+		background-color: #c7c7cc;
+	}
+
+	.swipe-btn-mute {
+		background-color: #ff9c38;
+	}
+
+	.swipe-btn-del {
+		background-color: #fa5151;
+	}
+
+	.swipe-btn-text {
+		font-size: 26rpx;
+		color: #ffffff;
+		font-weight: 600;
+		text-align: center;
+		lines: 2;
+	}
+
+	.swipe-content {
+		position: relative;
+		background-color: #ffffff;
+		z-index: 1;
+	}
+
+	.swipe-anim {
+		transition-property: transform;
+		transition-duration: 180ms;
+		transition-timing-function: ease-out;
+	}
+
+	.room-pin .swipe-wrap,
+	.room-pin .swipe-content {
+		background-color: #f7f7f7;
 	}
 
 	.room-row {
@@ -1851,104 +2072,5 @@
 		font-size: 22rpx;
 		color: #bbb;
 		text-align: center;
-	}
-
-	/* 通用操作面板 */
-	.action-sheet {
-		position: fixed;
-		left: 0;
-		right: 0;
-		top: 0;
-		bottom: 0;
-		background-color: rgba(0,0,0,0.45);
-		display: flex;
-		align-items: flex-end;
-		justify-content: center;
-	}
-
-	.action-panel {
-		width: 100%;
-		background-color: #f7f7fa;
-		border-top-left-radius: 28rpx;
-		border-top-right-radius: 28rpx;
-		padding: 16rpx 0 40rpx;
-	}
-
-	.action-handle {
-		width: 60rpx;
-		height: 6rpx;
-		background-color: #d0d0d6;
-		border-radius: 3rpx;
-		margin: 0 auto 16rpx;
-	}
-
-	.action-header {
-		padding: 8rpx 30rpx 20rpx;
-		align-items: center;
-		border-bottom-width: 1rpx;
-		border-bottom-color: #e8e8ec;
-		margin-bottom: 12rpx;
-	}
-
-	.action-title {
-		text-align: center;
-		font-size: 30rpx;
-		color: #1a1a1a;
-		font-weight: 700;
-	}
-
-	.action-subtitle {
-		text-align: center;
-		font-size: 22rpx;
-		color: #999;
-		margin-top: 6rpx;
-	}
-
-	.action-list {
-		background-color: #fff;
-		border-radius: 20rpx;
-		margin: 0 20rpx;
-		overflow: hidden;
-	}
-
-	.action-item {
-		flex-direction: row;
-		align-items: center;
-		padding: 28rpx 30rpx;
-		border-bottom-width: 1rpx;
-		border-bottom-color: #f0f0f4;
-	}
-
-	.action-item:last-child {
-		border-bottom-width: 0;
-	}
-
-	.action-icon {
-		width: 56rpx;
-		font-size: 32rpx;
-		color: #1a1a1a;
-		font-weight: 600;
-	}
-
-	.action-label {
-		font-size: 30rpx;
-		color: #1a1a1a;
-		flex: 1;
-	}
-
-	.action-item.danger .action-icon,
-	.action-item.danger .action-label {
-		color: #ff3b30;
-	}
-
-	.action-cancel {
-		background-color: #fff;
-		padding: 28rpx;
-		text-align: center;
-		margin: 12rpx 20rpx 0;
-		border-radius: 20rpx;
-		color: #1a1a1a;
-		font-size: 30rpx;
-		font-weight: 500;
 	}
 </style>
