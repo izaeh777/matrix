@@ -1,0 +1,309 @@
+<template>
+	<view class="preview-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<view class="title-wrap">
+				<view class="title-row">
+					<text v-if="resolvedKind.length > 0" class="kind-tag" :class="'tag-' + resolvedKind">{{ resolvedKind.toUpperCase() }}</text>
+					<text class="topbar-title">{{ pageTitle }}</text>
+				</view>
+			</view>
+			<view class="topbar-actions">
+				<!-- #ifdef H5 -->
+				<view class="action-btn action-btn-out" @click="openInBrowser">
+					<text class="action-btn-text action-btn-out-text">{{ browserBtnText }}</text>
+				</view>
+				<!-- #endif -->
+				<view class="action-btn action-btn-primary" @click="downloadMaterial">
+					<text class="action-btn-text action-btn-primary-text">{{ t('article.download') }}</text>
+				</view>
+			</view>
+		</view>
+
+		<view class="preview-body">
+			<web-view
+				v-if="previewSrc.length > 0"
+				class="preview-web"
+				:src="previewSrc"
+			></web-view>
+			<view v-else class="empty-state">
+				<text class="empty-text">{{ t('article.loadFail') }}</text>
+				<view class="retry-btn" @click="goBack">
+					<text class="retry-btn-text">{{ t('article.prev') }}</text>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, computed } from 'vue'
+	import { t as __i18nT } from '@/common/i18n.uts'
+	import { cmsFileUrl, cmsEnsureHttps, downloadCmsFile, openCmsLink } from '@/common/cms.uts'
+
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+	const rawUrl = ref<string>('')
+	const passedKind = ref<string>('')
+	const docTitle = ref<string>('')
+
+	const resolvedKind = computed((): string => {
+		let k = passedKind.value.trim().toLowerCase()
+		if (k.length > 0) return k
+		const u = rawUrl.value.toLowerCase()
+		const q = u.indexOf('?')
+		const clean = q >= 0 ? u.substring(0, q) : u
+		if (clean.indexOf('.pdf') >= 0) return 'pdf'
+		if (clean.indexOf('.pptx') >= 0) return 'pptx'
+		if (clean.indexOf('.ppt') >= 0) return 'ppt'
+		return ''
+	})
+
+	const fileUrl = computed((): string => {
+		const u = rawUrl.value.trim()
+		if (u.length == 0) return ''
+		return cmsFileUrl(u)
+	})
+
+	const pageTitle = computed((): string => {
+		const dt = docTitle.value.trim()
+		if (dt.length > 0) return dt
+		const u = fileUrl.value
+		if (u.length > 0) {
+			const q = u.indexOf('?')
+			const clean = q >= 0 ? u.substring(0, q) : u
+			const slash = clean.lastIndexOf('/')
+			if (slash >= 0 && slash + 1 < clean.length) {
+				try {
+					const name = decodeURIComponent(clean.substring(slash + 1)).trim()
+					if (name.length > 0) return name
+				} catch (e) {
+					return clean.substring(slash + 1)
+				}
+			}
+		}
+		const k = resolvedKind.value
+		if (k == 'pdf') return t('article.filePdf')
+		if (k == 'ppt' || k == 'pptx') return t('article.filePpt')
+		return t('pub.material')
+	})
+
+	const browserBtnText = computed((): string => {
+		const tr = t('article.openBrowser')
+		if (tr.length > 0 && tr != 'article.openBrowser') return tr
+		return t('article.origin')
+	})
+
+	const previewSrc = computed((): string => {
+		const u = fileUrl.value
+		if (u.length == 0) return ''
+		const url = cmsEnsureHttps(u)
+		const k = resolvedKind.value
+		if (k == 'ppt' || k == 'pptx') {
+			return 'https://view.officeapps.live.com/op/view.aspx?src=' + encodeURIComponent(url)
+		}
+		if (k == 'pdf') {
+			// #ifdef APP-ANDROID || APP-HARMONY
+			return 'https://docs.google.com/gview?embedded=true&url=' + encodeURIComponent(url)
+			// #endif
+			return url
+		}
+		return url
+	})
+
+	function goBack(): void {
+		const pages = getCurrentPages()
+		if (pages.length > 1) {
+			uni.navigateBack({})
+		} else {
+			uni.reLaunch({ url: '/pages/home/home' })
+		}
+	}
+
+	function downloadMaterial(): void {
+		const u = fileUrl.value
+		if (u.length == 0) return
+		downloadCmsFile(u, resolvedKind.value)
+	}
+
+	function openInBrowser(): void {
+		const u = fileUrl.value
+		if (u.length == 0) return
+		openCmsLink(u)
+	}
+
+	onLoad((options: UTSJSONObject) => {
+		try {
+			const u = options['url']
+			if (u != null) {
+				const s = '' + u
+				try {
+					rawUrl.value = decodeURIComponent(s)
+				} catch (e0) {
+					rawUrl.value = s
+				}
+			}
+		} catch (e1) {}
+		try {
+			const k = options['kind']
+			if (k != null) {
+				passedKind.value = ('' + k).trim().toLowerCase()
+			}
+		} catch (e2) {}
+		try {
+			const t = options['title']
+			if (t != null) {
+				try {
+					docTitle.value = decodeURIComponent('' + t)
+				} catch (e3) {
+					docTitle.value = '' + t
+				}
+			}
+		} catch (e4) {}
+	})
+</script>
+
+<style>
+	.preview-page {
+		flex: 1;
+		width: 100%;
+		height: 100%;
+		background-color: #ffffff;
+		flex-direction: column;
+	}
+	.status-bar-holder {
+		height: var(--status-bar-height);
+		background-color: #ffffff;
+	}
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 48rpx 20rpx 16rpx;
+		background-color: #ffffff;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f0f2f5;
+	}
+	.back-btn {
+		width: 72rpx;
+		height: 72rpx;
+		align-items: center;
+		justify-content: center;
+	}
+	.back-text {
+		font-size: 56rpx;
+		color: #181818;
+		line-height: 56rpx;
+	}
+	.title-wrap {
+		flex: 1;
+		flex-direction: column;
+		justify-content: center;
+		padding: 0 16rpx;
+	}
+	.title-row {
+		flex-direction: row;
+		align-items: center;
+	}
+	.kind-tag {
+		font-size: 20rpx;
+		font-weight: 700;
+		padding: 4rpx 12rpx;
+		border-radius: 8rpx;
+		margin-right: 12rpx;
+	}
+	.tag-pdf {
+		background-color: #fff1f0;
+		color: #f5222d;
+		border-width: 1rpx;
+		border-style: solid;
+		border-color: #ffa39e;
+	}
+	.tag-ppt,
+	.tag-pptx {
+		background-color: #fff7e6;
+		color: #fa8c16;
+		border-width: 1rpx;
+		border-style: solid;
+		border-color: #ffd591;
+	}
+	.topbar-title {
+		flex: 1;
+		font-size: 30rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+		lines: 1;
+		text-overflow: ellipsis;
+	}
+	.topbar-actions {
+		flex-direction: row;
+		align-items: center;
+		justify-content: flex-end;
+	}
+	.action-btn {
+		padding: 10rpx 22rpx;
+		border-radius: 28rpx;
+		align-items: center;
+		justify-content: center;
+		margin-left: 12rpx;
+	}
+	.action-btn-primary {
+		background-color: #1861c8;
+	}
+	.action-btn-primary-text {
+		font-size: 24rpx;
+		color: #ffffff;
+		font-weight: 600;
+	}
+	.action-btn-out {
+		background-color: #eef4ff;
+		border-width: 1rpx;
+		border-style: solid;
+		border-color: #c7d7f5;
+	}
+	.action-btn-out-text {
+		font-size: 24rpx;
+		color: #1861c8;
+		font-weight: 600;
+	}
+	.preview-body {
+		flex: 1;
+		width: 100%;
+		height: 100%;
+		background-color: #f7f9fc;
+		position: relative;
+	}
+	.preview-web {
+		width: 100%;
+		height: 100%;
+		flex: 1;
+	}
+	.empty-state {
+		flex: 1;
+		align-items: center;
+		justify-content: center;
+		padding: 100rpx 40rpx;
+	}
+	.empty-text {
+		font-size: 28rpx;
+		color: #9aa3af;
+		text-align: center;
+		margin-bottom: 24rpx;
+	}
+	.retry-btn {
+		padding: 12rpx 36rpx;
+		background-color: #1861c8;
+		border-radius: 32rpx;
+	}
+	.retry-btn-text {
+		font-size: 26rpx;
+		color: #ffffff;
+	}
+</style>
