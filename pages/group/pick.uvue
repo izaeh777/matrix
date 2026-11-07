@@ -411,6 +411,16 @@
 		if (roomId.value.length == 0) return
 		const ids = selectedIds.value.slice()
 		if (ids.length == 0) return
+		try {
+			const ok = await matrix.canManageRoom(roomId.value)
+			if (!ok) {
+				uni.showToast({ title: t('group.removeDenied'), icon: 'none' })
+				return
+			}
+		} catch (ePerm) {
+			uni.showToast({ title: t('group.removeDenied'), icon: 'none' })
+			return
+		}
 		uni.showLoading({ title: t('pick.removing') })
 		try {
 			for (let i = 0; i < ids.length; i++) {
