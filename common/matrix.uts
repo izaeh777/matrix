@@ -614,6 +614,11 @@ type MemberCacheEntry = {
 	loaded_at: number
 }
 
+type RoomMembersCacheEntry = {
+	list: Array<RoomMember>
+	loaded_at: number
+}
+
 export type InvitedRoomInfo = {
 	room_id: string
 	name: string
@@ -710,6 +715,8 @@ export class MatrixClient {
 	userAvatars: Map<string, string> = new Map()
 	favouriteRooms: Map<string, string> = new Map()
 	mutedRooms: Map<string, string> = new Map()
+	/** 本地未读数：sync / 已读回执共同维护；列表刷新时回填，避免角标只靠磁盘残留 */
+	roomUnreadCounts: Map<string, number> = new Map()
 	// 每房间最后一条消息预览（sync 时实时更新，避免 getMessages(1) 取不到）
 	roomLastMessage: Map<string, LastMessagePreview> = new Map()
 	// getRoomSummary 内存缓存：用并行数组存 (keys, entries)，避开 Map 和动态索引的兼容问题
@@ -752,6 +759,8 @@ export class MatrixClient {
 	decryptHandlers: Array<(event: MatrixEvent, roomId: string) => void> = []
 	// 房间成员缓存（key: 'joined_members:<roomId>'）
 	memberCache: Map<string, MemberCacheEntry> = new Map()
+	/** 完整成员资料缓存（joined_members 解析结果，避免反复打沉重的 /members） */
+	roomMembersCache: Map<string, RoomMembersCacheEntry> = new Map()
 	// 房间事件缓冲（任何房间的事件都会暂存）
 	roomTimelines: Map<string, Array<UTSJSONObject>> = new Map()
 	// 已知房间 ID 集合（来自 sync 推送）；listRooms 用它补全 /joined_rooms 可能漏掉的房间
@@ -1285,15 +1294,15 @@ export class MatrixClient {
 					}
 				}
 
-				const unread = jsonObj(room, 'unread_notifications')
-				const count = jsonNum(unread, 'notification_count')
-				const unreadDirect = this.onUnread
-				if (unreadDirect != null) {
-					try { unreadDirect(roomId, count) } catch (eU0) { console.error(eU0) }
-				}
-				for (let hi = 0; hi < this.unreadHandlers.length; hi++) {
-					try { this.unreadHandlers[hi](roomId, count) } catch (e) { console.error(e) }
-				}
+				// 仅当 sync 明确带了 unread_notifications 才更新；缺省键不能当 0，否则会误清/也清不掉（下一包常不带该字段）
+				try {
+					const unreadRaw = room['unread_notifications']
+					if (unreadRaw != null) {
+						const unread = toJsonObj(unreadRaw)
+						const count = jsonNum(unread, 'notification_count')
+						this.applyUnreadCount(roomId, count)
+					}
+				} catch (eUnread) {}
 
 				const roomAcc = jsonObj(room, 'account_data')
 				const roomAccEvs = jsonArr(roomAcc, 'events')
@@ -1615,6 +1624,7 @@ export class MatrixClient {
 				}
 				cachedRooms[ci].favourite = this.favouriteRooms.get(cachedRooms[ci].room_id) == '1'
 				cachedRooms[ci].muted = this.mutedRooms.get(cachedRooms[ci].room_id) == '1'
+				cachedRooms[ci].unread_count = this.getRoomUnread(cachedRooms[ci].room_id)
 			}
 			sortRoomList(cachedRooms)
 			return cachedRooms
@@ -1659,6 +1669,7 @@ export class MatrixClient {
 				}
 				rooms[li].favourite = this.favouriteRooms.get(rooms[li].room_id) == '1'
 				rooms[li].muted = this.mutedRooms.get(rooms[li].room_id) == '1'
+				rooms[li].unread_count = this.getRoomUnread(rooms[li].room_id)
 			}
 			sortRoomList(rooms)
 			this.listRoomsCache = { rooms, loaded_at: Date.now() }
@@ -1770,6 +1781,7 @@ export class MatrixClient {
 		room.is_direct = isDM
 		room.favourite = this.favouriteRooms.get(roomId) == '1'
 		room.muted = this.mutedRooms.get(roomId) == '1'
+		room.unread_count = this.getRoomUnread(roomId)
 		if (!isDM) {
 			const grid: Array<string> = []
 			for (let ai = 0; ai < avOther.length && grid.length < 9; ai++) grid.push(avOther[ai])
@@ -2154,6 +2166,8 @@ export class MatrixClient {
 	}
 
 	async readReceipt(roomId: string, eventId: string): Promise<void> {
+		// 先本地清零：服务端下一次 sync 经常不再带 unread_notifications=0，列表否则会一直挂着角标
+		this.clearRoomUnread(roomId)
 		try {
 			await this.request(
 				'POST',
@@ -2162,6 +2176,48 @@ export class MatrixClient {
 			)
 		} catch (e) {
 			// 忽略
+		}
+	}
+
+	getRoomUnread(roomId: string): number {
+		const v = this.roomUnreadCounts.get(roomId)
+		if (v == null) return 0
+		return v > 0 ? v : 0
+	}
+
+	clearRoomUnread(roomId: string): void {
+		this.applyUnreadCount(roomId, 0)
+	}
+
+	applyUnreadCount(roomId: string, count: number): void {
+		if (roomId.length == 0) return
+		const next = count > 0 ? Math.floor(count) : 0
+		const prev = this.roomUnreadCounts.get(roomId)
+		if (prev != null && prev == next) return
+		this.roomUnreadCounts.set(roomId, next)
+		if (this.listRoomsCache != null) {
+			const cached = this.listRoomsCache.rooms
+			for (let i = 0; i < cached.length; i++) {
+				if (cached[i].room_id == roomId) {
+					cached[i].unread_count = next
+					break
+				}
+			}
+		}
+		try {
+			const cachedRaw = summaryCache[roomId]
+			if (cachedRaw != null) {
+				const entry = cachedRaw as UTSJSONObject
+				const summary = entry['summary'] as MatrixRoom
+				if (summary != null) summary.unread_count = next
+			}
+		} catch (eSum) {}
+		const unreadDirect = this.onUnread
+		if (unreadDirect != null) {
+			try { unreadDirect(roomId, next) } catch (eU0) { console.error(eU0) }
+		}
+		for (let hi = 0; hi < this.unreadHandlers.length; hi++) {
+			try { this.unreadHandlers[hi](roomId, next) } catch (e) { console.error(e) }
 		}
 	}
 
@@ -2375,51 +2431,103 @@ export class MatrixClient {
 	// 房间成员 / 头像 / 状态
 	// ============================================================
 
-	async getRoomMembers(roomId: string): Promise<RoomMember[]> {
-		const data = (await this.request(
-			'GET',
-			`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
-			null,
-			{ not_membership: 'leave' }
-		)) as UTSJSONObject
-		const chunk = jsonArr(data, 'chunk')
+	invalidateRoomMembers(roomId: string): void {
+		if (roomId.length == 0) return
+		this.memberCache.delete('joined_members:' + roomId)
+		this.roomMembersCache.delete(roomId)
+	}
+
+	/**
+	 * 群成员列表：优先内存缓存 → joined_members（轻量，含 display_name/avatar）
+	 * 仅在轻量接口失败时才回退沉重的 /members。
+	 */
+	async getRoomMembers(roomId: string, forceRefresh: boolean = false): Promise<RoomMember[]> {
+		if (!forceRefresh) {
+			const hit = this.roomMembersCache.get(roomId)
+			if (hit != null && Date.now() - hit.loaded_at < 60000) {
+				return this.mergePendingRoomMembers(roomId, hit.list)
+			}
+		} else {
+			this.invalidateRoomMembers(roomId)
+		}
+
 		const result: RoomMember[] = []
 		const seen: Array<string> = []
-		for (let i = 0; i < chunk.length; i++) {
-			const m = chunk[i]
-			const content = jsonObj(m, 'content')
-			const membership = jsonStr(content, 'membership')
-			if (membership == 'leave' || membership == 'ban') continue
-			const uid = jsonStr(m, 'state_key')
-			if (uid.length == 0) continue
-			const dn = jsonStr(content, 'displayname')
-			const av = jsonStr(content, 'avatar_url')
-			if (dn.length > 0) this.userDisplayNames.set(uid, dn)
-			if (av.length > 0) this.userAvatars.set(uid, av)
-			const item: RoomMember = {
-				user_id: uid,
-				membership: membership.length > 0 ? membership : 'join',
-				display_name: dn,
-				avatar_url: av
-			}
-			result.push(item)
-			seen.push(uid)
-		}
-		if (result.length == 0) {
-			const ids = await this.getJoinedMembers(roomId, true)
-			for (let j = 0; j < ids.length; j++) {
-				const uid = ids[j]
+		let ok = false
+		try {
+			const res = (await this.request(
+				'GET',
+				`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`,
+				null
+			)) as UTSJSONObject
+			const joined = jsonObj(res, 'joined')
+			const ids = jsonKeys(joined)
+			for (let i = 0; i < ids.length; i++) {
+				const uid = ids[i]
 				if (uid.length == 0) continue
+				const info = jsonObj(joined, uid)
+				const dn = jsonStr(info, 'display_name')
+				const av = jsonStr(info, 'avatar_url')
+				if (dn.length > 0) this.userDisplayNames.set(uid, dn)
+				if (av.length > 0) this.userAvatars.set(uid, av)
 				result.push({
 					user_id: uid,
 					membership: 'join',
-					display_name: '',
-					avatar_url: ''
+					display_name: dn,
+					avatar_url: av
+				})
+				seen.push(uid)
+			}
+			if (ids.length > 0) {
+				this.memberCache.set('joined_members:' + roomId, { members: ids.slice(), loaded_at: Date.now() })
+				ok = true
+			}
+		} catch (eFast) {
+			console.warn(TAG, 'joined_members fail, fallback /members', roomId, eFast)
+		}
+
+		if (!ok) {
+			const data = (await this.request(
+				'GET',
+				`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/members`,
+				null,
+				{ not_membership: 'leave' }
+			)) as UTSJSONObject
+			const chunk = jsonArr(data, 'chunk')
+			for (let i = 0; i < chunk.length; i++) {
+				const m = chunk[i]
+				const content = jsonObj(m, 'content')
+				const membership = jsonStr(content, 'membership')
+				if (membership == 'leave' || membership == 'ban') continue
+				const uid = jsonStr(m, 'state_key')
+				if (uid.length == 0) continue
+				if (seen.indexOf(uid) >= 0) continue
+				const dn = jsonStr(content, 'displayname')
+				const av = jsonStr(content, 'avatar_url')
+				if (dn.length > 0) this.userDisplayNames.set(uid, dn)
+				if (av.length > 0) this.userAvatars.set(uid, av)
+				result.push({
+					user_id: uid,
+					membership: membership.length > 0 ? membership : 'join',
+					display_name: dn,
+					avatar_url: av
 				})
 				seen.push(uid)
 			}
 		}
-		// 刚 invite 成功、服务端成员列表还没跟上时，本地补上
+
+		const merged = this.mergePendingRoomMembers(roomId, result)
+		this.roomMembersCache.set(roomId, { list: merged.slice(), loaded_at: Date.now() })
+		return merged
+	}
+
+	mergePendingRoomMembers(roomId: string, base: Array<RoomMember>): Array<RoomMember> {
+		const out: Array<RoomMember> = []
+		const seen: Array<string> = []
+		for (let i = 0; i < base.length; i++) {
+			out.push(base[i])
+			seen.push(base[i].user_id)
+		}
 		const pending = this.takePendingInvites(roomId)
 		const still: Array<string> = []
 		for (let k = 0; k < pending.length; k++) {
@@ -2429,16 +2537,15 @@ export class MatrixClient {
 			still.push(pid)
 			const cachedName = this.getCachedUserName(pid)
 			const av2 = this.userAvatars.get(pid)
-			result.push({
+			out.push({
 				user_id: pid,
 				membership: 'invite',
 				display_name: cachedName,
 				avatar_url: av2 != null ? av2 : ''
 			})
 		}
-		// 已出现在服务端名单里的 pending 清掉，避免一直占着
 		this.pendingInvites.set(roomId, still)
-		return result
+		return out
 	}
 
 	async setRoomAvatar(roomId: string, mxc: string): Promise<void> {
@@ -3112,7 +3219,7 @@ export class MatrixClient {
 		try {
 			summaryCache[roomId] = null
 		} catch (e) {}
-		this.memberCache.delete('joined_members:' + roomId)
+		this.invalidateRoomMembers(roomId)
 		const cache = this.listRoomsCache
 		if (cache != null) cache.loaded_at = 0
 	}

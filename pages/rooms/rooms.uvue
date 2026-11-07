@@ -709,10 +709,23 @@
 		const rows = loadRoomList(s.user_id)
 		if (rows.length == 0) return false
 		const out: Array<MatrixRoom> = []
+		const matrix = getMatrix()
 		for (let i = 0; i < rows.length; i++) {
 			const room = rowToRoom(rows[i])
 			if (room.room_id.length == 0) continue
 			fillPreviewFromChatCache(room)
+			// 冷启动用磁盘未读种子到内存；已被 clear/read 的以 matrix 为准
+			if (matrix != null) {
+				const live = matrix.roomUnreadCounts.get(room.room_id)
+				if (live != null) {
+					room.unread_count = live
+				} else {
+					const cachedUc = room.unread_count
+					if (cachedUc != null && cachedUc > 0) {
+						matrix.roomUnreadCounts.set(room.room_id, cachedUc)
+					}
+				}
+			}
 			out.push(room)
 		}
 		if (out.length == 0) return false
@@ -1047,6 +1060,15 @@
 	}
 
 	function onOpenRoom(roomId: string) {
+		// 进聊天即本地清角标（已读回执异步；不靠下一包 sync 才消）
+		const matrix = getMatrix()
+		if (matrix != null) matrix.clearRoomUnread(roomId)
+		const idx = rooms.value.findIndex((r: MatrixRoom) => r.room_id == roomId)
+		if (idx >= 0) {
+			rooms.value[idx].unread_count = 0
+			rooms.value = rooms.value.slice()
+			schedulePersistRooms()
+		}
 		openChat(roomId)
 	}
 

@@ -14,16 +14,12 @@
 			<view class="card">
 				<view class="member-grid">
 					<view
-						v-for="m in displayMembers"
+						v-for="m in previewMembers"
 						:key="m.user_id"
 						class="member-cell"
-						@click="onMemberTap(m)"
 					>
 						<view class="member-avatar-box">
 							<image class="member-avatar" :src="memberAvatar(m)" mode="aspectFill"></image>
-							<view v-if="showKickMark(m)" class="kick-mark">
-								<text class="kick-mark-text">-</text>
-							</view>
 						</view>
 						<text class="member-name">{{ memberLabel(m) }}</text>
 					</view>
@@ -33,14 +29,14 @@
 						</view>
 						<text class="member-name">{{ t('group.add') }}</text>
 					</view>
-					<view v-if="canKick" class="member-cell" @click="removing = !removing">
+					<view v-if="canKick" class="member-cell" @click="onRemove">
 						<view class="member-add">
 							<text class="member-add-text">-</text>
 						</view>
 						<text class="member-name">{{ t('group.remove') }}</text>
 					</view>
 				</view>
-				<view v-if="isGroup" class="more-members" @click="showAllMembers">
+				<view v-if="showMoreMembers" class="more-members" @click="showAllMembers">
 					<text class="more-members-text">{{ t('group.allMembers') }}</text>
 					<text class="cell-arrow">›</text>
 				</view>
@@ -95,13 +91,15 @@
 	import { t as __i18nT } from '@/common/i18n.uts'
 
 	import { getMatrix, errText, RoomMember, roomIsGroup, memberDisplayName, MatrixRoom } from '@/common/matrix.uts'
-	import { openGroupPick } from '@/common/app.uts'
+	import { openGroupPick, openGroupMembers } from '@/common/app.uts'
 	import { defaultAvatar } from '@/common/avatar.uts'
 	function t(key: string): string {
 		return __i18nT(key)
 	}
 
-
+	/** 微信：每行 5 个，折叠最多 3 行；末尾留给 + / - */
+	const MEMBER_COLS = 5
+	const MEMBER_MAX_ROWS = 3
 
 	const roomId = ref<string>('')
 	const roomName = ref<string>('')
@@ -111,7 +109,8 @@
 	const muted = ref<boolean>(false)
 	const pinned = ref<boolean>(false)
 	const canKick = ref<boolean>(false)
-	const removing = ref<boolean>(false)
+	/** 从加/移成员页返回时强制刷新一次成员 */
+	let membersNeedRefresh = false
 
 	const pageTitle = computed((): string => {
 		if (isGroup.value) {
@@ -122,8 +121,8 @@
 		return t('group.info')
 	})
 
-	/** 两人会话/群：头像区不展示自己 */
-	const displayMembers = computed((): Array<RoomMember> => {
+	/** 两人会话：头像区不展示自己；群聊展示全部 */
+	const visibleMembers = computed((): Array<RoomMember> => {
 		const list = members.value
 		if (list.length != 2) return list
 		const matrix = getMatrix()
@@ -137,6 +136,30 @@
 		return out
 	})
 
+	const maxPreviewCount = computed((): number => {
+		const actions = canKick.value ? 2 : 1
+		const slots = MEMBER_COLS * MEMBER_MAX_ROWS
+		const n = slots - actions
+		return n > 0 ? n : 1
+	})
+
+	/** 折叠后的成员预览 */
+	const previewMembers = computed((): Array<RoomMember> => {
+		const list = visibleMembers.value
+		const max = maxPreviewCount.value
+		if (list.length <= max) return list
+		const out: Array<RoomMember> = []
+		for (let i = 0; i < max; i++) {
+			out.push(list[i])
+		}
+		return out
+	})
+
+	const showMoreMembers = computed((): boolean => {
+		if (!isGroup.value) return false
+		return visibleMembers.value.length > maxPreviewCount.value
+	})
+
 	const topicText = computed((): string => {
 		if (topic.value.length > 0) return topic.value
 		return t('group.unset')
@@ -148,13 +171,6 @@
 
 	function memberLabel(m: RoomMember): string {
 		return memberDisplayName(m)
-	}
-
-	function showKickMark(m: RoomMember): boolean {
-		if (removing.value == false) return false
-		const matrix = getMatrix()
-		if (matrix == null) return false
-		return m.user_id != matrix.userId
 	}
 
 	function memberAvatar(m: RoomMember): string {
@@ -178,44 +194,29 @@
 		if (summary.muted == true) muted.value = true
 	}
 
-	async function loadInfo(): Promise<void> {
+	async function loadInfo(forceMembers: boolean = false): Promise<void> {
 		const matrix = getMatrix()
 		if (matrix == null) return
 		if (roomId.value.length == 0) return
+		// 成员与摘要并行：不再每次 invalidate，避免清掉缓存后连打两个重接口
+		const membersPromise = matrix.getRoomMembers(roomId.value, forceMembers)
 		try {
 			const summary = await matrix.getRoomSummary(roomId.value)
 			applySummary(summary)
 		} catch (e) {}
 		try {
-			// 清掉 joined 缓存，避免刚邀请回来仍显示旧名单
-			matrix.invalidateRoomSummary(roomId.value)
-			const list = await matrix.getRoomMembers(roomId.value)
+			const list = await membersPromise
 			const joined: Array<RoomMember> = []
-			const seen: Array<string> = []
 			for (let i = 0; i < list.length; i++) {
 				if (list[i].membership == 'join' || list[i].membership == 'invite') {
 					joined.push(list[i])
-					seen.push(list[i].user_id)
 				}
-			}
-			// 双保险：pending 里还有但 list 没带上的
-			const pending = matrix.takePendingInvites(roomId.value)
-			for (let p = 0; p < pending.length; p++) {
-				const uid = pending[p]
-				if (uid.length == 0 || seen.indexOf(uid) >= 0) continue
-				joined.push({
-					user_id: uid,
-					membership: 'invite',
-					display_name: matrix.getCachedUserName(uid),
-					avatar_url: matrix.userAvatars.get(uid) ?? ''
-				} as RoomMember)
 			}
 			members.value = joined
 		} catch (e) {}
 		muted.value = matrix.isRoomMuted(roomId.value)
 		pinned.value = matrix.isRoomFavourite(roomId.value)
 		try {
-			// canKick.value = await matrix.canManageRoom(roomId.value)
 			canKick.value = members.value.length > 2
 		} catch (e2) {
 			canKick.value = false
@@ -223,36 +224,17 @@
 	}
 
 	function onInvite(): void {
+		membersNeedRefresh = true
 		openGroupPick('invite', roomId.value)
 	}
 
-	function showAllMembers(): void {
-		const names: Array<string> = []
-		const list = members.value
-		for (let i = 0; i < list.length; i++) {
-			names.push(memberDisplayName(list[i]))
-		}
-		uni.showModal({
-			title: t('group.members') + '(' + list.length + ')',
-			content: names.join('\n'),
-			showCancel: false
-		})
+	function onRemove(): void {
+		membersNeedRefresh = true
+		openGroupPick('remove', roomId.value)
 	}
 
-	async function kickNow(userId: string): Promise<void> {
-		const matrix = getMatrix()
-		if (matrix == null) return
-		uni.showLoading({ title: t('group.processing') })
-		try {
-			await matrix.kickMember(roomId.value, userId, '')
-			uni.hideLoading()
-			uni.showToast({ title: t('group.removed'), icon: 'success' })
-			removing.value = false
-			loadInfo()
-		} catch (e) {
-			uni.hideLoading()
-			uni.showToast({ title: errText(e, t('group.removeDenied')), icon: 'none' })
-		}
+	function showAllMembers(): void {
+		openGroupMembers(roomId.value)
 	}
 
 	async function saveName(name: string): Promise<void> {
@@ -264,25 +246,6 @@
 			uni.showToast({ title: t('group.updated'), icon: 'success' })
 		} catch (e) {
 			uni.showToast({ title: errText(e, t('group.updateFail')), icon: 'none' })
-		}
-	}
-
-	function onMemberTap(m: RoomMember): void {
-		const matrix = getMatrix()
-		if (matrix == null) return
-		if (removing.value) {
-			if (m.user_id == matrix.userId) {
-				uni.showToast({ title: t('group.noSelf'), icon: 'none' })
-				return
-			}
-			uni.showModal({
-				title: t('group.removeTitle'),
-				content: (() => { let s=t('group.removeConfirmNamed'); const name=memberDisplayName(m); const i=s.indexOf('{name}'); return i>=0?s.substring(0,i)+name+s.substring(i+6):s })(),
-				success: (res) => {
-					if (res.confirm) kickNow(m.user_id)
-				}
-			})
-			return
 		}
 	}
 
@@ -405,11 +368,13 @@
 				roomId.value = rid
 			}
 		}
-		loadInfo()
 	})
 
 	onShow(() => {
-		if (roomId.value.length > 0) loadInfo()
+		if (roomId.value.length == 0) return
+		const force = membersNeedRefresh
+		membersNeedRefresh = false
+		loadInfo(force)
 	})
 </script>
 
@@ -459,7 +424,7 @@
 		padding: 24rpx 12rpx 8rpx 12rpx;
 	}
 	.member-cell {
-		width: 140rpx;
+		width: 20%;
 		align-items: center;
 		margin-bottom: 24rpx;
 	}
@@ -473,22 +438,6 @@
 		height: 96rpx;
 		border-radius: 12rpx;
 		background-color: #e0e0e6;
-	}
-	.kick-mark {
-		position: absolute;
-		right: -8rpx;
-		top: -8rpx;
-		width: 32rpx;
-		height: 32rpx;
-		border-radius: 16rpx;
-		background-color: #fa5151;
-		align-items: center;
-		justify-content: center;
-	}
-	.kick-mark-text {
-		color: #ffffff;
-		font-size: 28rpx;
-		font-weight: 700;
 	}
 	.member-add {
 		width: 96rpx;

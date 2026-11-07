@@ -2424,20 +2424,27 @@
 		const rid = roomId.value
 		const gen = chatLoadGen
 		const from = prevBatch
-		loadingHistory.value = messages.value.length == 0
+		const hadLocal = messages.value.length > 0
+		// 本地已有记录时不挡界面；仅空会话才显示「加载历史」
+		loadingHistory.value = !hadLocal
 		try {
 			const page = await matrix.getMessagesPage(rid, 30, from)
 			// 已切换到别的会话，丢弃本次结果
 			if (gen != chatLoadGen || !sameRoomId(roomId.value, rid)) return
 			const history = page.messages
-			prevBatch = page.end
+			if (from.length == 0 && !hadLocal) {
+				prevBatch = page.end
+			} else if (from.length > 0) {
+				prevBatch = page.end
+			}
 			const merged: Array<ChatMsg> = []
-			if (from.length == 0) {
-				// 首次进入/切换房间：整表替换，避免旧房间消息残留
+			if (from.length == 0 && !hadLocal) {
+				// 真正的首次拉取：用服务端最新一页铺底
 				for (let hi = 0; hi < history.length; hi++) {
 					merged.push(fromMatrixMessage(history[hi]))
 				}
 			} else {
+				// 已有本地缓存：只合并，禁止整表覆盖（否则每次进来像重新加载）
 				for (let mi = 0; mi < messages.value.length; mi++) {
 					merged.push(messages.value[mi])
 				}
@@ -2453,7 +2460,7 @@
 			hydrateImages()
 			schedulePersist()
 		} catch (e: any) {
-			if (gen == chatLoadGen && sameRoomId(roomId.value, rid)) {
+			if (gen == chatLoadGen && sameRoomId(roomId.value, rid) && !hadLocal) {
 				uni.showToast({ title: errText(e, '加载历史失败'), icon: 'none' })
 			}
 		}
@@ -2963,6 +2970,16 @@
 	}
 
 	function goBack() {
+		const matrix = getMatrix()
+		const rid = roomId.value
+		if (matrix != null && rid.length > 0) {
+			if (messages.value.length > 0) {
+				const last = messages.value[messages.value.length - 1]
+				matrix.readReceipt(rid, last.event_id)
+			} else {
+				matrix.clearRoomUnread(rid)
+			}
+		}
 		uni.navigateBack()
 	}
 
@@ -3223,7 +3240,7 @@
 			inputText.value = ''
 			typingUsers.value = []
 			highlightEventId.value = ''
-			loadingHistory.value = true
+			loadingHistory.value = false
 			clearRoomAlert(nextId)
 			stripDragX.value = 0
 
@@ -3241,12 +3258,17 @@
 			const matrix = getMatrix()
 			if (matrix == null) return
 			if (gen != chatLoadGen) return
-			applyLocalCache()
+			const hadCache = applyLocalCache()
 			if (gen != chatLoadGen) return
-			loadingHistory.value = messages.value.length == 0
+			loadingHistory.value = !hadCache && messages.value.length == 0
 			await loadRoomMeta(matrix)
 			if (gen != chatLoadGen) return
-			await loadHistory()
+			if (hadCache || messages.value.length > 0) {
+				// 有缓存：界面先用本地，后台只拉最新增量
+				pullLatestLive()
+			} else {
+				await loadHistory()
+			}
 			if (gen != chatLoadGen) return
 			mergeRoomBuffer()
 			refreshMsgTimes()
@@ -3371,6 +3393,8 @@
 				scrollToBottom()
 				hydrateImages()
 			})
+		} else {
+			loadingHistory.value = messages.value.length == 0
 		}
 		const callMgr = getCallManager()
 		callMgr.bindMatrix()
@@ -3530,6 +3554,16 @@
 				clearTimeout(pt as number)
 			}
 			persistRoomChatNow()
+			const leaveRid = roomId.value
+			const leaveMx = matrixRef
+			if (leaveMx != null && leaveRid.length > 0) {
+				if (messages.value.length > 0) {
+					const last = messages.value[messages.value.length - 1]
+					leaveMx.readReceipt(leaveRid, last.event_id)
+				} else {
+					leaveMx.clearRoomUnread(leaveRid)
+				}
+			}
 			stopOff(offTimeline)
 			offTimeline = null
 			const mClient = matrixRef

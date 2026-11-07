@@ -88,6 +88,10 @@ export function openChat(roomId: string, highlight: string = ''): void {
 	uni.setStorageSync('pending_chat_room', roomId)
 	uni.setStorageSync('last_chat_room', roomId)
 	uni.setStorageSync('pending_chat_highlight', highlight)
+	try {
+		const matrix = getMatrix()
+		if (matrix != null && roomId.length > 0) matrix.clearRoomUnread(roomId)
+	} catch (eClr) {}
 	let url = '/pages/chat/chat?roomId=' + encodeURIComponent(roomId)
 	if (highlight.length > 0) url += '&highlight=' + encodeURIComponent(highlight)
 	uni.navigateTo({ url: url })
@@ -101,6 +105,10 @@ export function openGroupPick(mode: string, roomId: string = ''): void {
 	let url = '/pages/group/pick?mode=' + encodeURIComponent(mode)
 	if (roomId.length > 0) url += '&roomId=' + encodeURIComponent(roomId)
 	uni.navigateTo({ url: url })
+}
+
+export function openGroupMembers(roomId: string): void {
+	uni.navigateTo({ url: '/pages/group/members?roomId=' + encodeURIComponent(roomId) })
 }
 
 /** iOS/Android 底部安全区高度（px） */

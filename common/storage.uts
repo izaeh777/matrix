@@ -135,13 +135,26 @@ export type CachedRoomChat = {
 	msgs: Array<UTSJSONObject>
 }
 
+/** 进程内缓存：离开聊天页再进时先命中内存，避免每次都等磁盘/网络 */
+const memRoomChat: Map<string, CachedRoomChat> = new Map()
+
+function roomChatKey(userId: string, roomId: string): string {
+	return userId + ':' + roomId
+}
+
 export function saveRoomChat(userId: string, roomId: string, prev: string, msgs: Array<UTSJSONObject>): void {
 	if (userId.length == 0 || roomId.length == 0) return
+	const key = roomChatKey(userId, roomId)
+	const snap: CachedRoomChat = {
+		prev: prev,
+		msgs: msgs
+	}
+	memRoomChat.set(key, snap)
 	const body: UTSJSONObject = {}
 	body['prev'] = prev
 	body['msgs'] = msgs
 	try {
-		uni.setStorageSync(KEY_CHAT_PREFIX + userId + ':' + roomId, JSON.stringify(body))
+		uni.setStorageSync(KEY_CHAT_PREFIX + key, JSON.stringify(body))
 	} catch (e) {
 		console.warn('saveRoomChat fail', e)
 	}
@@ -149,8 +162,13 @@ export function saveRoomChat(userId: string, roomId: string, prev: string, msgs:
 
 export function loadRoomChat(userId: string, roomId: string): CachedRoomChat | null {
 	if (userId.length == 0 || roomId.length == 0) return null
+	const key = roomChatKey(userId, roomId)
+	const mem = memRoomChat.get(key)
+	if (mem != null && mem.msgs.length > 0) {
+		return mem
+	}
 	try {
-		const raw = uni.getStorageSync(KEY_CHAT_PREFIX + userId + ':' + roomId)
+		const raw = uni.getStorageSync(KEY_CHAT_PREFIX + key)
 		if (raw == null) return null
 		let text = ''
 		try {
@@ -195,6 +213,7 @@ export function loadRoomChat(userId: string, roomId: string): CachedRoomChat | n
 			prev: prev,
 			msgs: msgs
 		}
+		memRoomChat.set(key, out)
 		return out
 	} catch (e) {
 		console.warn('loadRoomChat fail', e)
@@ -261,6 +280,7 @@ export function loadRoomList(userId: string): Array<UTSJSONObject> {
 }
 
 export function clearRoomChats(): void {
+	memRoomChat.clear()
 	try {
 		const info = uni.getStorageInfoSync()
 		const keys = info.keys
@@ -278,6 +298,13 @@ export function clearUserRoomCaches(userId: string): void {
 	if (userId.length == 0) return
 	const chatPref = KEY_CHAT_PREFIX + userId + ':'
 	const roomKey = KEY_ROOM_LIST_PREFIX + userId
+	const dropKeys: Array<string> = []
+	memRoomChat.forEach((_v: CachedRoomChat, k: string) => {
+		if (k.indexOf(userId + ':') == 0) dropKeys.push(k)
+	})
+	for (let di = 0; di < dropKeys.length; di++) {
+		memRoomChat.delete(dropKeys[di])
+	}
 	try {
 		const info = uni.getStorageInfoSync()
 		const keys = info.keys

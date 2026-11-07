@@ -1,0 +1,220 @@
+<template>
+	<view class="members-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
+		<view class="topbar">
+			<view class="back-btn" @click="goBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">{{ pageTitle }}</text>
+			<view class="topbar-right"></view>
+		</view>
+		<view class="search-bar">
+			<input
+				class="search-input"
+				v-model="searchText"
+				:placeholder="t('pick.search')"
+				placeholder-class="search-ph"
+				@input="onSearchInput"
+			/>
+		</view>
+		<scroll-view class="member-list" scroll-y>
+			<view v-if="loading" class="hint-row">
+				<text class="hint-text">{{ t('common.loading') }}</text>
+			</view>
+			<view v-else-if="filtered.length == 0" class="hint-row">
+				<text class="hint-text">{{ t('group.membersEmpty') }}</text>
+			</view>
+			<view
+				v-for="m in filtered"
+				:key="m.user_id"
+				class="member-row"
+			>
+				<image class="avatar" :src="memberAvatar(m)" mode="aspectFill"></image>
+				<text class="name">{{ memberLabel(m) }}</text>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, computed } from 'vue'
+	import { t as __i18nT } from '@/common/i18n.uts'
+	import { getMatrix, errText, RoomMember, memberDisplayName } from '@/common/matrix.uts'
+	import { defaultAvatar } from '@/common/avatar.uts'
+
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+	const roomId = ref<string>('')
+	const members = ref<Array<RoomMember>>([])
+	const searchText = ref<string>('')
+	const loading = ref<boolean>(false)
+
+	const pageTitle = computed((): string => {
+		const n = members.value.length
+		if (n > 0) return t('group.members') + '(' + n + ')'
+		return t('group.members')
+	})
+
+	const filtered = computed((): Array<RoomMember> => {
+		const q = searchText.value.trim().toLowerCase()
+		const list = members.value
+		if (q.length == 0) return list
+		const out: Array<RoomMember> = []
+		for (let i = 0; i < list.length; i++) {
+			const m = list[i]
+			const name = memberDisplayName(m).toLowerCase()
+			const id = m.user_id.toLowerCase()
+			if (name.indexOf(q) >= 0 || id.indexOf(q) >= 0) out.push(m)
+		}
+		return out
+	})
+
+	function goBack(): void {
+		uni.navigateBack()
+	}
+
+	function memberLabel(m: RoomMember): string {
+		return memberDisplayName(m)
+	}
+
+	function memberAvatar(m: RoomMember): string {
+		const matrix = getMatrix()
+		if (matrix == null) return defaultAvatar(m.user_id)
+		const av = m.avatar_url
+		if (av != null && av.length > 0) {
+			const http = matrix.mxcToHttp(av, 80, 80)
+			if (http.length > 0) return http
+		}
+		return defaultAvatar(m.user_id)
+	}
+
+	function onSearchInput(): void {
+		// filtered 是 computed，依赖 searchText 即可
+	}
+
+	async function loadMembers(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (roomId.value.length == 0) return
+		loading.value = members.value.length == 0
+		try {
+			const list = await matrix.getRoomMembers(roomId.value, false)
+			const joined: Array<RoomMember> = []
+			for (let i = 0; i < list.length; i++) {
+				const mem = list[i].membership
+				if (mem == 'join' || mem == 'invite') joined.push(list[i])
+			}
+			members.value = joined
+		} catch (e) {
+			uni.showToast({ title: errText(e, t('group.updateFail')), icon: 'none' })
+		}
+		loading.value = false
+	}
+
+	function optStr(obj: UTSJSONObject, key: string): string {
+		try {
+			const v = obj[key]
+			if (v != null) {
+				const s = '' + v
+				if (s.length > 0 && s != 'null' && s != 'undefined') return s
+			}
+		} catch (e) {}
+		return ''
+	}
+
+	onLoad((options: UTSJSONObject) => {
+		const rid = optStr(options, 'roomId')
+		if (rid.length > 0) {
+			try {
+				const decoded = decodeURIComponent(rid)
+				roomId.value = decoded != null && decoded.length > 0 ? decoded : rid
+			} catch (e) {
+				roomId.value = rid
+			}
+		}
+		loadMembers()
+	})
+</script>
+
+<style>
+	.members-page {
+		flex: 1;
+		background-color: #ededed;
+		flex-direction: column;
+	}
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		padding: 48rpx 20rpx 16rpx 20rpx;
+		background-color: #ededed;
+	}
+	.back-btn {
+		width: 72rpx;
+	}
+	.back-text {
+		font-size: 56rpx;
+		color: #181818;
+	}
+	.topbar-title {
+		flex: 1;
+		text-align: center;
+		font-size: 34rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.topbar-right {
+		width: 72rpx;
+	}
+	.search-bar {
+		padding: 8rpx 24rpx 16rpx 24rpx;
+	}
+	.search-input {
+		height: 72rpx;
+		background-color: #ffffff;
+		border-radius: 8rpx;
+		padding-left: 20rpx;
+		padding-right: 20rpx;
+		font-size: 28rpx;
+	}
+	.search-ph {
+		color: #b2b2b2;
+	}
+	.member-list {
+		flex: 1;
+		height: 0;
+		background-color: #ffffff;
+	}
+	.hint-row {
+		padding: 48rpx 0;
+		align-items: center;
+	}
+	.hint-text {
+		font-size: 26rpx;
+		color: #999999;
+	}
+	.member-row {
+		flex-direction: row;
+		align-items: center;
+		padding: 20rpx 28rpx;
+		border-bottom-width: 1rpx;
+		border-bottom-color: #f2f2f5;
+	}
+	.avatar {
+		width: 80rpx;
+		height: 80rpx;
+		border-radius: 10rpx;
+		background-color: #e0e0e6;
+		margin-right: 20rpx;
+	}
+	.name {
+		flex: 1;
+		font-size: 30rpx;
+		color: #1a1a1a;
+		lines: 1;
+		text-overflow: ellipsis;
+	}
+</style>

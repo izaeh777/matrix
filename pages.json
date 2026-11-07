@@ -92,6 +92,14 @@
 			}
 		},
 		{
+			"path": "pages/group/members",
+			"style": {
+				"navigationBarTitleText": "Members",
+				"navigationStyle": "custom",
+				"backgroundColor": "#EDEDED"
+			}
+		},
+		{
 			"path": "pages/profile/profile",
 			"style": {
 				"navigationBarTitleText": "Me",

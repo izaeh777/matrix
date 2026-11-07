@@ -31,10 +31,14 @@
 				v-for="user in users"
 				:key="user.user_id"
 				class="user-row"
+				:class="isLocked(user.user_id) ? 'user-row-locked' : ''"
 				@click="toggleUser(user)"
 			>
-				<view class="check" :class="isSelected(user.user_id) ? 'check-on' : ''">
-					<text v-if="isSelected(user.user_id)" class="check-mark">✓</text>
+				<view
+					class="check"
+					:class="checkClass(user.user_id)"
+				>
+					<text v-if="isChecked(user.user_id)" class="check-mark">✓</text>
 				</view>
 				<image class="avatar" :src="avatarOf(user)" mode="aspectFill"></image>
 				<view class="user-info">
@@ -70,6 +74,10 @@
 	const users = ref<Array<PickUser>>([])
 	const selectedIds = ref<Array<string>>([])
 	const selectedUsers: Array<PickUser> = []
+	/** 群内已有成员（含已邀请）：默认勾选且不可取消 */
+	const lockedIds = ref<Array<string>>([])
+	/** 移出模式：可筛选的完整成员列表 */
+	const allMembers = ref<Array<PickUser>>([])
 	let searchTimer: number | null = null
 	const pageTitle = ref<string>(t('pick.startRoom'))
 	const emptyHint = ref<string>(t('pick.empty'))
@@ -93,12 +101,27 @@
 		return defaultAvatar(user.user_id)
 	}
 
+	function isLocked(uid: string): boolean {
+		return lockedIds.value.indexOf(uid) >= 0
+	}
+
 	function isSelected(uid: string): boolean {
 		return selectedIds.value.indexOf(uid) >= 0
 	}
 
+	function isChecked(uid: string): boolean {
+		return isLocked(uid) || isSelected(uid)
+	}
+
+	function checkClass(uid: string): string {
+		if (isLocked(uid)) return 'check-on check-locked'
+		if (isSelected(uid)) return 'check-on'
+		return ''
+	}
+
 	function toggleUser(user: PickUser): void {
 		const uid = user.user_id
+		if (isLocked(uid)) return
 		const idx = selectedIds.value.indexOf(uid)
 		if (idx >= 0) {
 			selectedIds.value.splice(idx, 1)
@@ -134,6 +157,86 @@
 		return row
 	}
 
+	async function loadExistingMembers(): Promise<void> {
+		if (mode.value != 'invite') return
+		if (roomId.value.length == 0) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const members = await matrix.getRoomMembers(roomId.value)
+			const locked: Array<string> = []
+			for (let i = 0; i < members.length; i++) {
+				const m = members[i]
+				const uid = m.user_id
+				if (uid.length == 0) continue
+				if (uid == matrix.userId) continue
+				const mem = m.membership
+				if (mem != 'join' && mem != 'invite') continue
+				locked.push(uid)
+				const dn = m.display_name != null ? m.display_name : ''
+				const av = m.avatar_url != null ? m.avatar_url : ''
+				const row: PickUser = {
+					user_id: uid,
+					display_name: dn.length > 0 ? dn : localPartOf(uid),
+					avatar_url: av
+				}
+				mergeUser(row)
+			}
+			lockedIds.value = locked
+			users.value = users.value.slice()
+		} catch (e) {
+			console.warn('loadExistingMembers', e)
+		}
+	}
+
+	async function loadRemoveCandidates(): Promise<void> {
+		if (mode.value != 'remove') return
+		if (roomId.value.length == 0) return
+		const matrix = getMatrix()
+		if (matrix == null) return
+		try {
+			const members = await matrix.getRoomMembers(roomId.value, false)
+			const rows: Array<PickUser> = []
+			for (let i = 0; i < members.length; i++) {
+				const m = members[i]
+				const uid = m.user_id
+				if (uid.length == 0) continue
+				if (uid == matrix.userId) continue
+				const mem = m.membership
+				if (mem != 'join' && mem != 'invite') continue
+				const dn = m.display_name != null ? m.display_name : ''
+				const av = m.avatar_url != null ? m.avatar_url : ''
+				rows.push({
+					user_id: uid,
+					display_name: dn.length > 0 ? dn : localPartOf(uid),
+					avatar_url: av
+				})
+			}
+			allMembers.value = rows
+			users.value = rows.slice()
+		} catch (e) {
+			console.warn('loadRemoveCandidates', e)
+			uni.showToast({ title: errText(e, t('pick.removeFail')), icon: 'none' })
+		}
+	}
+
+	function filterRemoveList(term: string): void {
+		const q = term.trim().toLowerCase()
+		const src = allMembers.value
+		if (q.length == 0) {
+			users.value = src.slice()
+			return
+		}
+		const out: Array<PickUser> = []
+		for (let i = 0; i < src.length; i++) {
+			const u = src[i]
+			const name = nameOf(u).toLowerCase()
+			const id = u.user_id.toLowerCase()
+			if (name.indexOf(q) >= 0 || id.indexOf(q) >= 0) out.push(u)
+		}
+		users.value = out
+	}
+
 	async function loadRecent(): Promise<void> {
 		const matrix = getMatrix()
 		if (matrix == null) return
@@ -158,12 +261,33 @@
 		} catch (e) {}
 	}
 
+	function remountLockedUsers(): void {
+		const locked = lockedIds.value
+		if (locked.length == 0) return
+		const matrix = getMatrix()
+		for (let i = 0; i < locked.length; i++) {
+			const uid = locked[i]
+			const dn = matrix != null ? matrix.getCachedUserName(uid) : ''
+			const row: PickUser = {
+				user_id: uid,
+				display_name: dn.length > 0 ? dn : localPartOf(uid),
+				avatar_url: ''
+			}
+			mergeUser(row)
+		}
+	}
+
 	async function runSearch(term: string): Promise<void> {
+		if (mode.value == 'remove') {
+			filterRemoveList(term)
+			return
+		}
 		const matrix = getMatrix()
 		if (matrix == null) return
 		const q = term.trim()
 		if (q.length == 0) {
 			users.value = []
+			remountLockedUsers()
 			await loadRecent()
 			return
 		}
@@ -281,6 +405,29 @@
 		}
 	}
 
+	async function removeNow(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (roomId.value.length == 0) return
+		const ids = selectedIds.value.slice()
+		if (ids.length == 0) return
+		uni.showLoading({ title: t('pick.removing') })
+		try {
+			for (let i = 0; i < ids.length; i++) {
+				await matrix.kickMember(roomId.value, ids[i], '')
+			}
+			uni.hideLoading()
+			uni.showToast({ title: t('pick.removed'), icon: 'success' })
+			setTimeout((): void => {
+				uni.navigateBack()
+			}, 300)
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: errText(e, t('pick.removeFail')), icon: 'none' })
+			loadRemoveCandidates()
+		}
+	}
+
 	function onDone(): void {
 		if (selectedIds.value.length == 0) {
 			uni.showToast({ title: t('pick.needSelect'), icon: 'none' })
@@ -288,6 +435,10 @@
 		}
 		if (mode.value == 'invite') {
 			inviteNow()
+			return
+		}
+		if (mode.value == 'remove') {
+			removeNow()
 			return
 		}
 		createGroupNow()
@@ -319,8 +470,16 @@
 		if (mode.value == 'invite') {
 			pageTitle.value = t('pick.select')
 			emptyHint.value = t('pick.inviteEmpty')
+			loadExistingMembers().then((): void => {
+				loadRecent()
+			})
+		} else if (mode.value == 'remove') {
+			pageTitle.value = t('pick.removeTitle')
+			emptyHint.value = t('pick.removeEmpty')
+			loadRemoveCandidates()
+		} else {
+			loadRecent()
 		}
-		loadRecent()
 	})
 </script>
 
@@ -394,19 +553,29 @@
 		border-bottom-width: 1rpx;
 		border-bottom-color: #f2f2f5;
 	}
+	.user-row-locked {
+		opacity: 0.72;
+	}
 	.check {
 		width: 40rpx;
 		height: 40rpx;
 		border-radius: 20rpx;
 		border-width: 2rpx;
+		border-style: solid;
 		border-color: #cfcfcf;
+		background-color: #ffffff;
 		margin-right: 20rpx;
+		flex-shrink: 0;
 		align-items: center;
 		justify-content: center;
 	}
 	.check-on {
 		background-color: #07c160;
 		border-color: #07c160;
+	}
+	.check-locked {
+		background-color: #c9c9c9;
+		border-color: #c9c9c9;
 	}
 	.check-mark {
 		color: #ffffff;
