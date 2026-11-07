@@ -1130,16 +1130,16 @@
 			const pushers = await matrix.getPushers()
 			const pusherList = pushers['pushers'] as Array<UTSJSONObject> | null
 			if (pusherList != null && pusherList.length > 0) {
-				pushStatusText.value = '已注册'
+				pushStatusText.value = t('settings.pushRegistered')
 				pushStatusClass.value = 'status-online'
 				pushEnabled.value = true
 			} else {
-				pushStatusText.value = '未注册推送'
+				pushStatusText.value = t('settings.pushNotRegistered')
 				pushStatusClass.value = 'status-offline'
 				pushEnabled.value = false
 			}
 		} catch (e) {
-			pushStatusText.value = '检查失败'
+			pushStatusText.value = t('settings.pushCheckFail')
 			pushStatusClass.value = 'status-offline'
 		}
 	}
@@ -1184,7 +1184,7 @@
 		if (matrix == null) return
 
 		if (enabled) {
-			uni.showLoading({ title: '注册推送…' })
+			uni.showLoading({ title: t('settings.pushRegistering') })
 			try {
 				// 实际场景：这里应该取 APNs/FCM/UniPush 返回的 pushkey
 				// 演示用假 pushkey，生产环境请替换为真实设备 token
@@ -1192,32 +1192,32 @@
 					kind: 'http',
 					app_id: 'im.clone.app',
 					pushkey: 'demo_pushkey_' + matrix.deviceId,
-					app_display_name: 'Clone Chat',
-					device_display_name: (session.value != null) ? session.value.device_id : 'Unknown Device',
+					app_display_name: t('settings.appName'),
+					device_display_name: (session.value != null) ? session.value.device_id : t('settings.unknownDevice'),
 					data: {
 						url: 'https://push-helper.example.com/notify',
 						format: 'event_id_only'
 					}
 				})
-				pushStatusText.value = '已注册'
+				pushStatusText.value = t('settings.pushRegistered')
 				pushStatusClass.value = 'status-online'
-				uni.showToast({ title: '推送已开启', icon: 'success' })
+				uni.showToast({ title: t('settings.pushOn'), icon: 'success' })
 			} catch (err: any) {
 				pushEnabled.value = false
-				uni.showToast({ title: '注册失败: ' + errText(err, ''), icon: 'none' })
+				uni.showToast({ title: t('settings.pushRegisterFail') + errText(err, ''), icon: 'none' })
 			} finally {
 				uni.hideLoading()
 			}
 		} else {
-			uni.showLoading({ title: '关闭推送…' })
+			uni.showLoading({ title: t('settings.pushClosing') })
 			try {
 				const matrix = getMatrix()
 				if (matrix != null) {
 					await matrix.removePusher('demo_pushkey_' + matrix.deviceId, 'im.clone.app')
 				}
-				pushStatusText.value = '未注册'
+				pushStatusText.value = t('settings.pushOff')
 				pushStatusClass.value = 'status-offline'
-				uni.showToast({ title: '推送已关闭', icon: 'success' })
+				uni.showToast({ title: t('settings.pushClosed'), icon: 'success' })
 			} catch (err: any) {
 				uni.showToast({ title: '关闭失败: ' + errText(err, ''), icon: 'none' })
 			} finally {
@@ -1244,16 +1244,16 @@
 			} else {
 				await matrix.deleteDevice(deviceId, {} as UTSJSONObject)
 			}
-			uni.showToast({ title: '已踢下线', icon: 'success' })
+			uni.showToast({ title: t('settings.kicked'), icon: 'success' })
 			showDeviceModal.value = false
 			await loadDevices()
 		} catch (e2) {
-			uni.showToast({ title: '验证失败: ' + errText(e2, ''), icon: 'none' })
+			uni.showToast({ title: t('settings.verifyFail') + errText(e2, ''), icon: 'none' })
 		}
 	}
 
 	async function tryKickDevice(deviceId: string): Promise<void> {
-		uni.showLoading({ title: '请稍候…' })
+		uni.showLoading({ title: t('login.wait') })
 		try {
 			const matrix = getMatrix()
 			if (matrix == null) {
@@ -1262,7 +1262,7 @@
 			}
 			await matrix.deleteDevice(deviceId, {} as UTSJSONObject)
 			uni.hideLoading()
-			uni.showToast({ title: '已踢下线', icon: 'success' })
+			uni.showToast({ title: t('settings.kicked'), icon: 'success' })
 			showDeviceModal.value = false
 			await loadDevices()
 		} catch (err) {
@@ -1272,10 +1272,10 @@
 			const needPwd = (ec == 'M_FORBIDDEN') || (em.indexOf('password') >= 0)
 			if (needPwd) {
 				uni.showModal({
-					title: '需要验证',
-					content: '请输入当前密码以确认操作',
+					title: t('settings.needAuth'),
+					content: t('settings.needAuthHint'),
 					editable: true,
-					placeholderText: '当前密码',
+					placeholderText: t('settings.currentPassword'),
 					success: (mr) => {
 						if (!mr.confirm) return
 						const pwd = mr.content
@@ -1284,15 +1284,15 @@
 					}
 				})
 			} else {
-				uni.showToast({ title: '操作失败: ' + errText(err, ''), icon: 'none' })
+				uni.showToast({ title: t('settings.opFailPrefix') + errText(err, ''), icon: 'none' })
 			}
 		}
 	}
 
 	function onKickDevice(deviceId: string) {
 		uni.showModal({
-			title: '确认操作',
-			content: '确定要让该设备登出吗？',
+			title: t('settings.confirmAction'),
+			content: t('settings.kickDeviceConfirm'),
 			success: (r) => {
 				if (!r.confirm) return
 				tryKickDevice(deviceId)
@@ -1301,7 +1301,7 @@
 	}
 
 	async function kickAllWithPassword(password: string): Promise<void> {
-		uni.showLoading({ title: '请稍候…' })
+		uni.showLoading({ title: t('login.wait') })
 		try {
 			const matrix = getMatrix()
 			if (matrix == null) {
@@ -1314,25 +1314,25 @@
 			}
 			await matrix.deleteAllDevices(auth)
 			uni.hideLoading()
-			uni.showToast({ title: '已登出其他设备', icon: 'success' })
+			uni.showToast({ title: t('settings.logoutOthersOk'), icon: 'success' })
 			await loadDevices()
 		} catch (err) {
 			uni.hideLoading()
-			uni.showToast({ title: '操作失败: ' + errText(err, ''), icon: 'none' })
+			uni.showToast({ title: t('settings.opFailPrefix') + errText(err, ''), icon: 'none' })
 		}
 	}
 
 	function onKickAllOther() {
 		uni.showModal({
-			title: '确认操作',
-			content: '将登出除当前设备外的所有设备，确定继续？',
+			title: t('settings.confirmAction'),
+			content: t('settings.logoutOthersConfirm'),
 			success: (r) => {
 				if (!r.confirm) return
 				uni.showModal({
-					title: '身份验证',
-					content: '请输入当前密码',
+					title: t('settings.authTitle'),
+					content: t('settings.enterPassword'),
 					editable: true,
-					placeholderText: '当前密码',
+					placeholderText: t('settings.currentPassword'),
 					success: (mr) => {
 						if (!mr.confirm) return
 						const pwd = mr.content
@@ -1423,7 +1423,7 @@
 	}
 
 	async function runDeactivate(): Promise<void> {
-		uni.showLoading({ title: '注销中…' })
+		uni.showLoading({ title: t('settings.deactivating') })
 		try {
 			const matrix = getMatrix()
 			if (matrix == null) {
@@ -1438,8 +1438,8 @@
 			uni.hideLoading()
 			showDeactivateModal.value = false
 			uni.showModal({
-				title: '账号已注销',
-				content: '你的账号已被永久删除。',
+				title: t('settings.deactivatedTitle'),
+				content: t('settings.deactivatedBody'),
 				showCancel: false,
 				success: (done) => {
 					endMatrixSession()
@@ -1448,19 +1448,19 @@
 			})
 		} catch (err) {
 			uni.hideLoading()
-			uni.showToast({ title: '注销失败: ' + errText(err, ''), icon: 'none' })
+			uni.showToast({ title: t('settings.deactivateFail') + errText(err, ''), icon: 'none' })
 		}
 	}
 
 	function onSubmitDeactivate() {
 		const pwd = deactivateForm.value.password
 		if (pwd.length == 0) {
-			uni.showToast({ title: '请输入密码确认', icon: 'none' })
+			uni.showToast({ title: t('settings.deactivatePwdHint'), icon: 'none' })
 			return
 		}
 		uni.showModal({
-			title: '最后确认',
-			content: '确定要永久注销账号吗？此操作不可逆！',
+			title: t('settings.deactivateLastTitle'),
+			content: t('settings.deactivateLastBody'),
 			success: (r) => {
 				if (!r.confirm) return
 				runDeactivate()

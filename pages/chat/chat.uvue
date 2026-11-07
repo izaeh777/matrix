@@ -155,7 +155,7 @@
 
 		<!-- 底部输入区：输入栏在上，表情/更多在下（同微信） -->
 		<view class="composer" :style="composerStyle">
-			<view class="input-bar" :class="(showEmojiPanel || showMorePanel) ? 'input-bar-panel' : ''">
+			<view class="input-bar" :class="(showEmojiPanel || showMorePanel || bottomMode == 'keyboard') ? 'input-bar-panel' : ''">
 				<view class="input-tool" @click="toggleVoiceMode">
 					<image
 						class="input-tool-img"
@@ -191,7 +191,7 @@
 						@keyboardheightchange="onInputKeyboardHeight"
 					/>
 				</view>
-				<view class="input-tool" @touchend.prevent="toggleEmojiPanel" @click.prevent="toggleEmojiPanel">
+				<view class="input-tool" @touchstart.prevent="onEmojiTouchStart" @click.prevent="toggleEmojiPanel">
 					<!-- 表情打开时切成键盘图标：再点弹出键盘（同微信） -->
 					<image
 						class="input-tool-img"
@@ -199,7 +199,7 @@
 						mode="aspectFit"
 					></image>
 				</view>
-				<view v-if="inputText.trim().length == 0" class="input-tool" @touchend.prevent="toggleMorePanel" @click.prevent="toggleMorePanel">
+				<view v-if="inputText.trim().length == 0" class="input-tool" @touchstart.prevent="onMoreTouchStart" @click.prevent="toggleMorePanel">
 					<image class="input-tool-img" src="/static/login/b2.png" mode="aspectFit"></image>
 				</view>
 				<!-- touchend + prevent：点发送不抢 input 焦点，键盘保持（同微信） -->
@@ -208,64 +208,65 @@
 				</view>
 			</view>
 
-			<!-- 底部更多功能面板：高度对齐键盘，切换不塌底 -->
-			<view v-if="showMorePanel" class="more-panel" :style="emojiPanelStyle">
-				<view class="more-grid">
-					<view class="more-item" @click="onPickImage">
-						<view class="more-icon-bg">
-							<image class="more-icon-img" src="/static/login/t1.png" mode="aspectFit"></image>
+			<!-- 底栏坞：表情/更多/键盘共用同一高度，只换内容，消息区不跟着跳（同微信） -->
+			<view v-if="dockHeightPx > 0" class="bottom-dock" :style="dockStyle">
+				<view v-if="showMorePanel" class="more-panel">
+					<view class="more-grid">
+						<view class="more-item" @click="onPickImage">
+							<view class="more-icon-bg">
+								<image class="more-icon-img" src="/static/login/t1.png" mode="aspectFit"></image>
+							</view>
+							<text class="more-label">{{ t('chat.moreImage') }}</text>
 						</view>
-						<text class="more-label">{{ t('chat.moreImage') }}</text>
-					</view>
-					<view class="more-item" @click="onPickFile">
-						<view class="more-icon-bg">
-							<image class="more-icon-img" src="/static/login/t2.png" mode="aspectFit"></image>
+						<view class="more-item" @click="onPickFile">
+							<view class="more-icon-bg">
+								<image class="more-icon-img" src="/static/login/t2.png" mode="aspectFit"></image>
+							</view>
+							<text class="more-label">{{ t('chat.moreFile') }}</text>
 						</view>
-						<text class="more-label">{{ t('chat.moreFile') }}</text>
-					</view>
-					<view class="more-item" @click.stop="startCallVoice">
-						<view class="more-icon-bg">
-							<image class="more-icon-img" src="/static/login/t3.png" mode="aspectFit"></image>
+						<view class="more-item" @click.stop="startCallVoice">
+							<view class="more-icon-bg">
+								<image class="more-icon-img" src="/static/login/t3.png" mode="aspectFit"></image>
+							</view>
+							<text class="more-label">{{ isGroup ? t('chat.groupVoice') : t('chat.voiceCall') }}</text>
 						</view>
-						<text class="more-label">{{ isGroup ? t('chat.groupVoice') : t('chat.voiceCall') }}</text>
-					</view>
-					<view class="more-item" @click.stop="startCallVideo">
-						<view class="more-icon-bg">
-							<image class="more-icon-img" src="/static/login/t4.png" mode="aspectFit"></image>
+						<view class="more-item" @click.stop="startCallVideo">
+							<view class="more-icon-bg">
+								<image class="more-icon-img" src="/static/login/t4.png" mode="aspectFit"></image>
+							</view>
+							<text class="more-label">{{ isGroup ? t('chat.groupVideo') : t('chat.videoCall') }}</text>
 						</view>
-						<text class="more-label">{{ isGroup ? t('chat.groupVideo') : t('chat.videoCall') }}</text>
 					</view>
+				</view>
+				<view v-else-if="showEmojiPanel" class="emoji-panel">
+					<view class="emoji-panel-tabs">
+						<view
+							v-for="(icon, idx) in emojiCatIcons"
+							:key="idx"
+							class="emoji-tab"
+							:class="idx == activeEmojiCat ? 'emoji-tab-active' : ''"
+							@click="setEmojiCat(idx)"
+						>
+							<text class="emoji-tab-text">{{ icon }}</text>
+						</view>
+					</view>
+					<scroll-view class="emoji-grid-scroll" scroll-y>
+						<view class="emoji-grid">
+							<view
+								v-for="(e, i) in activeEmojiList"
+								:key="i"
+								class="emoji-cell"
+								@click="insertEmoji(e)"
+							>
+								<view class="emoji-cell-bg">
+									<text class="emoji-cell-text">{{ e }}</text>
+								</view>
+							</view>
+						</view>
+					</scroll-view>
 				</view>
 			</view>
 
-			<!-- 表情包面板：高度对齐键盘，切换时不塌底（同微信） -->
-			<view v-if="showEmojiPanel" class="emoji-panel" :style="emojiPanelStyle">
-				<view class="emoji-panel-tabs">
-					<view
-						v-for="(icon, idx) in emojiCatIcons"
-						:key="idx"
-						class="emoji-tab"
-						:class="idx == activeEmojiCat ? 'emoji-tab-active' : ''"
-						@click="setEmojiCat(idx)"
-					>
-						<text class="emoji-tab-text">{{ icon }}</text>
-					</view>
-				</view>
-				<scroll-view class="emoji-grid-scroll" scroll-y>
-					<view class="emoji-grid">
-						<view
-							v-for="(e, i) in activeEmojiList"
-							:key="i"
-							class="emoji-cell"
-							@click="insertEmoji(e)"
-						>
-							<view class="emoji-cell-bg">
-								<text class="emoji-cell-text">{{ e }}</text>
-							</view>
-						</view>
-					</view>
-				</scroll-view>
-			</view>
 		</view>
 
 		<view v-if="showAtPicker" class="at-mask" @click="closeAtPicker">
@@ -474,6 +475,8 @@
 	const keyboardHeight = ref<number>(0)
 	/** 最近一次键盘高度，面板对齐用 */
 	const lastKeyboardHeight = ref<number>(0)
+	const showEmojiPanel = ref<boolean>(false)
+	const showMorePanel = ref<boolean>(false)
 	/** 切到键盘过程中忽略 height=0，防止占位被清掉导致塌一下 */
 	let expectKeyboard = false
 	let expectKeyboardTimer: number | null = null
@@ -519,41 +522,45 @@
 		if (h > 0) return h
 		return defaultPanelHeightPx()
 	}
-	const composerStyle = computed((): string => {
-		const kb = keyboardHeight.value
+	/** 表情/更多坞高；键盘态 App 用 margin 顶起（空坞在原生上高度常被压成 0） */
+	const dockHeightPx = computed((): number => {
 		const mode = bottomMode.value
+		if (mode == 'emoji' || mode == 'more') return panelHeightPx()
 		// #ifdef H5
-		// H5：fixed 贴底；键盘高度只来自 visualViewport，避免和 Safari 滚屏叠两次
-		if (mode == 'keyboard' && kb > 0) {
-			return 'position:fixed;left:0;right:0;bottom:' + kb + 'px;width:100%;'
+		if (mode == 'keyboard') {
+			const kb = clampKeyboardHeight(keyboardHeight.value)
+			if (kb > 0) return kb
 		}
+		// #endif
+		return 0
+	})
+	const dockStyle = computed((): string => {
+		const h = dockHeightPx.value
+		if (h > 0) return 'height:' + h + 'px;'
+		return 'height:0;'
+	})
+	const composerStyle = computed((): string => {
+		const kb = clampKeyboardHeight(keyboardHeight.value)
+		const lifting = bottomMode.value == 'keyboard' && kb > 0 && !showEmojiPanel.value && !showMorePanel.value
+		// #ifdef H5
 		return 'position:fixed;left:0;right:0;bottom:0;width:100%;'
 		// #endif
 		// #ifndef H5
-		if (mode == 'keyboard' && kb > 0) {
-			return 'margin-bottom:' + kb + 'px;'
-		}
-		return ''
+		if (lifting) return 'margin-bottom:' + kb + 'px;'
+		return 'margin-bottom:0;'
 		// #endif
 	})
 	const messagesPadStyle = computed((): string => {
 		// #ifdef H5
-		// fixed composer 脱离文档流，给消息区垫底
-		let pad = 110
-		if (bottomMode.value == 'emoji' || bottomMode.value == 'more') {
-			pad = 110 + panelHeightPx()
-		} else if (bottomMode.value == 'keyboard' && keyboardHeight.value > 0) {
-			pad = 110 + keyboardHeight.value
-		}
+		const dock = dockHeightPx.value
+		const pad = dock > 0 ? (110 + dock) : 110
 		return 'padding-bottom:' + pad + 'px;'
 		// #endif
 		// #ifndef H5
 		return ''
 		// #endif
 	})
-	const emojiPanelStyle = computed((): string => {
-		return 'height:' + panelHeightPx() + 'px;'
-	})
+	let h5FullInnerH = 0
 	function lockH5Body(): void {
 		// #ifdef H5
 		try {
@@ -592,14 +599,28 @@
 	function syncH5VisualViewport(): void {
 		// #ifdef H5
 		try {
-			if (bottomMode.value == 'emoji' || bottomMode.value == 'more') {
+			if (bottomMode.value == 'emoji' || bottomMode.value == 'more' || showEmojiPanel.value || showMorePanel.value) {
+				// 面板模式：坞高由 panel 承担，清键盘高避免叠高；勿抢回 keyboard
 				if (keyboardHeight.value != 0) keyboardHeight.value = 0
 				return
 			}
 			const vv = window.visualViewport
 			if (vv == null) return
-			// 用 innerHeight 与可视高度差，不叠加 offsetTop（否则会和滚屏重复）
-			let inset = Math.round(window.innerHeight - vv.height)
+			// Chrome 缩窗：布局高度变小，坞高必须为 0（浏览器已让出键盘空间）
+			if (h5FullInnerH > 0 && window.innerHeight < h5FullInnerH - 50) {
+				clearExpectKeyboard()
+				if (keyboardHeight.value != 0) keyboardHeight.value = 0
+				if (bottomMode.value == 'keyboard' && !inputFocused.value) {
+					bottomMode.value = 'none'
+				}
+				return
+			}
+			// Safari：innerHeight 基本不变，用可视差作为坞高
+			let inset = Math.round(window.innerHeight - vv.height - vv.offsetTop)
+			if (inset < 40) {
+				const layoutH = document.documentElement.clientHeight
+				inset = Math.round(layoutH - vv.height - vv.offsetTop)
+			}
 			if (inset < 40) inset = 0
 			inset = clampKeyboardHeight(inset)
 			if (inset > 0) {
@@ -609,13 +630,13 @@
 				showMorePanel.value = false
 				bottomMode.value = 'keyboard'
 				if (keyboardHeight.value != inset) keyboardHeight.value = inset
-				scrollToBottomAfterLayout()
 			} else if (!expectKeyboard) {
 				if (keyboardHeight.value != 0) keyboardHeight.value = 0
 				if (bottomMode.value == 'keyboard' && !inputFocused.value) {
 					bottomMode.value = 'none'
 				}
 			}
+			// expectKeyboard 期间保留 hold 坞高，等 inset 或缩窗判定
 		} catch (eVv) {}
 		// #endif
 	}
@@ -623,6 +644,7 @@
 		// #ifdef H5
 		try {
 			lockH5Body()
+			h5FullInnerH = window.innerHeight
 			const vv = window.visualViewport
 			if (vv == null) return
 			vv.addEventListener('resize', syncH5VisualViewport)
@@ -1143,8 +1165,6 @@
 	}
 
 	// ===== 表情包 =====
-	const showEmojiPanel = ref<boolean>(false)
-	const showMorePanel = ref<boolean>(false)
 	const inputFocused = ref<boolean>(false)
 	/** 点发送时短暂为 true：blur 回调里抢回焦点，避免键盘收起 */
 	let keepInputFocus = false
@@ -1227,7 +1247,7 @@
 		expectKeyboardTimer = bindTimeout(() => {
 			expectKeyboardTimer = null
 			expectKeyboard = false
-		}, 600)
+		}, 1200)
 	}
 	function hideSysKeyboard(): void {
 		keepInputFocus = false
@@ -1237,13 +1257,18 @@
 		} catch (eKb) {}
 	}
 
-	/** 打开表情/更多：先切模式再收键盘，底部只保留面板高度 */
+	/** 打开表情/更多：先切模式占住坞，再强制失焦收键盘（避免键盘盖住表情） */
 	function openBottomPanel(kind: string): void {
 		clearExpectKeyboard()
 		voiceMode.value = false
+		keepInputFocus = false
 		if (keyboardHeight.value > 0) {
 			lastKeyboardHeight.value = keyboardHeight.value
+		} else {
+			const hold = clampKeyboardHeight(lastKeyboardHeight.value)
+			if (hold <= 0) lastKeyboardHeight.value = defaultPanelHeightPx()
 		}
+		// 先切模式：后续 keyboardheight 残留会被忽略，不会抢回 keyboard
 		if (kind == 'emoji') {
 			showMorePanel.value = false
 			showEmojiPanel.value = true
@@ -1253,36 +1278,62 @@
 			showMorePanel.value = true
 			bottomMode.value = 'more'
 		}
-		// 面板已占位，清掉键盘 margin，避免「面板+margin」叠成双倍高
 		keyboardHeight.value = 0
-		hideSysKeyboard()
-		scrollToBottomAfterLayout()
+		inputFocused.value = false
+		try {
+			uni.hideKeyboard()
+		} catch (eKb) {}
+		nextTick(() => {
+			inputFocused.value = false
+			try {
+				uni.hideKeyboard()
+			} catch (eKb2) {}
+		})
 	}
 
-	/** 关表情/更多 → 弹键盘：先用上次键盘高度占位，再 focus */
+	/**
+	 * 关表情/更多 → 弹键盘（同微信）：
+	 * 卸面板后立刻用上次键盘高度占住坞，输入栏保持在键盘上方。
+	 */
 	function closePanelOpenKeyboard(): void {
+		const hold = panelHeightPx()
 		showEmojiPanel.value = false
 		showMorePanel.value = false
-		const hold = panelHeightPx()
 		armExpectKeyboard()
 		bottomMode.value = 'keyboard'
-		// App 先占位；H5 交给 visualViewport，避免假高度把栏顶飞
-		// #ifndef H5
 		keyboardHeight.value = hold
-		// #endif
-		// #ifdef H5
-		keyboardHeight.value = 0
-		// #endif
 		inputFocused.value = false
 		nextTick(() => {
 			inputFocused.value = true
 			// #ifdef H5
 			syncH5VisualViewport()
 			// #endif
-			scrollToBottomAfterLayout()
 		})
 	}
 
+	/**
+	 * touchstart.prevent 会吃掉后续 click，开关都必须在 touchstart 里完成。
+	 */
+	function onEmojiTouchStart(): void {
+		const now = Date.now()
+		if (now - lastPanelTapAt < 320) return
+		lastPanelTapAt = now
+		if (showEmojiPanel.value || bottomMode.value == 'emoji') {
+			closePanelOpenKeyboard()
+			return
+		}
+		openBottomPanel('emoji')
+	}
+	function onMoreTouchStart(): void {
+		const now = Date.now()
+		if (now - lastPanelTapAt < 320) return
+		lastPanelTapAt = now
+		if (showMorePanel.value || bottomMode.value == 'more') {
+			closePanelOpenKeyboard()
+			return
+		}
+		openBottomPanel('more')
+	}
 	function toggleMorePanel(): void {
 		const now = Date.now()
 		if (now - lastPanelTapAt < 320) return
@@ -2149,7 +2200,7 @@
 			// 2) 降级：AudioContext 直采 pcm 拼 wav
 			startWavFallback(stream)
 		}).catch(function(err) {
-			uni.showToast({ title: '麦克风权限被拒', icon: 'none' })
+			uni.showToast({ title: t('chat.micDeniedShort'), icon: 'none' })
 			console.warn('录音权限错误', err)
 			isRecording.value = false
 		})
@@ -2420,7 +2471,7 @@
 			mgr.bindMatrix()
 			await mgr.startOutgoing(roomId.value, isVideo)
 		} catch (e) {
-			uni.showToast({ title: errText(e, '发起通话失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('call.startFail')), icon: 'none' })
 		}
 		startingCall = false
 	}
@@ -2444,8 +2495,8 @@
 	function syncIncomingCall(s: CallSnapshot): void {
 		const show = s.phase == 'ringing' && s.isIncoming && (s.roomId.length == 0 || s.roomId == roomId.value)
 		incomingCall.value = show
-		incomingCallTitle.value = s.isVideo ? '视频来电' : s.peerName
-		incomingCallSub.value = s.isVideo ? (s.peerName + ' 邀请你视频通话') : s.sub
+		incomingCallTitle.value = s.isVideo ? t('rooms.videoIncoming') : s.peerName
+		incomingCallSub.value = s.isVideo ? (s.peerName + t('rooms.videoInvite')) : s.sub
 	}
 	function rejectIncomingCall() {
 		getCallManager().reject()
@@ -2457,6 +2508,7 @@
 	// 表情包
 	// ============================================================
 	function toggleEmojiPanel() {
+		// H5/桌面无 touch 时走 click；移动端已在 touchstart 处理，这里被防抖挡住
 		const now = Date.now()
 		if (now - lastPanelTapAt < 320) return
 		lastPanelTapAt = now
@@ -2653,7 +2705,7 @@
 		if (highlightEventId.value.length == 0) return
 		const idx = messages.value.findIndex(m => m.event_id == highlightEventId.value)
 		if (idx < 0) {
-			uni.showToast({ title: '目标消息较旧，上滑加载更多', icon: 'none' })
+			uni.showToast({ title: t('chat.msgTooOld'), icon: 'none' })
 			return
 		}
 		const msg = messages.value[idx]
@@ -2714,7 +2766,7 @@
 			schedulePersist()
 		} catch (e: any) {
 			if (gen == chatLoadGen && sameRoomId(roomId.value, rid) && !hadLocal) {
-				uni.showToast({ title: errText(e, '加载历史失败'), icon: 'none' })
+				uni.showToast({ title: errText(e, t('chat.loadHistoryFail')), icon: 'none' })
 			}
 		}
 		if (gen == chatLoadGen) loadingHistory.value = false
@@ -2801,7 +2853,7 @@
 			}
 			schedulePersist()
 		} catch (e) {
-			uni.showToast({ title: errText(e, '发送失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('login.sendFail')), icon: 'none' })
 			const list = messages.value
 			for (let i = 0; i < list.length; i++) {
 				if (list[i].event_id == tempId) {
@@ -2818,7 +2870,7 @@
 			sending.value = false
 			const text = inputText.value.trim()
 			if (text.length == 0) {
-				uni.showToast({ title: '请输入内容', icon: 'none' })
+				uni.showToast({ title: t('chat.inputEmpty'), icon: 'none' })
 				return
 			}
 			let matrix = matrixRef
@@ -2827,11 +2879,11 @@
 				matrixRef = matrix
 			}
 			if (matrix == null) {
-				uni.showToast({ title: '尚未登录', icon: 'none' })
+				uni.showToast({ title: t('chat.notLoggedIn'), icon: 'none' })
 				return
 			}
 			if (roomId.value.length == 0) {
-				uni.showToast({ title: '房间号为空', icon: 'none' })
+				uni.showToast({ title: t('chat.emptyRoomId'), icon: 'none' })
 				return
 			}
 			const tempId = matrix.genTxnId()
@@ -2856,7 +2908,7 @@
 			scrollToBottom()
 			finishSend(tempId, text, replyRef, matrix)
 		} catch (e) {
-			uni.showToast({ title: errText(e, '发送失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('login.sendFail')), icon: 'none' })
 		}
 	}
 
@@ -2921,44 +2973,32 @@
 			console.warn('onInputChange 异常', e)
 		}
 	}
-	function safeBottomInset(): number {
-		try {
-			const sys = uni.getSystemInfoSync()
-			const inset = sys.safeAreaInsets
-			if (inset != null && inset.bottom > 0) return Math.floor(inset.bottom)
-		} catch (e) {}
-		return 0
-	}
 	function normalizeKeyboardHeight(h: number): number {
 		if (h != h || h <= 0) return 0
-		let next = Math.floor(h)
-		// #ifdef APP-IOS || APP-HARMONY
-		// iOS/Harmony 回报高度已含安全区，需减掉，避免输入栏悬空一块
-		const safe = safeBottomInset()
-		if (safe > 0 && next > safe) next = next - safe
-		// #endif
-		return clampKeyboardHeight(next)
+		// 用内部 spacer 占位时，高度与系统回报一致即可；不再减 safeArea
+		return clampKeyboardHeight(Math.floor(h))
 	}
 	function applyKeyboardHeight(h: number): void {
 		const next = normalizeKeyboardHeight(h)
 		if (next > 0) {
+			// 表情/更多模式下正在收键盘：忽略残留高度，避免抢回键盘把面板闪掉
+			if (bottomMode.value == 'emoji' || bottomMode.value == 'more' || showEmojiPanel.value || showMorePanel.value) {
+				return
+			}
 			clearExpectKeyboard()
 			lastKeyboardHeight.value = next
 			showEmojiPanel.value = false
 			showMorePanel.value = false
 			bottomMode.value = 'keyboard'
 			if (keyboardHeight.value != next) keyboardHeight.value = next
-			scrollToBottomAfterLayout()
 			return
 		}
 		// height=0
-		if (bottomMode.value == 'emoji' || bottomMode.value == 'more') {
-			// 切面板时主动收键盘，布局已由面板高度承担
+		if (bottomMode.value == 'emoji' || bottomMode.value == 'more' || showEmojiPanel.value || showMorePanel.value) {
 			keyboardHeight.value = 0
 			return
 		}
 		if (expectKeyboard) {
-			// 正在唤起键盘，忽略中间的 0，避免占位被清掉
 			return
 		}
 		keyboardHeight.value = 0
@@ -2999,22 +3039,21 @@
 		inputFocused.value = true
 		keepInputFocus = false
 		voiceMode.value = false
+		armExpectKeyboard()
 		if (showEmojiPanel.value || showMorePanel.value || bottomMode.value == 'emoji' || bottomMode.value == 'more') {
+			const hold = panelHeightPx()
 			showEmojiPanel.value = false
 			showMorePanel.value = false
-			armExpectKeyboard()
 			bottomMode.value = 'keyboard'
-			// #ifndef H5
+			if (keyboardHeight.value <= 0) keyboardHeight.value = hold
+		} else {
+			bottomMode.value = 'keyboard'
+			// 先占住高度，避免键盘高度回调到来前输入栏沉在键盘下
 			if (keyboardHeight.value <= 0) keyboardHeight.value = panelHeightPx()
-			// #endif
-		} else if (bottomMode.value != 'keyboard') {
-			bottomMode.value = 'keyboard'
 		}
 		// #ifdef H5
-		// H5 不信 focus.detail.height，改用 visualViewport
 		nextTick(() => {
 			syncH5VisualViewport()
-			scrollToBottomAfterLayout()
 		})
 		return
 		// #endif
@@ -3027,10 +3066,6 @@
 		}
 		h = clampKeyboardHeight(h)
 		if (h > 0) applyKeyboardHeight(h)
-		else {
-			if (keyboardHeight.value <= 0) keyboardHeight.value = panelHeightPx()
-			scrollToBottomAfterLayout()
-		}
 	}
 	function toggleVoiceMode() {
 		voiceMode.value = !voiceMode.value
@@ -3080,7 +3115,7 @@
 				messages.value = messages.value.slice()
 			}
 		} catch (e) {
-			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('rooms.opFail')), icon: 'none' })
 		}
 	}
 
@@ -3092,11 +3127,11 @@
 			const idx = messages.value.findIndex(m => m.event_id == eventId)
 			if (idx >= 0) {
 				messages.value[idx].redacted = true
-				messages.value[idx].body = '（消息已撤回）'
+				messages.value[idx].body = t('matrix.recalled')
 				messages.value = messages.value.slice()
 			}
 		} catch (e) {
-			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('rooms.opFail')), icon: 'none' })
 		}
 	}
 
@@ -3117,10 +3152,10 @@
 					body: target.body
 				}
 				replyTo.value = rt
-				uni.showToast({ title: '回复模式已开启', icon: 'none' })
+				uni.showToast({ title: t('chat.replyModeOn'), icon: 'none' })
 			} else if (action == 'edit') {
 				uni.showModal({
-					title: '编辑消息',
+					title: t('chat.editMsg'),
 					editable: true,
 					content: target.body,
 					success: (res) => {
@@ -3131,8 +3166,8 @@
 				})
 			} else if (action == 'redact') {
 				uni.showModal({
-					title: '撤回消息',
-					content: '确定要撤回这条消息吗？',
+					title: t('chat.recallMsg'),
+					content: t('chat.recallConfirm'),
 					success: (res) => {
 						if (res.confirm) {
 							applyRedactMessage(target.event_id)
@@ -3141,7 +3176,7 @@
 				})
 			}
 		} catch (e: any) {
-			uni.showToast({ title: errText(e, '操作失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('rooms.opFail')), icon: 'none' })
 		}
 	}
 
@@ -3157,7 +3192,7 @@
 		const mxc = msg.mxc.length > 0 ? msg.mxc : msg.url
 		const url = getMxcUrl(mxc, 9999, 9999)
 		if (url.length > 0) {
-			uni.showToast({ title: '下载中…', icon: 'none' })
+			uni.showToast({ title: t('chat.downloading'), icon: 'none' })
 			uni.downloadFile({ url: url, success: (res) => {
 				if (res.tempFilePath != null) {
 					uni.openDocument({ filePath: res.tempFilePath })
@@ -3183,7 +3218,7 @@
 		const local = msg._blobUrl.length > 0 ? msg._blobUrl : ((msg.mxc.length == 0 && msg.url.length > 0 && msg.url.indexOf('mxc://') < 0) ? msg.url : '')
 		const go = (url: string) => {
 			if (url.length == 0) {
-				uni.showToast({ title: '语音无法播放', icon: 'none' })
+				uni.showToast({ title: t('chat.voiceNoPlay'), icon: 'none' })
 				playingAudioId.value = ''
 				return
 			}
@@ -3192,7 +3227,7 @@
 			ctx.src = url
 			ctx.onEnded(() => { playingAudioId.value = ''; playingCtx = null })
 			ctx.onError(() => {
-				uni.showToast({ title: '语音播放失败', icon: 'none' })
+				uni.showToast({ title: t('chat.voicePlayFail'), icon: 'none' })
 				playingAudioId.value = ''
 				playingCtx = null
 			})
@@ -3213,7 +3248,7 @@
 		try {
 			const matrix = await getMatrix2()
 			if (matrix == null) return
-			uni.showLoading({ title: '上传中…' })
+			uni.showLoading({ title: t('settings.uploading') })
 			const segs = path.split('/')
 			const fileName = segs.length > 0 ? segs[segs.length - 1] : 'image.jpg'
 			const mxc = await matrix.uploadMedia(path, 'image/jpeg', fileName)
@@ -3223,7 +3258,7 @@
 			uni.hideLoading()
 		} catch (e) {
 			uni.hideLoading()
-			uni.showToast({ title: errText(e, '发送失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('login.sendFail')), icon: 'none' })
 		}
 	}
 
@@ -3246,13 +3281,13 @@
 			// #ifdef APP-PLUS
 			plus.io.requestFileSystem(plus.io.PRIVATE_DOC, (fsObj) => {
 				// 简化：APP 端用原生文件选择插件（此处提示用户用相册）
-				uni.showToast({ title: '请使用相册选图片', icon: 'none' })
+				uni.showToast({ title: t('chat.pickImageAlbum'), icon: 'none' })
 			})
 			// #endif
 			// 简化处理：复用选图（很多 App 不支持任意文件选择）
 			onPickImage()
 		} catch (e) {
-			uni.showToast({ title: '请选择图片', icon: 'none' })
+			uni.showToast({ title: t('chat.pickImage'), icon: 'none' })
 		}
 	}
 
@@ -3336,7 +3371,7 @@
 	}
 
 	function pickAtAll(): void {
-		insertAtToken('所有人')
+		insertAtToken(t('chat.atAll'))
 	}
 
 	function pickAtMember(m: RoomMember): void {
@@ -3346,20 +3381,20 @@
 	async function sendChatInvite(userId: string): Promise<void> {
 		const matrix = await getMatrix2()
 		if (matrix == null) return
-		uni.showLoading({ title: '邀请中…' })
+		uni.showLoading({ title: t('pick.inviting') })
 		try {
 			await matrix.inviteUser(roomId.value, userId)
 			uni.hideLoading()
-			uni.showToast({ title: '已添加到群聊', icon: 'success' })
+			uni.showToast({ title: t('pick.added'), icon: 'success' })
 		} catch (e) {
 			uni.hideLoading()
 			const msg = errText(e, '')
 			if (msg.indexOf('M_FORBIDDEN') >= 0) {
-				uni.showToast({ title: '无权邀请（需管理员）', icon: 'none' })
+				uni.showToast({ title: t('chat.inviteAdminOnly'), icon: 'none' })
 			} else if (msg.indexOf('M_NOT_FOUND') >= 0) {
-				uni.showToast({ title: '用户不存在', icon: 'none' })
+				uni.showToast({ title: t('contact.notFound'), icon: 'none' })
 			} else {
-				uni.showToast({ title: '邀请失败: ' + msg, icon: 'none' })
+				uni.showToast({ title: t('chat.inviteFailPrefix') + msg, icon: 'none' })
 			}
 		}
 	}
@@ -3368,22 +3403,22 @@
 		try {
 			const matrix = await getMatrix2()
 			if (matrix == null) return
-			uni.showLoading({ title: '退出中…' })
+			uni.showLoading({ title: t('chat.leaving') })
 			await matrix.leaveRoom(roomId.value)
 			uni.hideLoading()
-			uni.showToast({ title: '已退出', icon: 'success' })
+			uni.showToast({ title: t('rooms.left'), icon: 'success' })
 			setTimeout(() => { uni.navigateBack() }, 500)
 		} catch (e) {
 			uni.hideLoading()
-			uni.showToast({ title: errText(e, '退出失败'), icon: 'none' })
+			uni.showToast({ title: errText(e, t('chat.leaveFail')), icon: 'none' })
 		}
 	}
 
 	function promptInviteMember() {
 		uni.showModal({
-			title: '邀请成员',
+			title: t('chat.inviteMember'),
 			editable: true,
-			placeholderText: '输入对方用户ID，如 @zhang:' + MATRIX_SERVER_NAME,
+			placeholderText: t('rooms.invitePh'),
 			success: (res) => {
 				if (!res.confirm) return
 				const raw = res.content
@@ -3396,7 +3431,7 @@
 
 	function showMore() {
 		uni.showActionSheet({
-			itemList: ['复制房间ID', '查看资料', '邀请成员', '退出房间'],
+			itemList: [t('chat.copyRoomId'), t('chat.viewProfile'), t('chat.inviteMember'), t('chat.leaveRoom')],
 			success: (res) => {
 				if (res.tapIndex == 0) {
 					uni.setClipboardData({ data: roomId.value })
@@ -3406,8 +3441,8 @@
 					promptInviteMember()
 				} else if (res.tapIndex == 3) {
 					uni.showModal({
-						title: '退出房间',
-						content: '确定要退出该房间吗？',
+						title: t('chat.leaveRoom'),
+						content: t('chat.leaveRoomConfirm'),
 						success: (r) => {
 							if (r.confirm) {
 								leaveCurrentRoom()
@@ -3791,7 +3826,7 @@
 			const idx = messages.value.findIndex(m => m.event_id == evId)
 			if (idx >= 0) {
 				messages.value[idx].redacted = true
-				messages.value[idx].body = '（消息已撤回）'
+				messages.value[idx].body = t('matrix.recalled')
 				messages.value = messages.value.slice()
 				schedulePersist()
 			}
@@ -3937,7 +3972,7 @@
 			}
 		}
 		if (roomId.value.length == 0) {
-			uni.showToast({ title: '房间号为空', icon: 'none' })
+			uni.showToast({ title: t('chat.emptyRoomId'), icon: 'none' })
 			setTimeout(() => { uni.navigateBack() }, 800)
 			return
 		}
@@ -4034,21 +4069,27 @@
 </script>
 
 <style>
+	.status-bar-holder {
+		height: var(--status-bar-height);
+		width: 100%;
+		flex-shrink: 0;
+		background-color: #ffffff;
+	}
 	.chat-page {
 		flex: 1;
 		width: 100%;
+		height: 100%;
 		/* App 对 background-image 渐变支持不稳，用纯色保证有底色；H5 再叠渐变 */
 		background-color: #F3F8FE;
 		display: flex;
 		flex-direction: column;
 		position: relative;
+		overflow: hidden;
 	}
 	/* #ifdef H5 */
 	.chat-page {
 		background-image: linear-gradient(180deg, #F3F8FE 0%, #FFFFFF 100%);
-		height: 100%;
 		max-height: 100%;
-		overflow: hidden;
 	}
 	/* #endif */
 	.chat-header {
@@ -4056,10 +4097,11 @@
 		/* 与聊天区同色，避免弧线下透出白边 */
 		background-color: #F3F8FE;
 		flex-direction: column;
+		flex-shrink: 0;
 		position: relative;
-		z-index: 2;
+		z-index: 30;
 		padding-bottom: 0;
-		overflow: visible;
+		overflow: hidden;
 	}
 	.header-wave-wrap {
 		position: relative;
@@ -4348,8 +4390,10 @@
 	.messages {
 		flex: 1;
 		height: 0;
+		min-height: 0;
 		padding: 28rpx 20rpx 20rpx;
 		background-color: #F3F8FE;
+		z-index: 1;
 	}
 	.chat-bottom-anchor {
 		width: 100%;
@@ -4551,7 +4595,7 @@
 		flex-shrink: 0;
 	}
 	.input-bar-panel {
-		/* 面板打开时输入栏贴着面板，不必再留底部安全区 */
+		/* 键盘/表情/更多抬起时贴住上方，去掉底部安全区，避免悬空一截 */
 		padding-bottom: 16rpx;
 	}
 	.input-tool {
@@ -4743,15 +4787,21 @@
 		font-weight: 600;
 	}
 
+	.bottom-dock {
+		width: 100%;
+		flex-shrink: 0;
+		overflow: hidden;
+		background-color: #ffffff;
+	}
 	/* ---- 底部更多功能面板（微信风格） ---- */
 	.more-panel {
 		background-color: #ffffff;
 		padding: 32rpx 30rpx;
 		border-top-width: 1rpx;
 		border-top-color: #f0f2f5;
-		flex-shrink: 0;
+		flex: 1;
+		height: 100%;
 		overflow: hidden;
-		height: 520rpx;
 	}
 
 	.more-grid {
@@ -4978,10 +5028,10 @@
 	/* ---- 表情包面板：高度由 inline style 对齐键盘 ---- */
 	.emoji-panel {
 		width: 100%;
-		height: 520rpx;
+		height: 100%;
 		background-color: #ffffff;
 		flex-direction: column;
-		flex-shrink: 0;
+		flex: 1;
 		overflow: hidden;
 		border-top-width: 1rpx;
 		border-top-color: #f0f2f5;

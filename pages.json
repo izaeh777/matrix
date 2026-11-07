@@ -63,7 +63,10 @@
 				"backgroundColor": "#F3F8FE",
 				"backgroundColorContent": "#F3F8FE",
 				"backgroundColorTop": "#F3F8FE",
-				"backgroundColorBottom": "#F3F8FE"
+				"backgroundColorBottom": "#F3F8FE",
+				"app-plus": {
+					"softinputMode": "adjustResize"
+				}
 			}
 		},
 		{

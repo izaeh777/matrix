@@ -10,7 +10,7 @@
 			<text class="topbar-title">{{ t('group.notice') }}</text>
 			<view class="topbar-right">
 				<text
-					v-if="isAdmin && !editing"
+					v-if="loaded && isAdmin && !editing"
 					class="topbar-action"
 					@click="startEdit"
 				>{{ hasNotice ? t('group.noticeEdit') : t('group.noticePublish') }}</text>
@@ -33,6 +33,11 @@
 				:focus="true"
 			></textarea>
 			<text class="edit-tip">{{ t('group.noticeAdminOnly') }}</text>
+		</view>
+
+		<!-- 加载中：避免先闪「暂无公告」 -->
+		<view v-else-if="!loaded" class="loading-wrap">
+			<text class="loading-text">{{ t('common.loading') }}</text>
 		</view>
 
 		<!-- 空态 -->
@@ -69,6 +74,7 @@
 	const isAdmin = ref<boolean>(false)
 	const editing = ref<boolean>(false)
 	const saving = ref<boolean>(false)
+	const loaded = ref<boolean>(false)
 
 	const hasNotice = computed((): boolean => {
 		return topic.value.trim().length > 0
@@ -118,8 +124,14 @@
 
 	async function loadNotice(): Promise<void> {
 		const matrix = getMatrix()
-		if (matrix == null) return
-		if (roomId.value.length == 0) return
+		if (matrix == null) {
+			loaded.value = true
+			return
+		}
+		if (roomId.value.length == 0) {
+			loaded.value = true
+			return
+		}
 		try {
 			isAdmin.value = await matrix.canManageRoom(roomId.value)
 		} catch (e0) {
@@ -132,6 +144,7 @@
 		} catch (e1) {
 			topic.value = ''
 		}
+		loaded.value = true
 	}
 
 	function optStr(obj: UTSJSONObject, key: string): string {
@@ -220,6 +233,15 @@
 		font-size: 24rpx;
 		color: #999999;
 		padding-left: 8rpx;
+	}
+	.loading-wrap {
+		flex: 1;
+		align-items: center;
+		justify-content: center;
+	}
+	.loading-text {
+		font-size: 28rpx;
+		color: #999999;
 	}
 	.empty-wrap {
 		flex: 1;

@@ -506,7 +506,7 @@
 			uni.setStorageSync(DRAFT_KEY, JSON.stringify(buildDraft()))
 			uni.showToast({ title: i18n.value.draft, icon: 'none' })
 		} catch (e) {
-			uni.showToast({ title: 'save failed', icon: 'none' })
+			uni.showToast({ title: t('cms.saveFail'), icon: 'none' })
 		}
 	}
 
@@ -739,10 +739,10 @@
 				uni.navigateBack()
 			}, 600)
 		} catch (e) {
-			let msg = 'submit failed'
+			let msg = t('cms.submitFail')
 			try { msg = '' + e } catch (e3) {}
 			if (msg.indexOf('Error:') == 0) msg = msg.substring(6).trim()
-			uni.showToast({ title: msg.length > 0 ? msg : 'submit failed', icon: 'none' })
+			uni.showToast({ title: msg.length > 0 ? msg : t('cms.submitFail'), icon: 'none' })
 		}
 		submitting.value = false
 	}
