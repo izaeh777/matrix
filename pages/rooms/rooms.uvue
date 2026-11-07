@@ -39,26 +39,6 @@
 			</view>
 		</view>
 
-		<view v-if="invites.length > 0" class="invite-banner">
-			<view class="invite-banner-head">
-				<text class="invite-banner-title">{{ inviteBannerText }}</text>
-			</view>
-			<view v-for="inv in invites" :key="inv.room_id" class="invite-row">
-				<view class="invite-row-body">
-					<text class="invite-room-name">{{ inviteTitle(inv) }}</text>
-					<text v-if="inviteHasFrom(inv)" class="invite-from">{{ i18n.from }}{{ inv.inviter }}</text>
-				</view>
-				<view class="invite-row-actions">
-					<view class="invite-btn reject" @click="onRejectInvite(inv.room_id)">
-						<text class="invite-btn-text">{{ i18n.reject }}</text>
-					</view>
-					<view class="invite-btn accept" @click="onAcceptInvite(inv.room_id)">
-						<text class="invite-btn-text">{{ i18n.accept }}</text>
-					</view>
-				</view>
-			</view>
-		</view>
-
 		<scroll-view class="rooms-scroll" direction="vertical" :show-scrollbar="false" :rebound="false">
 			<view v-if="needMatrixLogin" class="empty">
 				<text class="empty-title">{{ i18n.needLogin }}</text>
@@ -187,7 +167,7 @@
 
 <script setup lang="uts">
 	import { ref, onMounted, onUnmounted, computed } from 'vue'
-	import { getMatrix, MatrixRoom, MatrixEvent, errText, InvitedRoomInfo, CreateRoomOpts, roomIsGroup, sortRoomList, localPartOf } from '@/common/matrix.uts'
+	import { getMatrix, MatrixRoom, MatrixEvent, errText, CreateRoomOpts, roomIsGroup, sortRoomList, localPartOf } from '@/common/matrix.uts'
 	import { loadSession, SessionInfo, loadRoomList, saveRoomList, loadRoomChat } from '@/common/storage.uts'
 	import { openChat, bootstrapMatrix, openGroupPick, hasPlatformLogin, openMatrixLogin, tabbarPadBottomStyle } from '@/common/app.uts'
 	import { getCallManager, CallSnapshot, h5TapRunAnswer, unlockH5CallMedia } from '@/common/call.uts'
@@ -213,7 +193,6 @@
 		inviteMember: string
 		deleteChat: string
 		cancel: string
-		inviteBannerTpl: string
 		noMessage: string
 		yesterday: string
 		pin: string
@@ -230,7 +209,6 @@
 	}
 
 	const rooms = ref<Array<MatrixRoom>>([])
-	const invites = ref<Array<InvitedRoomInfo>>([])
 	const i18n = ref<RoomsI18n>({
 		title: t('chat.title'),
 		filterAll: t('chat.filterAll'),
@@ -249,7 +227,6 @@
 		inviteMember: t('chat.inviteMember'),
 		deleteChat: t('chat.deleteChat'),
 		cancel: t('common.cancel'),
-		inviteBannerTpl: t('chat.inviteBanner'),
 		noMessage: t('chat.noMessage'),
 		yesterday: t('chat.yesterday'),
 		pin: t('chat.pin'),
@@ -288,11 +265,13 @@
 	const SWIPE_BTN_COUNT = 3
 
 	function swipeMaxPx(): number {
+		const rpx = SWIPE_BTN_RPX * SWIPE_BTN_COUNT
 		try {
-			return uni.upx2px(SWIPE_BTN_RPX * SWIPE_BTN_COUNT)
-		} catch (e0) {
-			return 225
-		}
+			const sys = uni.getSystemInfoSync()
+			const w = sys.windowWidth
+			if (w > 0) return Math.floor(w * rpx / 750)
+		} catch (e0) {}
+		return 225
 	}
 
 	function swipeContentStyle(roomId: string): string {
@@ -382,17 +361,6 @@
 		return pad(d.getMonth() + 1) + '-' + pad(d.getDate())
 	}
 
-	const inviteBannerText = computed((): string => {
-		return i18n.value.inviteBannerTpl.replace('{n}', '' + invites.value.length)
-	})
-
-	function inviteTitle(inv: InvitedRoomInfo): string {
-		if (inv.name.length > 0) return inv.name
-		return inv.room_id
-	}
-	function inviteHasFrom(inv: InvitedRoomInfo): boolean {
-		return inv.inviter.length > 0
-	}
 	function roomPinned(room: MatrixRoom): boolean {
 		return room.favourite == true
 	}
@@ -765,6 +733,12 @@
 			} else if (fillPreviewFromChatCache(room)) {
 				changed = true
 			}
+			const liveUnread = matrix.getRoomUnread(room.room_id)
+			const curUnread = room.unread_count != null ? room.unread_count : 0
+			if (liveUnread != curUnread) {
+				room.unread_count = liveUnread
+				changed = true
+			}
 		}
 		if (!changed) return
 		sortRoomList(list)
@@ -827,13 +801,25 @@
 		}
 	}
 
-	// 拉取自己处于 invited 状态的房间（不是 join）
+	/** 邀请已自动加入，不再展示顶部横幅；这里只把残留 invite 再 join 一次 */
 	async function loadInvites() {
 		const matrix = getMatrix()
 		if (matrix == null) return
 		try {
 			const list = matrix.listInvitedRooms()
-			invites.value = list
+			if (list.length == 0) return
+			let joined = 0
+			for (let i = 0; i < list.length; i++) {
+				const rid = list[i].room_id
+				if (rid.length == 0) continue
+				try {
+					await matrix.joinRoom(rid)
+					joined = joined + 1
+				} catch (eJoin) {
+					console.warn('auto join invite fail', rid, eJoin)
+				}
+			}
+			if (joined > 0) await loadRooms()
 		} catch (e) {
 			console.warn('loadInvites error', e)
 		}
@@ -869,16 +855,23 @@
 			const cur = rooms.value[idx]
 			// 仅当新消息时间更新时才覆盖预览并重新排序
 			const lastTs = cur.last_message_ts != null ? cur.last_message_ts : 0
+			let bumped = false
 			if (lastTs < ts) {
 				cur.last_message_preview = body
 				cur.last_message_ts = ts
 				cur.last_message_sender = sender
+				// 对方新消息且不在该房：先本地 +1，避免等 sync 角标滞后/丢失
+				if (sender.length > 0 && sender != matrix.userId) {
+					matrix.bumpRoomUnread(roomId, sender)
+					cur.unread_count = matrix.getRoomUnread(roomId)
+					bumped = true
+				}
 				// 把该房间移到列表顶部（unshift 之前先 splice）
 				rooms.value.splice(idx, 1)
 				rooms.value.unshift(cur)
 			}
 			rooms.value = rooms.value.slice() // 触发响应式
-			schedulePersistRooms()
+			if (bumped || lastTs < ts) schedulePersistRooms()
 		} catch (e) {
 			// 静默
 		}
@@ -916,16 +909,14 @@
 			loadInvites()
 			loadRooms()
 		})
+		// 列表只走 onRoomListEvent，避免与 onTimeline 各刷一次导致未读 +2
 		offTimeline = matrix.onTimeline((event: MatrixEvent, rid: string) => {
 			if (event.type.indexOf('m.call.') == 0) {
 				getCallManager().handleEvent(event, rid)
-				return
 			}
-			if (event.type != 'm.room.message') return
-			refreshOneRoom(rid, event)
 		})
 		matrix.onRoomListEvent = (event: MatrixEvent, rid: string) => {
-			if (event.type != 'm.room.message') return
+			if (event.type != 'm.room.message' && event.type != 'm.room.encrypted') return
 			refreshOneRoom(rid, event)
 		}
 		const callMgr = getCallManager()
@@ -948,14 +939,11 @@
 				schedulePersistRooms()
 			}
 		}
+		// 只挂 handlers，避免再设 onUnread 导致同一回调执行两次
 		matrix.unreadHandlers.push(unreadHandler)
-		matrix.onUnread = unreadHandler
 		offUnread = () => {
 			const i = matrix.unreadHandlers.indexOf(unreadHandler)
 			if (i >= 0) matrix.unreadHandlers.splice(i, 1)
-			if (matrix.onUnread == unreadHandler) {
-				matrix.onUnread = null
-			}
 		}
 		matrix.startSync()
 		await loadInvites()
@@ -1001,7 +989,6 @@
 			inviteMember: t('chat.inviteMember'),
 			deleteChat: t('chat.deleteChat'),
 			cancel: t('common.cancel'),
-			inviteBannerTpl: t('chat.inviteBanner'),
 			noMessage: t('chat.noMessage'),
 			yesterday: t('chat.yesterday'),
 			pin: t('chat.pin'),
@@ -1018,51 +1005,10 @@
 		} as RoomsI18n
 	})
 
-	async function onAcceptInvite(roomId: string) {
-		const matrix = getMatrix()
-		if (matrix == null) return
-		uni.showLoading({ title: t('rooms.joining') })
-		try {
-			await matrix.joinRoom(roomId)
-			uni.hideLoading()
-			uni.showToast({ title: t('rooms.joined'), icon: 'success' })
-			await loadInvites()
-			await loadRooms()
-		} catch (e: any) {
-			uni.hideLoading()
-			uni.showToast({ title: t('rooms.joinFail') + ': ' + errText(e, ''), icon: 'none' })
-		}
-	}
-
-	async function rejectInvite(roomId: string): Promise<void> {
-		const matrix = getMatrix()
-		if (matrix == null) return
-		try {
-			await matrix.leaveRoom(roomId)
-			await loadInvites()
-		} catch (e) {
-			uni.showToast({ title: t('rooms.opFail'), icon: 'none' })
-		}
-	}
-
-	function onRejectInvite(roomId: string) {
-		const matrix = getMatrix()
-		if (matrix == null) return
-		uni.showModal({
-			title: t('rooms.rejectTitle'),
-			content: t('rooms.rejectContent'),
-			success: (res) => {
-				if (res.confirm) {
-					rejectInvite(roomId)
-				}
-			}
-		})
-	}
-
 	function onOpenRoom(roomId: string) {
-		// 进聊天即本地清角标（已读回执异步；不靠下一包 sync 才消）
+		// 进聊天即标记为当前房并清角标（已读回执异步；不靠下一包 sync 才消）
 		const matrix = getMatrix()
-		if (matrix != null) matrix.clearRoomUnread(roomId)
+		if (matrix != null) matrix.setActiveChatRoom(roomId)
 		const idx = rooms.value.findIndex((r: MatrixRoom) => r.room_id == roomId)
 		if (idx >= 0) {
 			rooms.value[idx].unread_count = 0
@@ -1232,10 +1178,11 @@
 		onOpenRoom(roomId)
 	}
 
-	function onSwipeStart(e: UniTouchEvent, roomId: string): void {
-		if (e.touches.length == 0) return
-		swipeStartX = e.touches[0].clientX
-		swipeStartY = e.touches[0].clientY
+	function onSwipeStart(e: any, roomId: string): void {
+		const te = e as UniTouchEvent
+		if (te.touches.length == 0) return
+		swipeStartX = te.touches[0].clientX
+		swipeStartY = te.touches[0].clientY
 		swipeLocked = false
 		swipeAxis = ''
 		swipeMoving.value = true
@@ -1251,11 +1198,12 @@
 		}
 	}
 
-	function onSwipeMove(e: UniTouchEvent, roomId: string): void {
+	function onSwipeMove(e: any, roomId: string): void {
+		const te = e as UniTouchEvent
 		if (swipeRoomId.value != roomId) return
-		if (e.touches.length == 0) return
-		const x = e.touches[0].clientX
-		const y = e.touches[0].clientY
+		if (te.touches.length == 0) return
+		const x = te.touches[0].clientX
+		const y = te.touches[0].clientY
 		const dx = x - swipeStartX
 		const dy = y - swipeStartY
 		const adx = dx > 0 ? dx : -dx
@@ -1270,7 +1218,7 @@
 			swipeLocked = true
 		}
 		if (swipeAxis != 'x') return
-		try { e.preventDefault() } catch (ePrev) {}
+		try { te.preventDefault() } catch (ePrev) {}
 		const max = swipeMaxPx()
 		let next = swipeBaseX + dx
 		if (next > 0) next = 0
@@ -1278,7 +1226,7 @@
 		swipeX.value = next
 	}
 
-	function onSwipeEnd(_e: UniTouchEvent, roomId: string): void {
+	function onSwipeEnd(_e: any, roomId: string): void {
 		if (swipeRoomId.value != roomId) return
 		swipeMoving.value = false
 		const max = swipeMaxPx()
@@ -1298,11 +1246,6 @@
 
 	function onSwipeCancel(_roomId: string): void {
 		closeSwipe()
-	}
-
-	async function onSwipeAction(room: MatrixRoom, action: string): Promise<void> {
-		closeSwipe()
-		await doRoomAction(room, action)
 	}
 
 	async function inviteMemberByInput(roomId: string, raw: string | null): Promise<void> {
@@ -1391,6 +1334,11 @@
 		} catch (e) {
 			uni.showToast({ title: errText(e, t('rooms.opFail')), icon: 'none' })
 		}
+	}
+
+	async function onSwipeAction(room: MatrixRoom, action: string): Promise<void> {
+		closeSwipe()
+		await doRoomAction(room, action)
 	}
 </script>
 
@@ -1695,89 +1643,6 @@
 		font-size: 20rpx;
 		color: #888;
 		margin-left: 6rpx;
-	}
-
-	/* 新邀请横幅 */
-	.invite-banner {
-		background-color: #ffffff;
-		padding: 20rpx 24rpx;
-		border-bottom-width: 1rpx;
-		border-bottom-color: #f0f2f5;
-	}
-
-	.invite-banner-head {
-		margin-bottom: 12rpx;
-	}
-
-	.invite-banner-title {
-		font-size: 26rpx;
-		color: #2f6ff2;
-		font-weight: 600;
-	}
-
-	.invite-row {
-		flex-direction: row;
-		align-items: center;
-		background-color: #ffffff;
-		border-radius: 12rpx;
-		padding: 16rpx 20rpx;
-		margin-bottom: 10rpx;
-		border-width: 1rpx;
-		border-color: #f0f2f5;
-		border-style: solid;
-	}
-
-	.invite-row-body {
-		flex: 1;
-		flex-direction: column;
-	}
-
-	.invite-room-name {
-		font-size: 28rpx;
-		color: #1a1a1a;
-		font-weight: 500;
-	}
-
-	.invite-room-id {
-		font-size: 22rpx;
-		color: #999;
-		margin-top: 4rpx;
-	}
-
-	.invite-from {
-		font-size: 22rpx;
-		color: #1f6feb;
-		margin-top: 4rpx;
-	}
-
-	.invite-row-actions {
-		flex-direction: row;
-		margin-left: 12rpx;
-	}
-
-	.invite-btn {
-		padding: 10rpx 24rpx;
-		border-radius: 8rpx;
-		margin-left: 8rpx;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.invite-btn.reject {
-		background-color: #f0f0f5;
-	}
-
-	.invite-btn.accept {
-		background-color: #1f6feb;
-	}
-
-	.invite-btn-text {
-		font-size: 24rpx;
-		color: #333;
-	}
-
-	.invite-btn.accept .invite-btn-text {
-		color: #fff;
 	}
 
 	.topbar-right {

@@ -42,6 +42,7 @@
 		</view>
 		<scroll-view
 			class="messages"
+			:style="messagesPadStyle"
 			direction="vertical"
 			:show-scrollbar="false"
 			:rebound="false"
@@ -179,6 +180,9 @@
 						:placeholder="chatInputPh"
 						placeholder-class="input-placeholder"
 						confirm-type="send"
+						:confirm-hold="true"
+						:hold-keyboard="true"
+						:focus="inputFocused"
 						:adjust-position="false"
 						@input="onInputChange"
 						@focus="onInputFocus"
@@ -187,19 +191,25 @@
 						@keyboardheightchange="onInputKeyboardHeight"
 					/>
 				</view>
-				<view class="input-tool" @click="toggleEmojiPanel">
-					<image class="input-tool-img" src="/static/login/b1.png" mode="aspectFit"></image>
+				<view class="input-tool" @touchend.prevent="toggleEmojiPanel" @click.prevent="toggleEmojiPanel">
+					<!-- 表情打开时切成键盘图标：再点弹出键盘（同微信） -->
+					<image
+						class="input-tool-img"
+						:src="(showEmojiPanel || bottomMode == 'emoji') ? '/static/login/j1.png' : '/static/login/b1.png'"
+						mode="aspectFit"
+					></image>
 				</view>
-				<view v-if="inputText.trim().length == 0" class="input-tool" @click="toggleMorePanel">
+				<view v-if="inputText.trim().length == 0" class="input-tool" @touchend.prevent="toggleMorePanel" @click.prevent="toggleMorePanel">
 					<image class="input-tool-img" src="/static/login/b2.png" mode="aspectFit"></image>
 				</view>
-				<view v-else class="btn-send" @click="onSend">
+				<!-- touchend + prevent：点发送不抢 input 焦点，键盘保持（同微信） -->
+				<view v-else class="btn-send" @touchend.prevent="onSendTap" @click.prevent="onSendTap">
 					<text class="btn-send-text">{{ chatSendText }}</text>
 				</view>
 			</view>
 
-			<!-- 底部更多功能面板 -->
-			<view v-if="showMorePanel" class="more-panel">
+			<!-- 底部更多功能面板：高度对齐键盘，切换不塌底 -->
+			<view v-if="showMorePanel" class="more-panel" :style="emojiPanelStyle">
 				<view class="more-grid">
 					<view class="more-item" @click="onPickImage">
 						<view class="more-icon-bg">
@@ -228,8 +238,8 @@
 				</view>
 			</view>
 
-			<!-- 表情包面板：跟在输入栏下方，输入框始终在上面 -->
-			<view v-if="showEmojiPanel" class="emoji-panel">
+			<!-- 表情包面板：高度对齐键盘，切换时不塌底（同微信） -->
+			<view v-if="showEmojiPanel" class="emoji-panel" :style="emojiPanelStyle">
 				<view class="emoji-panel-tabs">
 					<view
 						v-for="(icon, idx) in emojiCatIcons"
@@ -455,16 +465,183 @@
 	const showAtPicker = ref<boolean>(false)
 	// 效果图：顶栏白；聊天区浅蓝
 	const chatHeaderStyle = 'background-color:#F3F8FE;'
-	/** 键盘高度(px)：关掉整页上推后，只抬底部 composer */
+	/**
+	 * 底部交互模式（同微信，同一时刻只占一种高度）：
+	 * none = 无键盘无面板；keyboard = 系统键盘抬起；emoji/more = 自定义面板
+	 */
+	const bottomMode = ref<string>('none')
+	/** 系统键盘真实高度(px) */
 	const keyboardHeight = ref<number>(0)
+	/** 最近一次键盘高度，面板对齐用 */
+	const lastKeyboardHeight = ref<number>(0)
+	/** 切到键盘过程中忽略 height=0，防止占位被清掉导致塌一下 */
+	let expectKeyboard = false
+	let expectKeyboardTimer: number | null = null
+	let lastPanelTapAt = 0
 	let kbListenId: number = -1
+	/** UTS/Kotlin 无函数提升：先占位，后面挂上真实实现 */
+	let scrollToBottomAfterLayoutFn: (() => void) | null = null
+	function scrollToBottomAfterLayout(): void {
+		const fn = scrollToBottomAfterLayoutFn
+		if (fn != null) fn()
+	}
 	const chatPageDynStyle = 'background-color:#F3F8FE;'
+	function windowHeightPx(): number {
+		try {
+			const sys = uni.getSystemInfoSync()
+			const h = sys.windowHeight
+			if (h > 0) return Math.floor(h)
+		} catch (e) {}
+		return 0
+	}
+	function defaultPanelHeightPx(): number {
+		try {
+			const sys = uni.getSystemInfoSync()
+			const w = sys.windowWidth
+			if (w > 0) return Math.floor(520 * w / 750)
+		} catch (e) {}
+		return 280
+	}
+	/** 过滤异常键盘高度（H5 有时会把整窗高度当键盘高，把输入栏顶飞） */
+	function clampKeyboardHeight(h: number): number {
+		if (h != h || h <= 0) return 0
+		let next = Math.floor(h)
+		const wh = windowHeightPx()
+		if (wh > 0) {
+			const maxKb = Math.floor(wh * 0.62)
+			if (next > maxKb) next = maxKb
+		}
+		if (next < 80) return 0
+		return next
+	}
+	function panelHeightPx(): number {
+		const h = clampKeyboardHeight(lastKeyboardHeight.value)
+		if (h > 0) return h
+		return defaultPanelHeightPx()
+	}
 	const composerStyle = computed((): string => {
 		const kb = keyboardHeight.value
-		// 与 hello-uni-app-x keyboard-adjust 一致：用 margin-bottom 把输入区顶到键盘上方
-		if (kb > 0) return 'margin-bottom:' + kb + 'px;'
+		const mode = bottomMode.value
+		// #ifdef H5
+		// H5：fixed 贴底；键盘高度只来自 visualViewport，避免和 Safari 滚屏叠两次
+		if (mode == 'keyboard' && kb > 0) {
+			return 'position:fixed;left:0;right:0;bottom:' + kb + 'px;width:100%;'
+		}
+		return 'position:fixed;left:0;right:0;bottom:0;width:100%;'
+		// #endif
+		// #ifndef H5
+		if (mode == 'keyboard' && kb > 0) {
+			return 'margin-bottom:' + kb + 'px;'
+		}
 		return ''
+		// #endif
 	})
+	const messagesPadStyle = computed((): string => {
+		// #ifdef H5
+		// fixed composer 脱离文档流，给消息区垫底
+		let pad = 110
+		if (bottomMode.value == 'emoji' || bottomMode.value == 'more') {
+			pad = 110 + panelHeightPx()
+		} else if (bottomMode.value == 'keyboard' && keyboardHeight.value > 0) {
+			pad = 110 + keyboardHeight.value
+		}
+		return 'padding-bottom:' + pad + 'px;'
+		// #endif
+		// #ifndef H5
+		return ''
+		// #endif
+	})
+	const emojiPanelStyle = computed((): string => {
+		return 'height:' + panelHeightPx() + 'px;'
+	})
+	function lockH5Body(): void {
+		// #ifdef H5
+		try {
+			const de = document.documentElement
+			const bd = document.body
+			de.style.height = '100%'
+			de.style.overflow = 'hidden'
+			bd.style.height = '100%'
+			bd.style.overflow = 'hidden'
+			bd.style.position = 'fixed'
+			bd.style.left = '0'
+			bd.style.right = '0'
+			bd.style.width = '100%'
+			bd.style.top = '0'
+			window.scrollTo(0, 0)
+		} catch (eLock) {}
+		// #endif
+	}
+	function unlockH5Body(): void {
+		// #ifdef H5
+		try {
+			const de = document.documentElement
+			const bd = document.body
+			de.style.height = ''
+			de.style.overflow = ''
+			bd.style.height = ''
+			bd.style.overflow = ''
+			bd.style.position = ''
+			bd.style.left = ''
+			bd.style.right = ''
+			bd.style.width = ''
+			bd.style.top = ''
+		} catch (eUn) {}
+		// #endif
+	}
+	function syncH5VisualViewport(): void {
+		// #ifdef H5
+		try {
+			if (bottomMode.value == 'emoji' || bottomMode.value == 'more') {
+				if (keyboardHeight.value != 0) keyboardHeight.value = 0
+				return
+			}
+			const vv = window.visualViewport
+			if (vv == null) return
+			// 用 innerHeight 与可视高度差，不叠加 offsetTop（否则会和滚屏重复）
+			let inset = Math.round(window.innerHeight - vv.height)
+			if (inset < 40) inset = 0
+			inset = clampKeyboardHeight(inset)
+			if (inset > 0) {
+				clearExpectKeyboard()
+				lastKeyboardHeight.value = inset
+				showEmojiPanel.value = false
+				showMorePanel.value = false
+				bottomMode.value = 'keyboard'
+				if (keyboardHeight.value != inset) keyboardHeight.value = inset
+				scrollToBottomAfterLayout()
+			} else if (!expectKeyboard) {
+				if (keyboardHeight.value != 0) keyboardHeight.value = 0
+				if (bottomMode.value == 'keyboard' && !inputFocused.value) {
+					bottomMode.value = 'none'
+				}
+			}
+		} catch (eVv) {}
+		// #endif
+	}
+	function bindH5VisualViewport(): void {
+		// #ifdef H5
+		try {
+			lockH5Body()
+			const vv = window.visualViewport
+			if (vv == null) return
+			vv.addEventListener('resize', syncH5VisualViewport)
+			vv.addEventListener('scroll', syncH5VisualViewport)
+		} catch (eBind) {}
+		// #endif
+	}
+	function unbindH5VisualViewport(): void {
+		// #ifdef H5
+		try {
+			const vv = window.visualViewport
+			if (vv != null) {
+				vv.removeEventListener('resize', syncH5VisualViewport)
+				vv.removeEventListener('scroll', syncH5VisualViewport)
+			}
+			unlockH5Body()
+		} catch (eUn) {}
+		// #endif
+	}
 	const roomTitleBar = computed((): string => {
 		let title = roomName.value
 		if (title.length == 0) title = t('chat.title')
@@ -716,11 +893,16 @@
 
 	// UTS 无提升：实现挂到后面（persist/loadHistory 等定义之后）
 	let switchToStripRoomImpl: ((nextId: string) => Promise<void>) | null = null
+	let pullLatestLiveFn: (() => Promise<void>) | null = null
 	async function switchToStripRoom(nextId: string): Promise<void> {
 		const fn = switchToStripRoomImpl
 		if (fn != null) {
 			await fn(nextId)
 		}
+	}
+	async function pullLatestLive(): Promise<void> {
+		const fn = pullLatestLiveFn
+		if (fn != null) await fn()
 	}
 
 	function shiftStrip(dir: number): void {
@@ -964,6 +1146,9 @@
 	const showEmojiPanel = ref<boolean>(false)
 	const showMorePanel = ref<boolean>(false)
 	const inputFocused = ref<boolean>(false)
+	/** 点发送时短暂为 true：blur 回调里抢回焦点，避免键盘收起 */
+	let keepInputFocus = false
+	let lastSendTapAt = 0
 	const voiceMode = ref<boolean>(false)
 	const activeEmojiCat = ref<number>(0)
 	const emojiCategories = ref<Array<EmojiCat>>([
@@ -1028,21 +1213,85 @@
 	})
 
 	function noop(): void {}
-	function dismissKeyboardForPanel(): void {
+	function clearExpectKeyboard(): void {
+		expectKeyboard = false
+		const t = expectKeyboardTimer
+		expectKeyboardTimer = null
+		if (t != null) clearTimeout(t)
+	}
+	function armExpectKeyboard(): void {
+		expectKeyboard = true
+		const t = expectKeyboardTimer
+		expectKeyboardTimer = null
+		if (t != null) clearTimeout(t)
+		expectKeyboardTimer = bindTimeout(() => {
+			expectKeyboardTimer = null
+			expectKeyboard = false
+		}, 600)
+	}
+	function hideSysKeyboard(): void {
+		keepInputFocus = false
+		inputFocused.value = false
 		try {
 			uni.hideKeyboard()
 		} catch (eKb) {}
+	}
+
+	/** 打开表情/更多：先切模式再收键盘，底部只保留面板高度 */
+	function openBottomPanel(kind: string): void {
+		clearExpectKeyboard()
+		voiceMode.value = false
+		if (keyboardHeight.value > 0) {
+			lastKeyboardHeight.value = keyboardHeight.value
+		}
+		if (kind == 'emoji') {
+			showMorePanel.value = false
+			showEmojiPanel.value = true
+			bottomMode.value = 'emoji'
+		} else {
+			showEmojiPanel.value = false
+			showMorePanel.value = true
+			bottomMode.value = 'more'
+		}
+		// 面板已占位，清掉键盘 margin，避免「面板+margin」叠成双倍高
 		keyboardHeight.value = 0
+		hideSysKeyboard()
+		scrollToBottomAfterLayout()
+	}
+
+	/** 关表情/更多 → 弹键盘：先用上次键盘高度占位，再 focus */
+	function closePanelOpenKeyboard(): void {
+		showEmojiPanel.value = false
+		showMorePanel.value = false
+		const hold = panelHeightPx()
+		armExpectKeyboard()
+		bottomMode.value = 'keyboard'
+		// App 先占位；H5 交给 visualViewport，避免假高度把栏顶飞
+		// #ifndef H5
+		keyboardHeight.value = hold
+		// #endif
+		// #ifdef H5
+		keyboardHeight.value = 0
+		// #endif
+		inputFocused.value = false
+		nextTick(() => {
+			inputFocused.value = true
+			// #ifdef H5
+			syncH5VisualViewport()
+			// #endif
+			scrollToBottomAfterLayout()
+		})
 	}
 
 	function toggleMorePanel(): void {
-		const next = !showMorePanel.value
-		showMorePanel.value = next
-		if (next) {
-			showEmojiPanel.value = false
-			dismissKeyboardForPanel()
-			scrollToBottomAfterLayout()
+		const now = Date.now()
+		if (now - lastPanelTapAt < 320) return
+		lastPanelTapAt = now
+		if (showMorePanel.value || bottomMode.value == 'more') {
+			closePanelOpenKeyboard()
+			return
 		}
+		openBottomPanel('more')
 	}
 	const activeEmojiList = computed<Array<string>>(() => {
 		const cats = emojiCategories.value
@@ -1264,7 +1513,7 @@
 	}
 
 	/** 键盘/表情面板改布局后再贴底（等高度变化落稳再滚） */
-	function scrollToBottomAfterLayout(): void {
+	scrollToBottomAfterLayoutFn = (): void => {
 		scrollToBottom()
 		setTimeout(() => {
 			scrollToBottom()
@@ -2162,6 +2411,10 @@
 		startingCall = true
 		showMorePanel.value = false
 		showEmojiPanel.value = false
+		clearExpectKeyboard()
+		bottomMode.value = 'none'
+		keyboardHeight.value = 0
+		hideSysKeyboard()
 		try {
 			const mgr = getCallManager()
 			mgr.bindMatrix()
@@ -2204,14 +2457,14 @@
 	// 表情包
 	// ============================================================
 	function toggleEmojiPanel() {
-		const next = !showEmojiPanel.value
-		showEmojiPanel.value = next
-		if (next) {
-			showMorePanel.value = false
-			voiceMode.value = false
-			dismissKeyboardForPanel()
-			scrollToBottomAfterLayout()
+		const now = Date.now()
+		if (now - lastPanelTapAt < 320) return
+		lastPanelTapAt = now
+		if (showEmojiPanel.value || bottomMode.value == 'emoji') {
+			closePanelOpenKeyboard()
+			return
 		}
+		openBottomPanel('emoji')
 	}
 	function insertEmoji(e: string) {
 		const text = e
@@ -2596,13 +2849,31 @@
 			refreshMsgTimes()
 			inputText.value = ''
 			replyTo.value = null
-			showEmojiPanel.value = false
-			showMorePanel.value = false
+			// 表情面板打开时发送：保持面板（同微信）；仅键盘输入时保持焦点不收键盘
+			if (!showEmojiPanel.value && !showMorePanel.value) {
+				inputFocused.value = true
+			}
 			scrollToBottom()
 			finishSend(tempId, text, replyRef, matrix)
 		} catch (e) {
 			uni.showToast({ title: errText(e, '发送失败'), icon: 'none' })
 		}
+	}
+
+	/** 点右侧发送：保持输入焦点，不收键盘 */
+	function onSendTap(): void {
+		const now = Date.now()
+		// touchend + click 同一次点击可能各触发一次
+		if (now - lastSendTapAt < 400) return
+		lastSendTapAt = now
+		keepInputFocus = true
+		inputFocused.value = true
+		onSend()
+		inputFocused.value = true
+		nextTick(() => {
+			inputFocused.value = true
+			keepInputFocus = false
+		})
 	}
 
 	async function loadGroupMembers(): Promise<void> {
@@ -2666,20 +2937,32 @@
 		const safe = safeBottomInset()
 		if (safe > 0 && next > safe) next = next - safe
 		// #endif
-		return next
+		return clampKeyboardHeight(next)
 	}
 	function applyKeyboardHeight(h: number): void {
 		const next = normalizeKeyboardHeight(h)
-		if (keyboardHeight.value == next) {
-			if (next > 0) scrollToBottomAfterLayout()
-			return
-		}
-		keyboardHeight.value = next
 		if (next > 0) {
+			clearExpectKeyboard()
+			lastKeyboardHeight.value = next
 			showEmojiPanel.value = false
 			showMorePanel.value = false
+			bottomMode.value = 'keyboard'
+			if (keyboardHeight.value != next) keyboardHeight.value = next
 			scrollToBottomAfterLayout()
+			return
 		}
+		// height=0
+		if (bottomMode.value == 'emoji' || bottomMode.value == 'more') {
+			// 切面板时主动收键盘，布局已由面板高度承担
+			keyboardHeight.value = 0
+			return
+		}
+		if (expectKeyboard) {
+			// 正在唤起键盘，忽略中间的 0，避免占位被清掉
+			return
+		}
+		keyboardHeight.value = 0
+		if (bottomMode.value == 'keyboard') bottomMode.value = 'none'
 	}
 	function readEventHeight(e: UniEvent): number {
 		// UniEvent 无 detail 字段，只能走 UTSJSONObject 下标读取
@@ -2698,6 +2981,11 @@
 		}
 	}
 	function onInputKeyboardHeight(e: UniInputKeyboardHeightChangeEvent): void {
+		// #ifdef H5
+		// H5 键盘高度以 visualViewport 为准，忽略 input 事件里不可靠的 height
+		syncH5VisualViewport()
+		return
+		// #endif
 		let h = 0
 		try {
 			h = e.detail.height
@@ -2709,9 +2997,27 @@
 	}
 	function onInputFocus(e: UniInputFocusEvent): void {
 		inputFocused.value = true
+		keepInputFocus = false
 		voiceMode.value = false
-		showMorePanel.value = false
-		showEmojiPanel.value = false
+		if (showEmojiPanel.value || showMorePanel.value || bottomMode.value == 'emoji' || bottomMode.value == 'more') {
+			showEmojiPanel.value = false
+			showMorePanel.value = false
+			armExpectKeyboard()
+			bottomMode.value = 'keyboard'
+			// #ifndef H5
+			if (keyboardHeight.value <= 0) keyboardHeight.value = panelHeightPx()
+			// #endif
+		} else if (bottomMode.value != 'keyboard') {
+			bottomMode.value = 'keyboard'
+		}
+		// #ifdef H5
+		// H5 不信 focus.detail.height，改用 visualViewport
+		nextTick(() => {
+			syncH5VisualViewport()
+			scrollToBottomAfterLayout()
+		})
+		return
+		// #endif
 		let h = 0
 		try {
 			h = e.detail.height
@@ -2719,15 +3025,32 @@
 			const n = readEventHeight(e as UniEvent)
 			if (n > 0) h = n
 		}
+		h = clampKeyboardHeight(h)
 		if (h > 0) applyKeyboardHeight(h)
-		else scrollToBottomAfterLayout()
+		else {
+			if (keyboardHeight.value <= 0) keyboardHeight.value = panelHeightPx()
+			scrollToBottomAfterLayout()
+		}
 	}
 	function toggleVoiceMode() {
 		voiceMode.value = !voiceMode.value
 		showEmojiPanel.value = false
 		showMorePanel.value = false
+		clearExpectKeyboard()
+		keepInputFocus = false
+		inputFocused.value = false
+		if (voiceMode.value) {
+			hideSysKeyboard()
+			keyboardHeight.value = 0
+			bottomMode.value = 'none'
+		}
 	}
 	function onInputBlur() {
+		// 点发送瞬间会 blur：立刻抢回焦点，避免键盘闪收（同微信）
+		if (keepInputFocus) {
+			inputFocused.value = true
+			return
+		}
 		inputFocused.value = false
 		// 收起高度以 keyboardheightchange / onKeyboardHeightChange 的 0 为准
 	}
@@ -2979,6 +3302,7 @@
 			} else {
 				matrix.clearRoomUnread(rid)
 			}
+			matrix.setActiveChatRoom('')
 		}
 		uni.navigateBack()
 	}
@@ -3258,6 +3582,7 @@
 			const matrix = getMatrix()
 			if (matrix == null) return
 			if (gen != chatLoadGen) return
+			matrix.setActiveChatRoom(nextId)
 			const hadCache = applyLocalCache()
 			if (gen != chatLoadGen) return
 			loadingHistory.value = !hadCache && messages.value.length == 0
@@ -3284,7 +3609,7 @@
 		}
 	}
 
-	async function pullLatestLive(): Promise<void> {
+	pullLatestLiveFn = async (): Promise<void> => {
 		if (livePulling) return
 		const mx = getMatrix()
 		if (mx != null && mx.callActiveId.length > 0) return
@@ -3386,6 +3711,8 @@
 		currentUserId.value = matrix.userId
 		myInitial.value = senderInitial(matrix.userId)
 		myAvatarSrc.value = ''
+		// 当前正打开的房间：sync/本地 bump 都不应再累加未读
+		matrix.setActiveChatRoom(roomId.value)
 		const hadCache = applyLocalCache()
 		if (hadCache) {
 			loadingHistory.value = false
@@ -3563,6 +3890,7 @@
 				} else {
 					leaveMx.clearRoomUnread(leaveRid)
 				}
+				leaveMx.setActiveChatRoom('')
 			}
 			stopOff(offTimeline)
 			offTimeline = null
@@ -3635,6 +3963,9 @@
 			})
 		} catch (eKb) {}
 		// #endif
+		// #ifdef H5
+		bindH5VisualViewport()
+		// #endif
 	})
 
 	onShow(() => {
@@ -3644,6 +3975,7 @@
 		const matrix = getMatrix()
 		if (matrix == null) return
 		if (roomId.value.length == 0) return
+		matrix.setActiveChatRoom(roomId.value)
 		loadRoomMeta(matrix)
 	})
 
@@ -3657,7 +3989,11 @@
 			}
 		} catch (eKbOff) {}
 		// #endif
+		// #ifdef H5
+		unbindH5VisualViewport()
+		// #endif
 		keyboardHeight.value = 0
+		bottomMode.value = 'none'
 		stopOff(unloadHandler)
 		unloadHandler = null
 		clearRecordTimer()
@@ -3710,6 +4046,9 @@
 	/* #ifdef H5 */
 	.chat-page {
 		background-image: linear-gradient(180deg, #F3F8FE 0%, #FFFFFF 100%);
+		height: 100%;
+		max-height: 100%;
+		overflow: hidden;
 	}
 	/* #endif */
 	.chat-header {
@@ -4410,6 +4749,9 @@
 		padding: 32rpx 30rpx;
 		border-top-width: 1rpx;
 		border-top-color: #f0f2f5;
+		flex-shrink: 0;
+		overflow: hidden;
+		height: 520rpx;
 	}
 
 	.more-grid {
@@ -4633,13 +4975,14 @@
 		font-style: italic;
 	}
 
-	/* ---- 表情包面板：文档流排在输入栏下方 ---- */
+	/* ---- 表情包面板：高度由 inline style 对齐键盘 ---- */
 	.emoji-panel {
 		width: 100%;
 		height: 520rpx;
 		background-color: #ffffff;
 		flex-direction: column;
 		flex-shrink: 0;
+		overflow: hidden;
 		border-top-width: 1rpx;
 		border-top-color: #f0f2f5;
 	}

@@ -332,6 +332,17 @@
 		return 0
 	}
 
+	function unixToDateStr(ts: number): string {
+		if (ts <= 0) return ''
+		const d = new Date(ts * 1000)
+		const y = d.getFullYear()
+		const m = d.getMonth() + 1
+		const day = d.getDate()
+		const ms = m < 10 ? ('0' + m) : ('' + m)
+		const ds = day < 10 ? ('0' + day) : ('' + day)
+		return '' + y + '-' + ms + '-' + ds
+	}
+
 	function applyDraft(d: CmsProjectDraft): void {
 		name.value = d.name
 		category.value = d.category
@@ -414,17 +425,6 @@
 		const ts = new Date(y, m - 1, d).getTime()
 		if (ts != ts || ts <= 0) return 0
 		return Math.floor(ts / 1000)
-	}
-
-	function unixToDateStr(ts: number): string {
-		if (ts <= 0) return ''
-		const d = new Date(ts * 1000)
-		const y = d.getFullYear()
-		const m = d.getMonth() + 1
-		const day = d.getDate()
-		const ms = m < 10 ? ('0' + m) : ('' + m)
-		const ds = day < 10 ? ('0' + day) : ('' + day)
-		return '' + y + '-' + ms + '-' + ds
 	}
 
 	type StartDateDetail = {
@@ -575,27 +575,27 @@
 		}
 	}
 
-	async function pickImage(kind: string): Promise<void> {
+	function pickImage(kind: string): void {
 		uni.chooseImage({
 			count: 1,
 			sizeType: ['compressed'],
 			sourceType: ['album', 'camera'],
-			success: async (res) => {
+			success: (res) => {
 				const paths = res.tempFilePaths
 				if (paths == null || paths.length == 0) return
-				await uploadPickedFile('' + paths[0], kind)
+				uploadPickedFile('' + paths[0], kind)
 			}
 		})
 	}
 
-	async function pickFile(kind : string) : Promise<void> {
+	function pickFile(kind: string): void {
 		uni.chooseFile({
 			count: 1,
 			extension: ['pdf', 'ppt', 'pptx'],
-			success: async (res) => {
+			success: (res) => {
 				const paths = res.tempFilePaths
 				if (paths == null || paths.length == 0) return
-				await uploadPickedFile('' + paths[0], kind)
+				uploadPickedFile('' + paths[0], kind)
 			},
 			fail: (err) => {
 				console.warn('chooseFile fail', err)
@@ -607,11 +607,11 @@
 		uni.chooseVideo({
 			sourceType: ['album', 'camera'],
 			compressed: true,
-			success: async (res) => {
+			success: (res) => {
 				let path = ''
 				try { path = ('' + res.tempFilePath).trim() } catch (e0) { path = '' }
 				if (path.length == 0) return
-				await uploadPickedFile(path, 'video')
+				uploadPickedFile(path, 'video')
 			}
 		})
 	}
@@ -722,13 +722,15 @@
 				await updateCmsProjectContent(editId.value, draft)
 				uni.showToast({ title: i18n.value.saveUpdate, icon: 'none' })
 			} else {
-				const { id, status }  = await createCmsProject(draft)
-				if (status === 'pending') {
+				const created = await createCmsProject(draft)
+				const newId = created.id
+				const newStatus = created.status
+				if (newStatus == 'pending') {
 					try {
-						await submitCmsProject(id, false)
+						await submitCmsProject(newId, false)
 					} catch (e1) {}
 					uni.showToast({ title: i18n.value.submit, icon: 'none' })
-				}else{
+				} else {
 					uni.showToast({ title: i18n.value.draft, icon: 'none' })
 				}
 				try { uni.removeStorageSync(DRAFT_KEY) } catch (e2) {}

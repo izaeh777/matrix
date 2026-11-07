@@ -34,7 +34,10 @@ function currentChatRoomId(): string {
 						} catch (e2) {}
 					}
 					if (rid.length > 0) {
-						try { return decodeURIComponent(rid) } catch (e3) { return rid }
+						try {
+							const decoded = decodeURIComponent(rid)
+							return decoded != null ? decoded : rid
+						} catch (e3) { return rid }
 					}
 				} catch (e4) {}
 				try {
@@ -128,12 +131,14 @@ export function bindMsgSound(): void {
 
 /** 切换账号后重新绑定 */
 export function rebindMsgSound(): void {
-	if (offTimeline != null) {
-		try { offTimeline() } catch (e0) {}
+	const tl = offTimeline
+	if (tl != null) {
+		try { tl() } catch (e0) {}
 		offTimeline = null
 	}
-	if (offSync != null) {
-		try { offSync() } catch (e1) {}
+	const sy = offSync
+	if (sy != null) {
+		try { sy() } catch (e1) {}
 		offSync = null
 	}
 	bound = false

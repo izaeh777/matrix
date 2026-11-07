@@ -299,7 +299,8 @@
 		const slash = clean.lastIndexOf('/')
 		if (slash >= 0 && slash + 1 < clean.length) {
 			try {
-				const name = decodeURIComponent(clean.substring(slash + 1)).trim()
+				const decoded = decodeURIComponent(clean.substring(slash + 1))
+				const name = (decoded != null ? decoded : '').trim()
 				if (name.length > 0) return name
 			} catch (e) {
 				return clean.substring(slash + 1)

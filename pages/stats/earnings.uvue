@@ -124,12 +124,6 @@
 		uni.navigateBack({})
 	}
 
-	function setType(tp: string): void {
-		if (typeKey.value == tp) return
-		typeKey.value = tp
-		loadList(true)
-	}
-
 	async function loadList(reset: boolean): Promise<void> {
 		if (reset) {
 			page.value = 1
@@ -174,6 +168,12 @@
 		}
 		loading.value = false
 		loadingMore.value = false
+	}
+
+	function setType(tp: string): void {
+		if (typeKey.value == tp) return
+		typeKey.value = tp
+		loadList(true)
 	}
 
 	function onReachBottom(): void {

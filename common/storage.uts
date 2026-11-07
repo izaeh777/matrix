@@ -45,7 +45,8 @@ export function saveSession(session: SessionInfo): void {
 		console.error('saveSession 失败', e)
 	}
 	try {
-		if (_afterSessionSave != null) _afterSessionSave()
+		const after = _afterSessionSave
+		if (after != null) after()
 	} catch (e2) {}
 }
 

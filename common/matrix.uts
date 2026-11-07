@@ -717,6 +717,10 @@ export class MatrixClient {
 	mutedRooms: Map<string, string> = new Map()
 	/** 本地未读数：sync / 已读回执共同维护；列表刷新时回填，避免角标只靠磁盘残留 */
 	roomUnreadCounts: Map<string, number> = new Map()
+	/** 当前正在看的聊天房间：该房新消息不累计未读 */
+	activeChatRoomId: string = ''
+	/** 本轮 sync 已写入权威 unread_notifications 的房间，列表侧勿再 bump +1 */
+	_syncUnreadApplied: Map<string, number> = new Map()
 	// 每房间最后一条消息预览（sync 时实时更新，避免 getMessages(1) 取不到）
 	roomLastMessage: Map<string, LastMessagePreview> = new Map()
 	// getRoomSummary 内存缓存：用并行数组存 (keys, entries)，避开 Map 和动态索引的兼容问题
@@ -1162,11 +1166,29 @@ export class MatrixClient {
 		const rooms = jsonObj(data, 'rooms')
 		const join = jsonObj(rooms, 'join')
 		const roomIds = jsonKeys(join)
+		this._syncUnreadApplied.clear()
 		if (roomIds.length > 0) {
 			for (let ri = 0; ri < roomIds.length; ri++) {
 				const roomId = roomIds[ri]
 				const room = jsonObj(join, roomId)
 				this.knownRoomIds.add(roomId)
+
+				// 先落权威未读，再派发 timeline，避免 bump + sync 同轮各 +1
+				try {
+					const unreadRaw = room['unread_notifications']
+					if (unreadRaw != null) {
+						const unread = toJsonObj(unreadRaw)
+						let count = jsonNum(unread, 'notification_count')
+						const highlight = jsonNum(unread, 'highlight_count')
+						if (highlight > count) count = highlight
+						if (roomId == this.activeChatRoomId) {
+							this.applyUnreadCount(roomId, 0)
+						} else {
+							this.applyUnreadCount(roomId, count)
+						}
+						this._syncUnreadApplied.set(roomId, 1)
+					}
+				} catch (eUnreadEarly) {}
 
 				const timeline = jsonObj(room, 'timeline')
 				const events = jsonArr(timeline, 'events')
@@ -1293,16 +1315,6 @@ export class MatrixClient {
 						}
 					}
 				}
-
-				// 仅当 sync 明确带了 unread_notifications 才更新；缺省键不能当 0，否则会误清/也清不掉（下一包常不带该字段）
-				try {
-					const unreadRaw = room['unread_notifications']
-					if (unreadRaw != null) {
-						const unread = toJsonObj(unreadRaw)
-						const count = jsonNum(unread, 'notification_count')
-						this.applyUnreadCount(roomId, count)
-					}
-				} catch (eUnread) {}
 
 				const roomAcc = jsonObj(room, 'account_data')
 				const roomAccEvs = jsonArr(roomAcc, 'events')
@@ -1556,6 +1568,7 @@ export class MatrixClient {
 		this.autoJoinPending.push(roomId)
 		try {
 			await this.joinRoom(roomId)
+			this.invitedRoomCache.delete(roomId)
 		} catch (e) {
 			console.warn(TAG, 'auto-join invite failed', roomId, e)
 		}
@@ -2185,13 +2198,29 @@ export class MatrixClient {
 		return v > 0 ? v : 0
 	}
 
+	setActiveChatRoom(roomId: string): void {
+		this.activeChatRoomId = roomId
+		if (roomId.length > 0) this.clearRoomUnread(roomId)
+	}
+
 	clearRoomUnread(roomId: string): void {
 		this.applyUnreadCount(roomId, 0)
 	}
 
+	/** 列表侧乐观 +1：对方新消息且当前不在该房；本轮 sync 已有权威未读则跳过 */
+	bumpRoomUnread(roomId: string, sender: string): void {
+		if (roomId.length == 0) return
+		if (roomId == this.activeChatRoomId) return
+		if (sender.length > 0 && sender == this.userId) return
+		if (this._syncUnreadApplied.get(roomId) != null) return
+		const cur = this.getRoomUnread(roomId)
+		this.applyUnreadCount(roomId, cur + 1)
+	}
+
 	applyUnreadCount(roomId: string, count: number): void {
 		if (roomId.length == 0) return
-		const next = count > 0 ? Math.floor(count) : 0
+		let next = count > 0 ? Math.floor(count) : 0
+		if (roomId == this.activeChatRoomId) next = 0
 		const prev = this.roomUnreadCounts.get(roomId)
 		if (prev != null && prev == next) return
 		this.roomUnreadCounts.set(roomId, next)

@@ -1160,7 +1160,12 @@ export type CmsProjectDraft = {
 	start_time: number
 }
 
-export async function createCmsProject(draft: CmsProjectDraft): Promise<number> {
+export type CmsCreateResult = {
+	id: number
+	status: string
+}
+
+export async function createCmsProject(draft: CmsProjectDraft): Promise<CmsCreateResult> {
 	const summary = draft.summary
 	const content = draft.content.length > 0 ? draft.content : summary
 	const fields: UTSJSONObject = {
@@ -1184,11 +1189,13 @@ export async function createCmsProject(draft: CmsProjectDraft): Promise<number> 
 		throw new Error(msg.length > 0 ? msg : t('cms.createFail'))
 	}
 	const data = root['data'] as UTSJSONObject
-	if (data == null) return 0
+	if (data == null) {
+		return { id: 0, status: '' } as CmsCreateResult
+	}
 	let id = pickNum(data, 'id')
-	let status = pickStr(data, 'status')
+	const status = pickStr(data, 'status')
 	if (id == 0) id = pickNum(data, 'project_id')
-	return {id,status}
+	return { id: id, status: status } as CmsCreateResult
 }
 
 export async function submitCmsProject(id: number, st: boolean): Promise<void> {
@@ -1368,7 +1375,6 @@ export function openCmsLink(url: string): void {
 				if (res.statusCode >= 200 && res.statusCode < 300 && res.tempFilePath.length > 0) {
 					uni.openDocument({
 						filePath: res.tempFilePath,
-						showMenu: true,
 						fail: (_e1) => {
 							uni.setClipboardData({
 								data: finalUrl,
@@ -1444,7 +1450,6 @@ export function downloadCmsFile(url: string, fileType: string = ''): void {
 				uni.openDocument({
 					filePath: res.tempFilePath,
 					fileType: fileType,
-					showMenu: true,
 					fail: (_e1) => {
 						uni.setClipboardData({
 							data: finalUrl,

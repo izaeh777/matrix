@@ -137,21 +137,6 @@
 		if (item.id > 0) openProjectDetail(item.id)
 	}
 
-	async function onPublish(item: CmsArchiveItem): Promise<void> {
-	    if (item.id <= 0) return
-
-	    try {
-	        await submitCmsProject(item.id, true)
-	        await loadList()
-	    } catch (e1) {
-	        console.error('[cms] 发布失败：', e1)
-	    }
-	}
-
-	function onEdit(item: CmsArchiveItem): void {
-		if (item.id > 0) openProjectEdit(item.id)
-	}
-
 	function errMsg(e: any | null, fallback: string): string {
 		let msg = ''
 		try { msg = ('' + e).trim() } catch (e0) { msg = '' }
@@ -165,57 +150,6 @@
 			if (i != idx) next.push(rows.value[i])
 		}
 		rows.value = next
-	}
-
-	async function onHide(item: CmsArchiveItem, idx: number): Promise<void> {
-		if (busy.value || item.id <= 0) return
-		uni.showModal({
-			title: t('publish.actHide'),
-			content: t('publish.hideConfirm'),
-			success: async (res) => {
-				if (!res.confirm) return
-				busy.value = true
-				try {
-					await hideCmsProject(item.id)
-					item.status = 'hidden'
-					const copy: Array<CmsArchiveItem> = [] as Array<CmsArchiveItem>
-					for (let i = 0; i < rows.value.length; i++) {
-						copy.push(rows.value[i])
-					}
-					rows.value = copy
-					uni.showToast({ title: t('publish.hideOk'), icon: 'none' })
-				} catch (e) {
-					uni.showToast({ title: errMsg(e, t('publish.hideFail')), icon: 'none' })
-				}
-				busy.value = false
-			}
-		})
-	}
-
-	async function onDelete(item: CmsArchiveItem, idx: number): Promise<void> {
-		if (busy.value || item.id <= 0) return
-		uni.showModal({
-			title: t('publish.actDelete'),
-			content: t('publish.deleteConfirm'),
-			success: async (res) => {
-				if (!res.confirm) return
-				busy.value = true
-				try {
-					await offlineCmsProject(item.id)
-					removeAt(idx)
-					uni.showToast({ title: t('publish.deleteOk'), icon: 'none' })
-				} catch (e) {
-					uni.showToast({ title: errMsg(e, t('publish.deleteFail')), icon: 'none' })
-				}
-				busy.value = false
-			}
-		})
-	}
-
-	function refreshLabels(): void {
-		pageTitle.value = t('publish.title')
-		loadingText.value = t('common.loading')
-		emptyText.value = t('publish.empty')
 	}
 
 	async function loadList(): Promise<void> {
@@ -232,6 +166,71 @@
 			uni.showToast({ title: errMsg(e, t('publish.loadFail')), icon: 'none' })
 		}
 		loading.value = false
+	}
+
+	async function onPublish(item: CmsArchiveItem): Promise<void> {
+		if (item.id <= 0) return
+		try {
+			await submitCmsProject(item.id, true)
+			await loadList()
+		} catch (e1) {
+			console.error('[cms] 发布失败：', e1)
+		}
+	}
+
+	function onEdit(item: CmsArchiveItem): void {
+		if (item.id > 0) openProjectEdit(item.id)
+	}
+
+	function onHide(item: CmsArchiveItem, idx: number): void {
+		if (busy.value || item.id <= 0) return
+		uni.showModal({
+			title: t('publish.actHide'),
+			content: t('publish.hideConfirm'),
+			success: (res) => {
+				if (!res.confirm) return
+				busy.value = true
+				hideCmsProject(item.id).then(() => {
+					item.status = 'hidden'
+					const copy: Array<CmsArchiveItem> = [] as Array<CmsArchiveItem>
+					for (let i = 0; i < rows.value.length; i++) {
+						copy.push(rows.value[i])
+					}
+					rows.value = copy
+					uni.showToast({ title: t('publish.hideOk'), icon: 'none' })
+					busy.value = false
+				}).catch((e) => {
+					uni.showToast({ title: errMsg(e, t('publish.hideFail')), icon: 'none' })
+					busy.value = false
+				})
+			}
+		})
+	}
+
+	function onDelete(item: CmsArchiveItem, idx: number): void {
+		if (busy.value || item.id <= 0) return
+		uni.showModal({
+			title: t('publish.actDelete'),
+			content: t('publish.deleteConfirm'),
+			success: (res) => {
+				if (!res.confirm) return
+				busy.value = true
+				offlineCmsProject(item.id).then(() => {
+					removeAt(idx)
+					uni.showToast({ title: t('publish.deleteOk'), icon: 'none' })
+					busy.value = false
+				}).catch((e) => {
+					uni.showToast({ title: errMsg(e, t('publish.deleteFail')), icon: 'none' })
+					busy.value = false
+				})
+			}
+		})
+	}
+
+	function refreshLabels(): void {
+		pageTitle.value = t('publish.title')
+		loadingText.value = t('common.loading')
+		emptyText.value = t('publish.empty')
 	}
 	function goPublish(): void {
 		if (!canPublish.value) {

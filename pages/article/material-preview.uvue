@@ -82,7 +82,8 @@
 			const slash = clean.lastIndexOf('/')
 			if (slash >= 0 && slash + 1 < clean.length) {
 				try {
-					const name = decodeURIComponent(clean.substring(slash + 1)).trim()
+					const decoded = decodeURIComponent(clean.substring(slash + 1))
+					const name = (decoded != null ? decoded : '').trim()
 					if (name.length > 0) return name
 				} catch (e) {
 					return clean.substring(slash + 1)
@@ -145,7 +146,8 @@
 			if (u != null) {
 				const s = '' + u
 				try {
-					rawUrl.value = decodeURIComponent(s)
+					const decoded = decodeURIComponent(s)
+					rawUrl.value = decoded != null ? decoded : s
 				} catch (e0) {
 					rawUrl.value = s
 				}
@@ -161,7 +163,8 @@
 			const t = options['title']
 			if (t != null) {
 				try {
-					docTitle.value = decodeURIComponent('' + t)
+					const decoded = decodeURIComponent('' + t)
+					docTitle.value = decoded != null ? decoded : ('' + t)
 				} catch (e3) {
 					docTitle.value = '' + t
 				}

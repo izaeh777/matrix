@@ -90,7 +90,7 @@ export function openChat(roomId: string, highlight: string = ''): void {
 	uni.setStorageSync('pending_chat_highlight', highlight)
 	try {
 		const matrix = getMatrix()
-		if (matrix != null && roomId.length > 0) matrix.clearRoomUnread(roomId)
+		if (matrix != null && roomId.length > 0) matrix.setActiveChatRoom(roomId)
 	} catch (eClr) {}
 	let url = '/pages/chat/chat?roomId=' + encodeURIComponent(roomId)
 	if (highlight.length > 0) url += '&highlight=' + encodeURIComponent(highlight)
@@ -109,6 +109,10 @@ export function openGroupPick(mode: string, roomId: string = ''): void {
 
 export function openGroupMembers(roomId: string): void {
 	uni.navigateTo({ url: '/pages/group/members?roomId=' + encodeURIComponent(roomId) })
+}
+
+export function openGroupNotice(roomId: string): void {
+	uni.navigateTo({ url: '/pages/group/notice?roomId=' + encodeURIComponent(roomId) })
 }
 
 /** iOS/Android 底部安全区高度（px） */

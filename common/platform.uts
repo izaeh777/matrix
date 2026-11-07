@@ -133,7 +133,8 @@ export function savePlatformSession(session: PlatformSession): void {
 		console.error('savePlatformSession fail', e)
 	}
 	try {
-		if (_afterPlatformSessionSave != null) _afterPlatformSessionSave()
+		const after = _afterPlatformSessionSave
+		if (after != null) after()
 	} catch (e2) {}
 }
 

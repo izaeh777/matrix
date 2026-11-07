@@ -1,0 +1,272 @@
+<template>
+	<view class="notice-page">
+		<!-- #ifdef APP -->
+		<view class="status-bar-holder"></view>
+		<!-- #endif -->
+		<view class="topbar">
+			<view class="back-btn" @click="onBack">
+				<text class="back-text">‹</text>
+			</view>
+			<text class="topbar-title">{{ t('group.notice') }}</text>
+			<view class="topbar-right">
+				<text
+					v-if="isAdmin && !editing"
+					class="topbar-action"
+					@click="startEdit"
+				>{{ hasNotice ? t('group.noticeEdit') : t('group.noticePublish') }}</text>
+				<text
+					v-else-if="isAdmin && editing"
+					class="topbar-action topbar-action-on"
+					@click="onSave"
+				>{{ t('group.noticeDone') }}</text>
+			</view>
+		</view>
+
+		<!-- 编辑态 -->
+		<view v-if="editing" class="edit-wrap">
+			<textarea
+				class="edit-area"
+				v-model="draft"
+				:placeholder="t('group.noticePh')"
+				:maxlength="2000"
+				:auto-height="false"
+				:focus="true"
+			></textarea>
+			<text class="edit-tip">{{ t('group.noticeAdminOnly') }}</text>
+		</view>
+
+		<!-- 空态 -->
+		<view v-else-if="!hasNotice" class="empty-wrap">
+			<image class="empty-icon-img" src="/static/login/gong.png" mode="aspectFit"></image>
+			<text class="empty-title">{{ t('group.noticeEmpty') }}</text>
+			<text class="empty-hint">{{ isAdmin ? t('group.noticeEmptyAdmin') : t('group.noticeEmptyMember') }}</text>
+			<view v-if="isAdmin" class="empty-btn" @click="startEdit">
+				<text class="empty-btn-text">{{ t('group.noticePublish') }}</text>
+			</view>
+		</view>
+
+		<!-- 阅读态 -->
+		<scroll-view v-else class="view-scroll" scroll-y>
+			<view class="view-card">
+				<text class="view-body">{{ topic }}</text>
+			</view>
+		</scroll-view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	import { ref, computed } from 'vue'
+	import { t as __i18nT } from '@/common/i18n.uts'
+	import { getMatrix, errText } from '@/common/matrix.uts'
+
+	function t(key: string): string {
+		return __i18nT(key)
+	}
+
+	const roomId = ref<string>('')
+	const topic = ref<string>('')
+	const draft = ref<string>('')
+	const isAdmin = ref<boolean>(false)
+	const editing = ref<boolean>(false)
+	const saving = ref<boolean>(false)
+
+	const hasNotice = computed((): boolean => {
+		return topic.value.trim().length > 0
+	})
+
+	function onBack(): void {
+		if (editing.value) {
+			editing.value = false
+			draft.value = topic.value
+			return
+		}
+		uni.navigateBack()
+	}
+
+	function startEdit(): void {
+		if (!isAdmin.value) {
+			uni.showToast({ title: t('group.noticeAdminOnly'), icon: 'none' })
+			return
+		}
+		draft.value = topic.value
+		editing.value = true
+	}
+
+	async function onSave(): Promise<void> {
+		if (saving.value) return
+		if (!isAdmin.value) {
+			uni.showToast({ title: t('group.noticeAdminOnly'), icon: 'none' })
+			return
+		}
+		const matrix = getMatrix()
+		if (matrix == null) return
+		const text = draft.value.trim()
+		saving.value = true
+		uni.showLoading({ title: t('common.loading') })
+		try {
+			await matrix.setRoomTopic(roomId.value, text)
+			topic.value = text
+			editing.value = false
+			uni.hideLoading()
+			uni.showToast({ title: t('group.updated'), icon: 'success' })
+		} catch (e) {
+			uni.hideLoading()
+			uni.showToast({ title: errText(e, t('group.updateFail')), icon: 'none' })
+		}
+		saving.value = false
+	}
+
+	async function loadNotice(): Promise<void> {
+		const matrix = getMatrix()
+		if (matrix == null) return
+		if (roomId.value.length == 0) return
+		try {
+			isAdmin.value = await matrix.canManageRoom(roomId.value)
+		} catch (e0) {
+			isAdmin.value = false
+		}
+		try {
+			const summary = await matrix.getRoomSummary(roomId.value)
+			const tp = summary.topic
+			topic.value = tp != null ? tp : ''
+		} catch (e1) {
+			topic.value = ''
+		}
+	}
+
+	function optStr(obj: UTSJSONObject, key: string): string {
+		try {
+			const v = obj[key]
+			if (v != null) {
+				const s = '' + v
+				if (s.length > 0 && s != 'null' && s != 'undefined') return s
+			}
+		} catch (e) {}
+		return ''
+	}
+
+	onLoad((options: UTSJSONObject) => {
+		const rid = optStr(options, 'roomId')
+		if (rid.length > 0) {
+			try {
+				const decoded = decodeURIComponent(rid)
+				roomId.value = decoded != null && decoded.length > 0 ? decoded : rid
+			} catch (e) {
+				roomId.value = rid
+			}
+		}
+		loadNotice()
+	})
+</script>
+
+<style>
+	.notice-page {
+		flex: 1;
+		background-color: #ededed;
+		flex-direction: column;
+	}
+	.topbar {
+		flex-direction: row;
+		align-items: center;
+		padding: 48rpx 20rpx 16rpx 20rpx;
+		background-color: #ededed;
+	}
+	.back-btn {
+		width: 72rpx;
+	}
+	.back-text {
+		font-size: 56rpx;
+		color: #181818;
+	}
+	.topbar-title {
+		flex: 1;
+		text-align: center;
+		font-size: 34rpx;
+		font-weight: 700;
+		color: #1a1a1a;
+	}
+	.topbar-right {
+		min-width: 120rpx;
+		align-items: flex-end;
+		justify-content: center;
+	}
+	.topbar-action {
+		font-size: 28rpx;
+		color: #576b95;
+		padding: 8rpx 4rpx;
+	}
+	.topbar-action-on {
+		color: #07c160;
+		font-weight: 600;
+	}
+	.edit-wrap {
+		flex: 1;
+		flex-direction: column;
+		padding: 24rpx;
+	}
+	.edit-area {
+		flex: 1;
+		width: 100%;
+		min-height: 480rpx;
+		background-color: #ffffff;
+		border-radius: 12rpx;
+		padding: 28rpx;
+		font-size: 32rpx;
+		color: #1a1a1a;
+		line-height: 1.6;
+	}
+	.edit-tip {
+		margin-top: 20rpx;
+		font-size: 24rpx;
+		color: #999999;
+		padding-left: 8rpx;
+	}
+	.empty-wrap {
+		flex: 1;
+		align-items: center;
+		justify-content: center;
+		padding: 80rpx 48rpx;
+	}
+	.empty-icon-img {
+		width: 96rpx;
+		height: 96rpx;
+		margin-bottom: 24rpx;
+	}
+	.empty-title {
+		font-size: 34rpx;
+		font-weight: 600;
+		color: #1a1a1a;
+		margin-bottom: 12rpx;
+	}
+	.empty-hint {
+		font-size: 26rpx;
+		color: #999999;
+		text-align: center;
+		margin-bottom: 48rpx;
+	}
+	.empty-btn {
+		padding: 20rpx 56rpx;
+		background-color: #07c160;
+		border-radius: 8rpx;
+	}
+	.empty-btn-text {
+		font-size: 30rpx;
+		color: #ffffff;
+		font-weight: 600;
+	}
+	.view-scroll {
+		flex: 1;
+		height: 0;
+	}
+	.view-card {
+		margin: 24rpx;
+		background-color: #ffffff;
+		border-radius: 12rpx;
+		padding: 32rpx;
+	}
+	.view-body {
+		font-size: 32rpx;
+		color: #1a1a1a;
+		line-height: 1.7;
+	}
+</style>

@@ -48,7 +48,7 @@
 					<text class="cell-value">{{ roomName }}</text>
 					<text class="cell-arrow">›</text>
 				</view>
-				<view class="cell" @click="editTopic">
+				<view class="cell" @click="openNotice">
 					<text class="cell-label">{{ t('group.notice') }}</text>
 					<text class="cell-value">{{ topicText }}</text>
 					<text class="cell-arrow">›</text>
@@ -91,7 +91,7 @@
 	import { t as __i18nT } from '@/common/i18n.uts'
 
 	import { getMatrix, errText, RoomMember, roomIsGroup, memberDisplayName, MatrixRoom } from '@/common/matrix.uts'
-	import { openGroupPick, openGroupMembers } from '@/common/app.uts'
+	import { openGroupPick, openGroupMembers, openGroupNotice } from '@/common/app.uts'
 	import { defaultAvatar } from '@/common/avatar.uts'
 	function t(key: string): string {
 		return __i18nT(key)
@@ -109,6 +109,8 @@
 	const muted = ref<boolean>(false)
 	const pinned = ref<boolean>(false)
 	const canKick = ref<boolean>(false)
+	/** 群主/管理员（power >= 50）：可发公告、移出成员 */
+	const isAdmin = ref<boolean>(false)
 	/** 从加/移成员页返回时强制刷新一次成员 */
 	let membersNeedRefresh = false
 
@@ -217,10 +219,12 @@
 		muted.value = matrix.isRoomMuted(roomId.value)
 		pinned.value = matrix.isRoomFavourite(roomId.value)
 		try {
-			// 仅群主/管理员（power >= 50）可移出；普通成员不显示「移出」
+			// 仅群主/管理员（power >= 50）可移出、发公告
 			const manage = await matrix.canManageRoom(roomId.value)
+			isAdmin.value = manage
 			canKick.value = manage && members.value.length > 2
 		} catch (e2) {
+			isAdmin.value = false
 			canKick.value = false
 		}
 	}
@@ -266,30 +270,8 @@
 		})
 	}
 
-	async function saveTopic(text: string): Promise<void> {
-		const matrix = getMatrix()
-		if (matrix == null) return
-		try {
-			await matrix.setRoomTopic(roomId.value, text)
-			topic.value = text
-			uni.showToast({ title: t('group.updated'), icon: 'success' })
-		} catch (e) {
-			uni.showToast({ title: errText(e, t('group.updateFail')), icon: 'none' })
-		}
-	}
-
-	function editTopic(): void {
-		uni.showModal({
-			title: t('group.notice'),
-			editable: true,
-			content: topic.value,
-			success: (res) => {
-				if (!res.confirm) return
-				const raw = res.content
-				const text = (raw != null) ? raw.trim() : ''
-				saveTopic(text)
-			}
-		})
+	function openNotice(): void {
+		openGroupNotice(roomId.value)
 	}
 
 	function onSearchChat(): void {
