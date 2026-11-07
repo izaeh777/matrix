@@ -97,7 +97,7 @@
 				</view>
 			</view>
 			<view v-if="pageMode == 'settings'" class="section">
-				<view class="section-title">{{ t('settings.about') }}</view>
+				<view class="section-title">{{ t('settings.aboutPlatform') }}</view>
 				<view class="setting-row">
 					<text class="setting-label">{{ t('settings.appVer') }}</text>
 					<text class="setting-value">{{ appVerText }}</text>
