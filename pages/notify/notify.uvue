@@ -344,17 +344,25 @@
 	.scroll-pad { height: 48rpx; }
 	.wx-tabbar {
 		flex-direction: row;
+		align-items: center;
 		background-color: #ffffff;
 		border-top-width: 1rpx;
 		border-top-color: #eaeaea;
 		padding-bottom: 24rpx;
 		flex-shrink: 0;
+		overflow: visible;
 	}
 	.wx-tab {
 		flex: 1;
+		height: 88rpx;
 		align-items: center;
 		justify-content: center;
-		padding: 18rpx 0 12rpx;
+		padding: 0;
+		overflow: visible;
 	}
-	.wx-tab-icon { width: 48rpx; height: 48rpx; }
+	.wx-tab-icon {
+		width: 44rpx;
+		height: 44rpx;
+		flex-shrink: 0;
+	}
 </style>

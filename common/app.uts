@@ -41,10 +41,10 @@ export function startMatrixFromPlatform(): boolean {
 	return true
 }
 
-/** 引导补登 Matrix（聊天账号），不清除平台 session */
+/** 引导补登聊天账号：走平台邮箱登录（会带回 Matrix 凭证），不再进旧的 Matrix 用户名页 */
 export function openMatrixLogin(): void {
 	uni.showToast({ title: t('app.needMatrix'), icon: 'none' })
-	uni.navigateTo({ url: '/pages/login/login-email' })
+	uni.navigateTo({ url: '/pages/login/login-mail' })
 }
 
 /**
