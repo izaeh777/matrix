@@ -1,4 +1,4 @@
-<template>
+﻿<template>
 	<view class="detail-page">
 		<!-- #ifdef APP -->
 		<view class="status-bar-holder"></view>
@@ -55,6 +55,15 @@
 				<view v-if="tagList.length > 0" class="tags">
 					<text v-for="tag in tagList" :key="tag" class="tag">{{ tag }}</text>
 				</view>
+				<video
+					v-for="(vsrc, vidx) in videoList"
+					:key="'vid-' + vidx"
+					class="content-video"
+					:src="vsrc"
+					controls
+					object-fit="contain"
+					:show-center-play-btn="true"
+				></video>
 				<view v-if="showMaterialPreview" class="material-block">
 					<view class="material-head">
 						<view class="material-info">
@@ -80,15 +89,6 @@
 						<text class="material-hint">{{ previewHint }}</text>
 					</view>
 				</view>
-				<video
-					v-for="(vsrc, vidx) in videoList"
-					:key="'vid-' + vidx"
-					class="content-video"
-					:src="vsrc"
-					controls
-					object-fit="contain"
-					:show-center-play-btn="true"
-				></video>
 				<view v-if="fileList.length > 0" class="file-list">
 					<view
 						v-for="(furl, fidx) in fileList"

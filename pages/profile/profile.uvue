@@ -1442,7 +1442,8 @@
 	.user-avatar {
 		width: 112rpx;
 		height: 112rpx;
-		border-radius: 56rpx;
+		/* border-radius: 56rpx; */
+		border-radius: 12rpx;
 		background-color: #dbe7f8;
 		margin-right: 22rpx;
 	}
