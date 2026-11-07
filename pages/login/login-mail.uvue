@@ -11,8 +11,10 @@
 			<view class="top-spacer"></view>
 		</view>
 
+		<!-- logo 固定在滚动区外，上下滑表单时不动 -->
+		<image class="brand-logo" src="/static/login/logo.png" mode="aspectFit"></image>
+
 		<scroll-view class="form-scroll" scroll-y="true">
-			<image class="brand-logo" src="/static/login/logo.png" mode="aspectFit"></image>
 			<text class="card-title">{{ isRegister ? i18n.create : i18n.welcome }}</text>
 			<text class="card-subtitle">{{ cardSub }}</text>
 
@@ -427,6 +429,7 @@
 		width: 280rpx;
 		height: 64rpx;
 		margin-bottom: 20rpx;
+		flex-shrink: 0;
 	}
 	.card-title {
 		font-size: 48rpx;

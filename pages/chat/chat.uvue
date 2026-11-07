@@ -1,10 +1,10 @@
 <template>
 	<view class="chat-page" :style="chatPageDynStyle">
-		<!-- #ifdef APP -->
-		<view class="status-bar-holder"></view>
-		<!-- #endif -->
-		<!-- 效果图：顶栏白色 + 底部弧形，下方聊天区浅蓝 -->
-		<view class="chat-header" :style="chatHeaderStyle">
+		<!-- 状态栏 + 顶栏同一白底，避免中间露出浅蓝空隙 -->
+		<view class="chat-header">
+			<!-- #ifdef APP -->
+			<view class="status-bar-holder"></view>
+			<!-- #endif -->
 			<view class="topbar">
 				<view class="back-btn" @click="goBack">
 					<text class="back-text">‹</text>
@@ -20,7 +20,6 @@
 					</view>
 				</view>
 			</view>
-
 		</view>
 
 		<view v-if="roomEncrypted" class="encrypt-banner">
@@ -464,8 +463,6 @@
 	const memberCount = ref<number>(0)
 	const groupMembers = ref<Array<RoomMember>>([])
 	const showAtPicker = ref<boolean>(false)
-	// 效果图：顶栏白；聊天区浅蓝
-	const chatHeaderStyle = 'background-color:#F3F8FE;'
 	/**
 	 * 底部交互模式（同微信，同一时刻只占一种高度）：
 	 * none = 无键盘无面板；keyboard = 系统键盘抬起；emoji/more = 自定义面板
@@ -486,6 +483,11 @@
 	let scrollToBottomAfterLayoutFn: (() => void) | null = null
 	function scrollToBottomAfterLayout(): void {
 		const fn = scrollToBottomAfterLayoutFn
+		if (fn != null) fn()
+	}
+	let stickBottomOnNewMsgFn: (() => void) | null = null
+	function stickBottomOnNewMsg(): void {
+		const fn = stickBottomOnNewMsgFn
 		if (fn != null) fn()
 	}
 	const chatPageDynStyle = 'background-color:#F3F8FE;'
@@ -629,7 +631,9 @@
 				showEmojiPanel.value = false
 				showMorePanel.value = false
 				bottomMode.value = 'keyboard'
-				if (keyboardHeight.value != inset) keyboardHeight.value = inset
+				const changed = keyboardHeight.value != inset
+				if (changed) keyboardHeight.value = inset
+				if (changed) stickBottomOnNewMsg()
 			} else if (!expectKeyboard) {
 				if (keyboardHeight.value != 0) keyboardHeight.value = 0
 				if (bottomMode.value == 'keyboard' && !inputFocused.value) {
@@ -1305,6 +1309,7 @@
 		inputFocused.value = false
 		nextTick(() => {
 			inputFocused.value = true
+			stickBottomOnNewMsg()
 			// #ifdef H5
 			syncH5VisualViewport()
 			// #endif
@@ -1561,6 +1566,27 @@
 			scrollTop.value = Date.now() % 100000 + 999000
 			forceScrollBottomDom()
 		})
+	}
+
+	/** 新消息 / 弹键盘：等 DOM 落稳再贴底（一次不够时补滚） */
+	let newMsgStickTimer1: number | null = null
+	let newMsgStickTimer2: number | null = null
+	stickBottomOnNewMsgFn = (): void => {
+		scrollToBottom()
+		const t1 = newMsgStickTimer1
+		const t2 = newMsgStickTimer2
+		newMsgStickTimer1 = null
+		newMsgStickTimer2 = null
+		if (t1 != null) clearTimeout(t1)
+		if (t2 != null) clearTimeout(t2)
+		newMsgStickTimer1 = bindTimeout(() => {
+			newMsgStickTimer1 = null
+			scrollToBottom()
+		}, 80)
+		newMsgStickTimer2 = bindTimeout(() => {
+			newMsgStickTimer2 = null
+			scrollToBottom()
+		}, 220)
 	}
 
 	/** 键盘/表情面板改布局后再贴底（等高度变化落稳再滚） */
@@ -2021,7 +2047,7 @@
 			messages.value.push(msgObj)
 			messages.value = messages.value.slice()
 			refreshMsgTimes()
-			scrollToBottom()
+			stickBottomOnNewMsg()
 			let mxc = ''
 			if (tempPath.length > 0) {
 				uni.showLoading({ title: t('chat.sending') })
@@ -2905,7 +2931,7 @@
 			if (!showEmojiPanel.value && !showMorePanel.value) {
 				inputFocused.value = true
 			}
-			scrollToBottom()
+			stickBottomOnNewMsg()
 			finishSend(tempId, text, replyRef, matrix)
 		} catch (e) {
 			uni.showToast({ title: errText(e, t('login.sendFail')), icon: 'none' })
@@ -2990,7 +3016,10 @@
 			showEmojiPanel.value = false
 			showMorePanel.value = false
 			bottomMode.value = 'keyboard'
-			if (keyboardHeight.value != next) keyboardHeight.value = next
+			const changed = keyboardHeight.value != next
+			if (changed) keyboardHeight.value = next
+			// 键盘顶起后消息贴底，避免最新一条被挡住
+			if (changed) stickBottomOnNewMsg()
 			return
 		}
 		// height=0
@@ -3051,6 +3080,8 @@
 			// 先占住高度，避免键盘高度回调到来前输入栏沉在键盘下
 			if (keyboardHeight.value <= 0) keyboardHeight.value = panelHeightPx()
 		}
+		// 弹出输入框时消息滚到最底部
+		stickBottomOnNewMsg()
 		// #ifdef H5
 		nextTick(() => {
 			syncH5VisualViewport()
@@ -3553,7 +3584,7 @@
 					messages.value = messages.value.slice()
 				})
 			}
-			scrollToBottom()
+			stickBottomOnNewMsg()
 			schedulePersist()
 			if (sender != currentUserId.value && matrix != null) {
 				matrix.readReceipt(rid, m.event_id)
@@ -3714,7 +3745,7 @@
 				const merged: Array<ChatMsg> = messages.value.slice()
 				merged.sort((a, b) => a.ts - b.ts)
 				messages.value = merged
-				scrollToBottom()
+				stickBottomOnNewMsg()
 				refreshMsgTimes()
 				schedulePersist()
 			}
@@ -4016,6 +4047,12 @@
 
 
 	onUnmounted(() => {
+		const nt1 = newMsgStickTimer1
+		const nt2 = newMsgStickTimer2
+		newMsgStickTimer1 = null
+		newMsgStickTimer2 = null
+		if (nt1 != null) clearTimeout(nt1)
+		if (nt2 != null) clearTimeout(nt2)
 		// #ifndef H5
 		try {
 			if (kbListenId >= 0) {
@@ -4094,13 +4131,12 @@
 	/* #endif */
 	.chat-header {
 		width: 100%;
-		/* 与聊天区同色，避免弧线下透出白边 */
-		background-color: #F3F8FE;
+		background-color: #ffffff;
 		flex-direction: column;
 		flex-shrink: 0;
 		position: relative;
 		z-index: 30;
-		padding-bottom: 0;
+		padding: 0;
 		overflow: hidden;
 	}
 	.header-wave-wrap {
@@ -4133,7 +4169,7 @@
 		flex-direction: row;
 		align-items: center;
 		justify-content: space-between;
-		padding: 12rpx 20rpx;
+		padding: 0 20rpx;
 		background-color: #ffffff;
 		width: 100%;
 		height: 88rpx;
